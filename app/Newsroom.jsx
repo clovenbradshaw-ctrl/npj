@@ -41,6 +41,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
   const citeOrderRef = useRef([]);
+  const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
   const [rev, setRev] = useState(0);                // bump to recompute span counts
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -357,8 +358,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   }, []);
 
   const citeNum = (key) => { const i = citeOrderRef.current.indexOf(key); return i < 0 ? 0 : i + 1; };
+  // the span to bind: the live in-editor selection if there is one, else the
+  // last one we saved — a collapsed caret is never a span
+  const spanRange = () => {
+    const s = window.getSelection();
+    if (s && s.rangeCount && !s.isCollapsed && ed.current && ed.current.contains(s.anchorNode) && ed.current.contains(s.focusNode)) return s.getRangeAt(0);
+    if (selRange.current && !selRange.current.collapsed && ed.current && ed.current.contains(selRange.current.commonAncestorContainer)) return selRange.current;
+    return null;
+  };
+  // Bind a source to a span. With words selected it binds right away. With
+  // nothing selected it ARMS the source instead of failing silently: the next
+  // selection you make in the page binds to it (see the effect below). So
+  // "pick the source, then grab its exact words" works as well as the reverse.
   const bindSource = (key) => {
-    const r = selRange.current; if (!r || r.collapsed) { setInviteMsg(""); return; }
+    const r = spanRange();
+    if (!r) { setArmSrc(key); setMenu(null); return; }
     let order = citeOrderRef.current;
     if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
     const num = order.indexOf(key) + 1;
@@ -367,8 +381,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false"); sup.setAttribute("data-cite", key); sup.title = key; sup.textContent = num;
     span.after(sup);
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
-    window.getSelection().removeAllRanges(); setSel(null); setMenu(null); setSrcUrl(""); setRev(v => v + 1); scheduleSave();
+    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave();
   };
+  // armed + a fresh selection just landed → bind it to the armed source
+  // (layout effect so it binds before the floating toolbar can paint)
+  React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
   const bindNewUrl = () => {
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
     const key = "web-" + Date.now().toString(36);
@@ -657,7 +674,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             (not the canvas) is the contentEditable, so the document border wraps
             banner, headline and body as one sheet */}
         <div className="np-scroll" ref={scroller} style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
-          <div className="md-preview nr-page" ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
@@ -680,7 +697,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
               <I.doc style={{ fontSize: 15 }} /> Upload documents
             </label>
-            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual: select the exact words in your draft, then bind a source to that span. One source can back several spans.</div>
+            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual: select the exact words, then bind a source — or hit <b>Cite span</b> on a source and grab the words next. One source can back several spans.</div>
           </div>
 
           {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6, padding: "0 2px" }}>No sources yet. Ingest a URL or upload a document, then highlight a claim and bind it.</div>}
@@ -700,7 +717,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</div>
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                  <button onClick={() => insertCite(s.key)} disabled={s.snapshotting} title="Bind the selected span to this source" className="np-cond" style={{ flex: 1, background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Cite span</button>
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
+                    title="Select the words this source backs, then click — or click first and grab the words next"
+                    className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {!s.archived && !s.snapshotting && <button onClick={() => setArchiveTarget(s)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Archive</button>}
                 </div>
               </div>
@@ -749,6 +768,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
             </div>
           )}
+        </div>
+      )}
+
+      {/* armed: a source is waiting for you to grab the words it backs */}
+      {armSrc && (
+        <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4300, maxWidth: "92vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 12px 30px rgba(0,0,0,.5)", display: "flex", alignItems: "center", gap: 12, padding: "9px 12px 9px 15px" }}>
+          <span className="np-mono" style={{ fontSize: 11.5, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Citing</span>
+          <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, maxWidth: 220, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(window.NPJ.SOURCES[armSrc] || {}).title || armSrc}</span>
+          <span className="np-mono npj-hide-sm" style={{ fontSize: 11, opacity: .82, flex: "0 0 auto" }}>— select the exact words it backs</span>
+          <button onClick={() => setArmSrc(null)} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "4px 10px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Cancel</button>
         </div>
       )}
 

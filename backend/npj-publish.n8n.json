@@ -331,7 +331,7 @@
         848
       ],
       "webhookId": "chain-head-publish",
-      "notes": "POST /webhook/chain-head\nBody: {token} + the scraper's chain_head.json contents:\n  {head_id, head_hash, next_index, last_block_date, last_aggregate}\n\nRequires matching token (see Auth Check1).\nWrites chain_head.json to clovenbradshaw-ctrl/plain-text (main).\nClients read it at:\n  https://raw.githubusercontent.com/clovenbradshaw-ctrl/plain-text/main/chain_head.json"
+      "notes": "POST /webhook/chain-head-npj\nBody: {token} + the scraper's chain_head.json contents:\n  {head_id, head_hash, next_index, last_block_date, last_aggregate}\n\nRequires matching token (see Auth Check1).\nWrites chain_head.json to clovenbradshaw-ctrl/npj (main).\nClients read it at:\n  https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/chain_head.json"
     },
     {
       "parameters": {
@@ -584,7 +584,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, filename: 'chain_head.json', head_id: ($('Chain Head Webhook').first().json.body || $('Chain Head Webhook').first().json).head_id, raw_url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/plain-text/main/chain_head.json' }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: true, filename: 'chain_head.json', head_id: ($('Chain Head Webhook').first().json.body || $('Chain Head Webhook').first().json).head_id, raw_url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/chain_head.json' }) }}",
         "options": {
           "responseCode": 200,
           "responseHeaders": {
