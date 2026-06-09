@@ -15,9 +15,12 @@ const NR = {
 const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
+const DEK_PH = "Subtitle — one line under the headline";
 const START_DOC =
   '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
-  '<h1>Untitled</h1><p><br/></p>';
+  '<h1>Untitled</h1>' +
+  '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
+  '<p><br/></p>';
 
 // edge-dashes stripped AFTER the length cap — a cap that lands mid-word used
 // to leave filenames like "…-and-the-people-.md"
@@ -44,9 +47,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [publish, setPublish] = useState(null);
   const [title, setTitle] = useState("Untitled");
+  const [fileSlug, setFileSlug] = useState("");      // custom filename; "" = derived from the title
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
   const [toc, setToc] = useState([]);
+  const [media, setMedia] = useState([]);           // images + embeds in the piece
+  const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
   const [showVersions, setShowVersions] = useState(false);
   const [showRooms, setShowRooms] = useState(false);
   const [rooms, setRooms] = useState(null);
@@ -75,9 +81,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const html = ed.current ? ed.current.innerHTML : htmlRef.current;
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
-    window.NpjDrafts.save(draftId, { html, title, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
     saveTimer.current = null;
-  }, [draftId, title, tags, column, sources, room]);
+  }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
   useEffect(() => { persistRef.current = persist; });
   const scheduleSave = useCallback(() => {
@@ -99,8 +105,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       try { d = await window.NpjDrafts.restore(draftId); } catch (e) {}
       if (alive && d) {
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
-        if (ed.current && d.html) ed.current.innerHTML = d.html;
+        if (ed.current && d.html) {
+          ed.current.innerHTML = d.html;
+          // older drafts predate the dek — every article gets the field
+          if (!ed.current.querySelector(".nr-dek")) {
+            const h1 = ed.current.querySelector("h1");
+            if (h1) { const p = document.createElement("p"); p.className = "nr-dek"; p.setAttribute("data-ph", DEK_PH); p.innerHTML = "<br/>"; h1.after(p); }
+          }
+        }
         if (d.title) setTitle(d.title);
+        if (typeof d.slug === "string") setFileSlug(d.slug);
         if (Array.isArray(d.tags)) setTags(d.tags);
         if (d.column) setColumn(d.column);
         if (Array.isArray(d.sources)) setSources(d.sources);
@@ -114,7 +128,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   }, [draftId]);
 
   useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
-  useEffect(() => { scheduleSave(); }, [title, tags, column, sources, room, scheduleSave]);
+  useEffect(() => { scheduleSave(); }, [title, fileSlug, tags, column, sources, room, scheduleSave]);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -133,6 +147,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setToc(items);
     const h1 = ed.current.querySelector("h1");
     if (h1) setTitle(h1.innerText.trim() || "Untitled");
+    // media census: every figure with a filled image slot or an embed.
+    // Figures get a stable data-mid so the rail/viewer can jump to them.
+    const found = [];
+    Array.from(ed.current.querySelectorAll("figure")).forEach((f, i) => {
+      if (!f.dataset.mid) f.dataset.mid = "m" + Date.now().toString(36) + i;
+      const slot = f.querySelector("image-slot");
+      const url = slot ? (slot.url || slot.getAttribute("src")) : null;
+      const embed = f.getAttribute("data-embed-url");
+      const cap = f.querySelector("figcaption");
+      const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
+      if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
+      else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
+    });
+    setMedia(found);
   }, []);
   useEffect(() => { const t = setTimeout(scanHeadings, 60); return () => clearTimeout(t); }, [scanHeadings]);
 
@@ -157,7 +185,35 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
-  const insertImage = () => insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`);
+  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`;
+  const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
+
+  // ---- images come in by paste/drop too ----
+  // A figure can't live inside the headline or the dek — if the caret is in
+  // one, step the insertion point past that block first.
+  const escapeBlock = () => {
+    const s = window.getSelection(); const n = s && s.anchorNode; if (!n) return;
+    const el = n.nodeType === 1 ? n : n.parentElement;
+    const block = el && el.closest && el.closest("h1,h2,h3,.nr-dek,figure");
+    if (block && ed.current && ed.current.contains(block) && block !== ed.current) {
+      const r = document.createRange(); r.setStartAfter(block); r.collapse(true);
+      s.removeAllRanges(); s.addRange(r);
+    }
+  };
+  // Pasted/dropped image files land as regular image figures. When the image
+  // was copied off the web WITH an archive.org URL in the html flavor, the
+  // durable CDN link wins over the raw bytes.
+  const insertImageFiles = (files, archiveUrl) => {
+    escapeBlock();
+    files.forEach((f, i) => {
+      const id = "img-" + Date.now().toString(36) + "-" + i;
+      insertHTML(imageFigure(id));
+      const el = ed.current && ed.current.querySelector("#" + id);
+      if (!el) return;
+      if (archiveUrl && files.length === 1) el.ingestUrl(archiveUrl);
+      else el.ingestFile(f);
+    });
+  };
 
   // ---- text comes in clean ----
   // Paste (and text dragged in from elsewhere) is rebuilt from text/plain via
@@ -166,35 +222,70 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // the content is already clean.
   const dragFromSelf = useRef(false);
   const onPaste = (e) => {
-    if (!e.clipboardData) return;
+    const cd = e.clipboardData; if (!cd) return;
     e.preventDefault();
-    const text = e.clipboardData.getData("text/plain");
+    const files = Array.from(cd.files || []).filter(f => /^image\//.test(f.type));
+    if (files.length) {
+      let archiveUrl = null;
+      const html = cd.getData("text/html") || "";
+      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      if (m && window.NpjArchiveCDN.isMediaUrl(m[1])) archiveUrl = m[1];
+      insertImageFiles(files, archiveUrl);
+      return;
+    }
+    const text = cd.getData("text/plain");
     if (!text) return;
+    if (/\n/.test(text)) escapeBlock(); // block-level paste never lands inside a headline or the dek
     window.NpjPlainText.insert(text);
     scanHeadings(); scheduleSave();
   };
-  const onDropText = (e) => {
-    if (dragFromSelf.current || !e.dataTransfer) return; // internal rearrange — native handles it
-    e.preventDefault(); // never let the browser insert the formatted flavor (or navigate to a dropped file)
-    if (e.dataTransfer.files && e.dataTransfer.files.length) return; // files belong on image slots, which catch their own drops
-    const text = e.dataTransfer.getData("text/plain");
-    if (!text) return;
+  const caretToPoint = (e) => {
     let r = null;
     if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(e.clientX, e.clientY);
     else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(e.clientX, e.clientY); if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); } }
     if (r && ed.current && ed.current.contains(r.startContainer)) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+  };
+  const onDropText = (e) => {
+    if (dragFromSelf.current || !e.dataTransfer) return; // internal rearrange — native handles it
+    e.preventDefault(); // never let the browser insert the formatted flavor (or navigate to a dropped file)
+    const files = Array.from(e.dataTransfer.files || []).filter(f => /^image\//.test(f.type));
+    if (files.length) { caretToPoint(e); insertImageFiles(files, null); return; }
+    if (e.dataTransfer.files && e.dataTransfer.files.length) return; // non-image files have no home here
+    const text = e.dataTransfer.getData("text/plain");
+    if (!text) return;
+    caretToPoint(e);
+    if (/\n/.test(text)) escapeBlock();
     window.NpjPlainText.insert(text);
     scanHeadings(); scheduleSave();
   };
 
-  // image slots persist archive.org images by mutating their own src
-  // attribute — onInput never fires for that, so save on their change event
+  // image slots mutate themselves (src attribute, local fills) — onInput
+  // never fires for that, so re-scan the media census and save on their event
   useEffect(() => {
     const el = ed.current; if (!el) return;
-    const f = () => scheduleSave();
+    const f = () => { scanHeadings(); scheduleSave(); };
     el.addEventListener("image-slot-change", f);
     return () => el.removeEventListener("image-slot-change", f);
-  }, [scheduleSave]);
+  }, [scanHeadings, scheduleSave]);
+
+  // media viewer keyboard: esc closes, arrows move
+  const mediaImages = media.filter(m => m.kind === "image");
+  useEffect(() => {
+    if (viewer == null) return;
+    const f = (e) => {
+      if (e.key === "Escape") setViewer(null);
+      else if (e.key === "ArrowLeft") setViewer(v => Math.max(0, v - 1));
+      else if (e.key === "ArrowRight") setViewer(v => Math.min(mediaImages.length - 1, v + 1));
+    };
+    document.addEventListener("keydown", f);
+    return () => document.removeEventListener("keydown", f);
+  }, [viewer, mediaImages.length]);
+  const scrollToFigure = (mid) => {
+    const cont = scroller.current, body = ed.current; if (!cont || !body) return;
+    const el = body.querySelector('figure[data-mid="' + mid + '"]'); if (!el) return;
+    const cr = cont.getBoundingClientRect(), er = el.getBoundingClientRect();
+    cont.scrollTop += (er.top - cr.top) - 18;
+  };
 
   // ---- rich formatting (toolbar additions) ----
   const wrapInline = (tag) => {
@@ -390,7 +481,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
-          <span className="np-mono" style={{ fontSize: 11.5, color: NR.muted }}>{slugify(title) || "untitled"}.md</span>
+          <span className="np-mono" title={fileSlug ? "custom filename — set at the publish gate" : "filename follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted }}>{fileSlug || slugify(title) || "untitled"}.md</span>
           <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
             what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
         </div>
@@ -536,6 +627,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {toc.map(h => (
             <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>
           ))}
+          {/* media census — every image/embed in the piece; images open the viewer */}
+          <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
+            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Paste an image straight into the page.</div>}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {media.map(m => m.kind === "image"
+                ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
+                    <img src={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  </button>
+                : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 15 }}>▶</button>)}
+            </div>
+          </div>
           {/* tags + column */}
           <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
             <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Column</div>
@@ -649,9 +752,28 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
+      {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
+      {viewer != null && mediaImages[viewer] && (
+        <div className="fade-in" onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 5600, background: "rgba(8,7,5,.93)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 26 }}>
+          <img src={mediaImages[viewer].url} alt={mediaImages[viewer].caption || ""} onClick={e => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", border: "1.5px solid rgba(255,255,255,.25)", background: "#000" }} />
+          <div className="np-mono" onClick={e => e.stopPropagation()} style={{ color: "#cfc8b6", fontSize: 11.5, marginTop: 12, maxWidth: 720, textAlign: "center", lineHeight: 1.5 }}>
+            {mediaImages[viewer].caption || "untitled image"} · {viewer + 1} / {mediaImages.length}
+          </div>
+          <div onClick={e => e.stopPropagation()} style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap", justifyContent: "center" }}>
+            {[["← Prev", () => setViewer(v => Math.max(0, v - 1)), viewer === 0],
+              ["Show in document", () => { scrollToFigure(mediaImages[viewer].mid); setViewer(null); }, false],
+              ["Next →", () => setViewer(v => Math.min(mediaImages.length - 1, v + 1)), viewer === mediaImages.length - 1],
+              ["Close · esc", () => setViewer(null), false]].map(([label, fn, off]) => (
+              <button key={label} onClick={fn} disabled={off} className="np-cond" style={{ background: "transparent", color: off ? "rgba(216,211,196,.35)" : "#e3ddcc", border: "1px solid rgba(255,255,255,.25)", padding: "7px 13px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", cursor: off ? "default" : "pointer" }}>{label}</button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
       {archiveTarget && <ArchiveModal items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
+        customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
     </div>
   );
@@ -699,14 +821,21 @@ function Spinner() { return <span style={{ width: 11, height: 11, border: "2px s
 /* The publish boundary is real: nothing fires until the author confirms, every
    step reports what actually happened, and a failed step stops the run — no
    checkmark is ever painted on something that didn't succeed. */
-function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent }) {
-  const slug = slugify(title) || "untitled";
+function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug }) {
+  // the filename is the author's call — it follows the headline until they
+  // rename it at the gate, and a custom name sticks with the draft
+  const auto = slugify(title) || "untitled";
+  const [slugVal, setSlugVal] = useState(customSlug || auto);
+  const slug = slugify(slugVal) || "untitled";
   const articleUrl = window.npjArticleUrl(slug);
+  const editSlug = (v) => { setSlugVal(v); if (onSlug) { const s = slugify(v); onSlug(!s || s === auto ? "" : s); } };
 
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {
     const c = (getContent ? getContent() : null) || { html: "", title };
     const root = document.createElement("div"); root.innerHTML = c.html || "";
+    const dekEl = root.querySelector(".nr-dek");
+    const dek = dekEl ? (dekEl.textContent || "").trim() : "";
     const text = (root.innerText || "").trim();
     const words = text ? text.split(/\s+/).length : 0;
     const cites = Array.from(root.querySelectorAll("sup.md-cite[data-cite]")).filter(n => !n.hasAttribute("data-fn"));
@@ -717,7 +846,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
     });
     const archived = (sources || []).filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
-    return { content: c, words, spans: cites.length, missing, srcTotal: (sources || []).length, archived };
+    return { content: c, dek, words, spans: cites.length, missing, srcTotal: (sources || []).length, archived };
   }, []);
 
   const [phase, setPhase] = useState("confirm");          // confirm | run
@@ -737,6 +866,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
 
   const run = async () => {
     setPhase("run");
+    // the gate may have renamed the file after the steps were initialized
+    upd(3, { detail: "→ clovenbradshaw-ctrl/npj · " + slug + ".md" });
+    upd(4, { detail: articleUrl });
     // 1 — pull the piece
     upd(0, { state: "active" }); await tick(400);
     if (!flight.words) return halt(0, "the draft is empty", "Write the piece first — there's no text to publish.");
@@ -812,8 +944,16 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
           <div style={{ padding: "20px 22px" }}>
             <div style={{ fontFamily: "var(--display)", fontSize: 24, color: NR.text, marginBottom: 4 }}>ONE LAST LOOK</div>
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 12 }}>Nothing has been published yet. This is what goes out the moment you confirm — committed to the public repo and served on GitHub Pages.</div>
-            <Row k="File">{slug + ".md"} <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ clovenbradshaw-ctrl/npj</span></Row>
+            <Row k="File">
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                <input value={slugVal} onChange={e => editSlug(e.target.value)} placeholder={auto} title="Name the file anything — it doesn't have to match the headline" className="np-mono" spellCheck={false}
+                  style={{ width: "min(300px, 56vw)", border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
+                <span className="np-mono" style={{ fontSize: 11 }}>.md</span>
+                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ clovenbradshaw-ctrl/npj{slugVal !== slug ? " · saved as " + slug + ".md" : ""}</span>
+              </span>
+            </Row>
             <Row k="Live at">{articleUrl}</Row>
+            <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
             <Row k="Length">{flight.words} words</Row>
@@ -920,6 +1060,10 @@ function htmlToMarkdown(html) {
       if (node.classList.contains("verse")) { String(node.innerText || "").replace(/\n+$/, "").split("\n").forEach(l => lines.push(l.trimEnd() + "  ")); lines.push(""); }
       else lines.push("```", String(node.innerText || "").replace(/\n+$/, ""), "```", "");
     }
+    else if (node.classList && node.classList.contains("nr-dek")) {
+      const t = inline(node).trim();
+      if (t) lines.push("*" + t + "*", ""); // the dek — an italic standfirst right under the headline
+    }
     else if (node.classList && node.classList.contains("cmp-widget") && node.getAttribute("data-widget") === "poll") {
       const qEl = node.querySelector(".cmp-widget-b strong");
       lines.push("> **Poll:** " + (qEl ? qEl.textContent.trim() : ""));
@@ -948,7 +1092,10 @@ function htmlToMarkdown(html) {
 }
 window.NpjArticleMarkdown = function (content) {
   const c = content || {};
-  const meta = "<!-- column: " + (c.column || "") + " · tags: " + ((c.tags || []).join(", ")) + " -->\n\n";
+  const tmp = document.createElement("div"); tmp.innerHTML = c.html || "";
+  const dekEl = tmp.querySelector(".nr-dek");
+  const dek = dekEl ? (dekEl.textContent || "").trim() : "";
+  const meta = "<!-- column: " + (c.column || "") + " · tags: " + ((c.tags || []).join(", ")) + (dek ? " · subtitle: " + dek.replace(/-->/g, "") : "") + " -->\n\n";
   return meta + htmlToMarkdown(c.html);
 };
 
