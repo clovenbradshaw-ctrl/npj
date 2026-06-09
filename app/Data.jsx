@@ -1,5 +1,8 @@
 /* NPJ — Data explorer, archive.org consent modal, and the editor's data picker.
-   Patterns adapted from drafteo (sources.js): all-or-nothing archive consent. */
+   Patterns adapted from drafteo (sources.js): all-or-nothing archive consent.
+   The explorer + picker render live archive.org items: app/archive-sources.js
+   pulls everything tagged `npj-source` into window.NPJ.DATASETS and fires
+   "npj:datasets" — useArchiveData() below re-renders on that event. */
 
 /* ============ archive.org consent modal (Permanence/Privacy/Rights) ============ */
 function ArchiveModal({ items, onClose, onDone }) {
@@ -80,10 +83,29 @@ function ArchiveModal({ items, onClose, onDone }) {
   );
 }
 
+/* ============ live data: archive.org items land in window.NPJ.DATASETS ============ */
+function useArchiveData() {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setTick(t => t + 1);
+    window.addEventListener("npj:datasets", bump);
+    return () => window.removeEventListener("npj:datasets", bump);
+  }, []);
+  return window.NPJ.DATASETS || [];
+}
+function dsHaystack(d) {
+  return [d.name, d.project, (d.cols || []).join(" "), d.description || "", (d.subjects || []).join(" ")].join(" ").toLowerCase();
+}
+function TagCode({ children }) {
+  return <code className="np-mono" style={{ background: "var(--paper-2)", border: "1px solid var(--rule)", padding: "1px 6px", fontSize: 12, whiteSpace: "nowrap" }}>{children}</code>;
+}
+
 /* ============ dataset row + preview ============ */
 function dsAccent(type) { return "var(--data)"; }
 function DatasetCard({ d, onCite, onArchive, compact }) {
   const [open, setOpen] = useState(false);
+  const cols = d.cols || [];
+  const hasTable = cols.length > 0;
   return (
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: compact ? 8 : 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
@@ -92,23 +114,37 @@ function DatasetCard({ d, onCite, onArchive, compact }) {
           <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17, lineHeight: 1.08 }}>{d.name}</div>
           <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
             <span style={{ color: "var(--data)" }}>◆ {d.project}</span>
-            <span>{d.rows.toLocaleString()} rows · {d.cols.length} cols</span>
-            <span>updated {d.updated}</span>
-            <span>{d.cites} citations</span>
+            {typeof d.rows === "number"
+              ? <span>{d.rows.toLocaleString()} rows · {cols.length} cols</span>
+              : d.sizeLabel ? <span>{d.sizeLabel}{d.mediatype ? " · " + d.mediatype : ""}</span> : null}
+            {d.updated && <span>updated {d.updated}</span>}
+            {d.origin === "archive.org"
+              ? <span>{(d.downloads || 0).toLocaleString()} downloads</span>
+              : <span>{d.cites} citations</span>}
           </div>
         </div>
         {d.archived
-          ? <span className="chip chip-accepted" style={{ flex: "0 0 auto" }}><I.archive style={{ fontSize: 12 }} /> Archived</span>
+          ? (d.archive_url
+            ? <a href={d.archive_url} target="_blank" rel="noopener" className="chip chip-accepted" style={{ flex: "0 0 auto", textDecoration: "none" }}><I.archive style={{ fontSize: 12 }} /> Archived</a>
+            : <span className="chip chip-accepted" style={{ flex: "0 0 auto" }}><I.archive style={{ fontSize: 12 }} /> Archived</span>)
           : <button className="btn btn-sm" onClick={() => onArchive && onArchive(d)} style={{ borderColor: "var(--review)", color: "var(--review)", flex: "0 0 auto" }}>Archive</button>}
         {onCite && <button className="btn btn-sm btn-primary" onClick={() => onCite(d)} style={{ flex: "0 0 auto" }}>Cite</button>}
         <button onClick={() => setOpen(o => !o)} className="btn btn-sm btn-ghost" style={{ flex: "0 0 auto" }}>{open ? "Hide" : "Preview"}</button>
       </div>
       {open && (
         <div className="fade-in" style={{ borderTop: "1px solid var(--rule)", padding: "10px 14px", overflowX: "auto" }}>
-          <table className="np-mono" style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
-            <thead><tr>{d.cols.map(c => <th key={c} style={{ textAlign: "left", padding: "4px 10px 4px 0", borderBottom: "1.5px solid var(--ink)", textTransform: "uppercase", letterSpacing: ".04em" }}>{c}</th>)}</tr></thead>
-            <tbody>{[0, 1, 2].map(r => <tr key={r}>{d.cols.map(c => <td key={c} style={{ padding: "4px 10px 4px 0", borderBottom: "1px solid var(--rule)", color: "var(--ink-soft)" }}>·····</td>)}</tr>)}</tbody>
-          </table>
+          {hasTable && <table className="np-mono" style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
+            <thead><tr>{cols.map(c => <th key={c} style={{ textAlign: "left", padding: "4px 10px 4px 0", borderBottom: "1.5px solid var(--ink)", textTransform: "uppercase", letterSpacing: ".04em" }}>{c}</th>)}</tr></thead>
+            <tbody>{[0, 1, 2].map(r => <tr key={r}>{cols.map(c => <td key={c} style={{ padding: "4px 10px 4px 0", borderBottom: "1px solid var(--rule)", color: "var(--ink-soft)" }}>·····</td>)}</tr>)}</tbody>
+          </table>}
+          {!hasTable && <React.Fragment>
+            {d.description
+              ? <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 8px" }}>{d.description.length > 320 ? d.description.slice(0, 320) + "…" : d.description}</p>
+              : <p style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: "var(--ink-soft)", margin: "0 0 8px" }}>No description on the archive item.</p>}
+            {(d.subjects || []).length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
+              {d.subjects.map(s => <span key={s} className="np-mono" style={{ fontSize: 10, border: "1px solid var(--rule)", padding: "1px 7px", color: "var(--ink-soft)" }}>{s}</span>)}
+            </div>}
+          </React.Fragment>}
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6 }}>{d.archived ? <a href={d.archive_url} target="_blank" rel="noopener" style={{ color: "var(--verified)" }}>archived snapshot ↗</a> : "not yet archived — cites won't resolve until you freeze it"}</div>
         </div>
       )}
@@ -117,13 +153,36 @@ function DatasetCard({ d, onCite, onArchive, compact }) {
 }
 
 /* ============ data explorer page ============ */
+function ArchiveTagHowTo({ failed }) {
+  const tag = (window.NPJ.ARCHIVE || {}).tag || "npj-source";
+  return (
+    <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
+      <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>
+        {failed ? "Couldn't reach archive.org" : "Nothing tagged yet"}
+      </div>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: "0 0 10px" }}>
+        This page lists every Internet Archive item carrying the subject tag <TagCode>{tag}</TagCode>. To make an upload show up here:
+      </p>
+      <ol style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.6, color: "var(--ink-soft)", margin: "0 0 10px", paddingLeft: 20 }}>
+        <li>Upload the file at <a href="https://archive.org/upload" target="_blank" rel="noopener" style={{ color: "var(--data)" }}>archive.org/upload</a> — or open an existing item and hit <strong>Edit metadata</strong>.</li>
+        <li>Under <strong>Subject tags</strong>, add <TagCode>{tag}</TagCode>.</li>
+        <li>Optionally add <TagCode>npj-project:Your Project</TagCode> to group it under a project filter here.</li>
+      </ol>
+      <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>
+        new tags appear after the archive.org search index refreshes — minutes up to about an hour
+      </div>
+    </div>
+  );
+}
+
 function DataExplorer({ onHome, onNewsroom }) {
-  const data = window.NPJ.DATASETS || [];
+  const data = useArchiveData();
+  const arc = window.NPJ.ARCHIVE || {};
   const projects = ["All", ...Array.from(new Set(data.map(d => d.project)))];
   const [q, setQ] = useState("");
   const [proj, setProj] = useState("All");
   const [archiveTarget, setArchiveTarget] = useState(null);
-  const shown = data.filter(d => (proj === "All" || d.project === proj) && (d.name + d.project + d.cols.join(" ")).toLowerCase().includes(q.toLowerCase()));
+  const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(q.toLowerCase()));
 
   return (
     <div className="fade-in">
@@ -131,9 +190,15 @@ function DataExplorer({ onHome, onNewsroom }) {
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "36px 22px 70px" }}>
         <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Data explorer</div>
         <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .9, margin: "0 0 10px" }}>The evidence, before the story.</h1>
-        <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "60ch", margin: "0 0 24px" }}>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "60ch", margin: "0 0 12px" }}>
           Every dataset any project has gathered, in one place — searchable, previewable, and citeable from any story across any feed. Archived datasets resolve to a permanent snapshot; the rest are a click away from it.
         </p>
+        <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 24, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {arc.state === "loading" && <span>querying archive.org for subject:"{arc.tag}"…</span>}
+          {arc.state === "ok" && <span style={{ color: "var(--verified)" }}>● live from archive.org — {data.length} item{data.length !== 1 ? "s" : ""} tagged "{arc.tag}"</span>}
+          {arc.state === "error" && <span style={{ color: "var(--reject)" }}>archive.org query failed{arc.error ? " (" + arc.error + ")" : ""}</span>}
+          {arc.state !== "loading" && <button onClick={() => window.NPJ.loadArchiveSources && window.NPJ.loadArchiveSources()} className="np-mono" style={{ border: "1px solid var(--rule)", background: "var(--card)", fontSize: 10, padding: "1px 8px", cursor: "pointer", color: "var(--ink-soft)" }}>refresh</button>}
+        </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "0 12px", flex: "1 1 260px" }}>
@@ -151,7 +216,14 @@ function DataExplorer({ onHome, onNewsroom }) {
         </div>
 
         {shown.map(d => <DatasetCard key={d.id} d={d} onArchive={setArchiveTarget} />)}
-        {shown.length === 0 && <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)" }}>No datasets match.</div>}
+        {shown.length === 0 && (data.length === 0 && arc.state !== "loading"
+          ? <ArchiveTagHowTo failed={arc.state === "error"} />
+          : <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)" }}>{arc.state === "loading" ? "Loading from archive.org…" : "No datasets match."}</div>)}
+        {data.length > 0 && (
+          <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 18 }}>
+            add a source: upload to archive.org with the subject tag <TagCode>{arc.tag || "npj-source"}</TagCode> (+ optional <TagCode>npj-project:Name</TagCode>)
+          </div>
+        )}
       </div>
       {archiveTarget && <ArchiveModal items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}
     </div>
@@ -160,9 +232,9 @@ function DataExplorer({ onHome, onNewsroom }) {
 
 /* ============ data picker (used inside the composer) ============ */
 function DataPicker({ onPick, onClose }) {
-  const data = window.NPJ.DATASETS || [];
+  const data = useArchiveData();
   const [q, setQ] = useState("");
-  const shown = data.filter(d => (d.name + d.project + d.cols.join(" ")).toLowerCase().includes(q.toLowerCase()));
+  const shown = data.filter(d => dsHaystack(d).includes(q.toLowerCase()));
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.6)", zIndex: 5000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "8vh 22px" }} className="fade-in">
       <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: "min(620px,96vw)", maxHeight: "76vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
@@ -186,4 +258,4 @@ function DataPicker({ onPick, onClose }) {
   );
 }
 
-Object.assign(window, { ArchiveModal, DataExplorer, DataPicker, DatasetCard });
+Object.assign(window, { ArchiveModal, DataExplorer, DataPicker, DatasetCard, useArchiveData });
