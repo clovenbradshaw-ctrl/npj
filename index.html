@@ -219,7 +219,7 @@ function App() {
           me={me} onHome={goHome} onNewsroom={goNewsroom} />
       )}
       {route === "newsroom" && (isEditorRole
-        ? <Newsroom session={session} draftId="working" onExit={goHome} onPublished={goArticle} />
+        ? <NewsroomApp session={session} onExit={goHome} onPublished={goArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}

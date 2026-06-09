@@ -126,5 +126,22 @@
 
   function discard(id) { dropLocal(id); clearTimeout(timers[id]); }
 
-  window.NpjDrafts = { save, flush, restore, list, loadLocal, discard, onStatus, ACCOUNT_TYPE };
+  // Permanently delete a draft from BOTH layers. Local goes immediately; the
+  // remote (account-data) copy is removed too, so a deleted doc can't resurface
+  // on the next sync / device. Best-effort on the server side.
+  async function remove(id) {
+    dropLocal(id);
+    clearTimeout(timers[id]);
+    if (!signedIn() || !window.MatrixAuth.setAccountData) return;
+    try {
+      const store = await remoteStore();
+      if (store && store.drafts && Object.prototype.hasOwnProperty.call(store.drafts, id)) {
+        delete store.drafts[id];
+        store.updated = nowIso();
+        await window.MatrixAuth.setAccountData(ACCOUNT_TYPE, store);
+      }
+    } catch (e) { /* leave local removed; server prune retries on next change */ }
+  }
+
+  window.NpjDrafts = { save, flush, restore, list, loadLocal, discard, remove, onStatus, ACCOUNT_TYPE };
 })();

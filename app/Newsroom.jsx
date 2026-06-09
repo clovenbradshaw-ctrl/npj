@@ -44,6 +44,7 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
   const [inviteMsg, setInviteMsg] = useState("");
   const ed = useRef(null);
   const selRange = useRef(null);
+  const htmlRef = useRef("");   // last-known editor HTML, so a save that fires after the node detaches (e.g. navigating back to the explorer) still writes real content, never an empty clobber
 
   // let Clippy drop suggested tags in
   useEffect(() => {
@@ -54,18 +55,26 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
   // ---- durable drafts: restore on open, autosave on every change ----
   // localStorage = instant recovery on refresh; Matrix account data = the
   // authoritative copy that survives a browser wipe / new device (app/drafts.js).
+  const pendingSave = useRef(false);
   const persist = useCallback(() => {
     if (!restored.current) return;
-    const html = ed.current ? ed.current.innerHTML : "";
+    pendingSave.current = false;
+    const html = ed.current ? ed.current.innerHTML : (htmlRef.current || "");
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     window.NpjDrafts.save(draftId, { html, title, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
   }, [draftId, title, tags, column, sources, room]);
+  const persistRef = useRef(persist); persistRef.current = persist;   // always the freshest persist, for the unmount flush below
   const scheduleSave = useCallback(() => {
     if (!restored.current) return;
+    if (ed.current) htmlRef.current = ed.current.innerHTML;   // snapshot before the debounce; the timer may fire after we've left the editor
+    pendingSave.current = true;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persist, 500);
   }, [persist]);
+  // Flush a pending change synchronously on unmount so leaving the editor for the
+  // document explorer writes the final keystrokes before the list re-reads them.
+  useEffect(() => () => { clearTimeout(saveTimer.current); if (pendingSave.current) persistRef.current(); }, []);
 
   useEffect(() => {
     let alive = true;
@@ -75,6 +84,7 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
       if (alive && d) {
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
         if (ed.current && d.html) ed.current.innerHTML = d.html;
+        if (d.html) htmlRef.current = d.html;
         if (d.title) setTitle(d.title);
         if (Array.isArray(d.tags)) setTags(d.tags);
         if (d.column) setColumn(d.column);
@@ -241,8 +251,8 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
     <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* top bar */}
       <div style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
+        <button onClick={onExit} className="np-cond" title="Back to your documents" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Documents
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
@@ -632,4 +642,196 @@ function NewsroomLocked({ signedIn, me, onSignIn, onHome }) {
   );
 }
 
-Object.assign(window, { Newsroom, NewsroomLocked });
+/* ---- document file explorer: the first page of the logged-in newsroom ----
+   Lists every draft document (recovered from this device ∪ your Matrix account
+   via NpjDrafts.list), so signing in lands you on your work rather than dropping
+   straight into a single hardcoded draft. Open one, start a new one, or delete. */
+
+// Pull a display title + a short body preview out of a stored draft's HTML.
+function docMeta(d) {
+  const tmp = document.createElement("div");
+  tmp.innerHTML = (d && d.html) || "";
+  const h1 = tmp.querySelector("h1");
+  const fromBody = h1 ? (h1.textContent || "").trim() : "";
+  const title = ((d && d.title && d.title !== "Untitled") ? d.title : fromBody) || "Untitled";
+  if (h1) h1.remove();
+  tmp.querySelectorAll("figure, image-slot, figcaption, sup.md-cite").forEach(n => n.remove());
+  const preview = (tmp.textContent || "").replace(/\s+/g, " ").trim();
+  return { title, preview };
+}
+
+// Human "updated 5 min ago" for an ISO timestamp (drafts store a full ISO string).
+function fmtWhen(iso) {
+  const then = iso ? new Date(iso).getTime() : NaN;
+  if (isNaN(then)) return "";
+  const s = Math.max(0, (Date.now() - then) / 1000);
+  if (s < 45) return "just now";
+  if (s < 90) return "1 min ago";
+  if (s < 3600) return Math.round(s / 60) + " min ago";
+  if (s < 5400) return "1 hr ago";
+  if (s < 86400) return Math.round(s / 3600) + " hr ago";
+  if (s < 172800) return "yesterday";
+  if (s < 604800) return Math.round(s / 86400) + " days ago";
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function NewsroomExplorer({ session, onOpen, onNew, onExit }) {
+  const isMobile = window.useIsMobile();
+  const [docs, setDocs] = useState(null);          // null = still loading
+  const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(null);
+  const [showRooms, setShowRooms] = useState(false);
+  const [rooms, setRooms] = useState(null);
+
+  const reload = useCallback(async () => {
+    try { setDocs(await window.NpjDrafts.list()); } catch (e) { setDocs([]); }
+  }, []);
+  useEffect(() => { reload(); }, [reload]);
+
+  const openRooms = async () => {
+    setShowRooms(true);
+    if (rooms) return;
+    setRooms({ loading: true });
+    try {
+      const [joined, drafts] = await Promise.all([window.MatrixAuth.joinedRooms(), window.MatrixAuth.listDrafts()]);
+      setRooms({ joined, drafts });
+    } catch (e) { setRooms({ joined: [], drafts: [], error: e.message }); }
+  };
+
+  const doDelete = async (id) => {
+    setBusy(true);
+    try { await window.NpjDrafts.remove(id); } catch (e) {}
+    setConfirmDel(null); setBusy(false); reload();
+  };
+
+  const filtered = (docs || []).filter(d => {
+    const needle = q.trim().toLowerCase(); if (!needle) return true;
+    const { title } = docMeta(d);
+    return (title + " " + (d.column || "") + " " + ((d.tags || []).join(" "))).toLowerCase().includes(needle);
+  });
+  const count = docs ? filtered.length : null;
+
+  const topBtn = { background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" };
+
+  return (
+    <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+      {/* top bar — mirrors the editor's so the explorer reads as the newsroom's home */}
+      <div style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <button onClick={onExit} className="np-cond" title="Back to the public site" style={{ ...topBtn, fontSize: 13 }}>
+          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
+        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
+          <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
+          <span className="np-mono" style={{ fontSize: 11.5, color: NR.muted }}>documents</span>
+        </div>
+        <span style={{ flex: 1 }} />
+        <div style={{ position: "relative" }}>
+          <button onClick={openRooms} className="np-cond" style={topBtn}><I.archive style={{ fontSize: 13 }} /> Rooms</button>
+          {showRooms && <RoomsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
+        </div>
+        <button onClick={onNew} className="np-cond" style={{ background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", padding: "6px 14px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <I.plus style={{ fontSize: 14 }} /> New document
+        </button>
+      </div>
+
+      {/* body */}
+      <div className="np-scroll" style={{ flex: 1, overflowY: "auto", background: "#16140f", padding: isMobile ? "18px 16px 48px" : "26px 36px 64px" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
+          <div>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 5 }}>Your documents</div>
+            <div style={{ fontFamily: "var(--display)", fontSize: 30, color: NR.text, lineHeight: 1 }}>
+              {count === null ? "—" : count} {count === 1 ? "document" : "documents"}
+            </div>
+          </div>
+          <span style={{ flex: 1 }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 7, border: "1px solid " + NR.line, background: NR.field, padding: "0 10px", minWidth: isMobile ? 0 : 240, flex: isMobile ? "1 1 100%" : "0 0 auto" }}>
+            <I.search style={{ fontSize: 14, color: NR.muted }} />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search documents…" className="np-mono" style={{ flex: 1, border: 0, background: "transparent", color: NR.text, padding: "9px 0", fontSize: 12.5, outline: "none" }} />
+          </div>
+        </div>
+
+        {docs === null && <div className="np-mono" style={{ fontSize: 12, color: NR.muted, display: "inline-flex", gap: 8, alignItems: "center" }}><Spinner /> loading your documents…</div>}
+
+        {docs && docs.length === 0 && (
+          <div style={{ textAlign: "center", padding: "56px 20px", border: "1px dashed " + NR.line, background: NR.field }}>
+            <I.doc style={{ fontSize: 42, color: NR.muted }} />
+            <div style={{ fontFamily: "var(--display)", fontSize: 27, color: NR.text, margin: "14px 0 8px" }}>No documents yet</div>
+            <div className="np-mono" style={{ fontSize: 12, color: NR.muted, marginBottom: 22, lineHeight: 1.6, maxWidth: 420, marginLeft: "auto", marginRight: "auto" }}>Start a new piece — it autosaves to this device and, once you're signed in, to your Matrix account, so a refresh or a new device never loses it.</div>
+            <button onClick={onNew} className="np-cond" style={{ background: "var(--yellow)", color: "var(--ink)", border: 0, padding: "11px 20px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+              <I.plus style={{ fontSize: 16 }} /> New document
+            </button>
+          </div>
+        )}
+
+        {docs && docs.length > 0 && filtered.length === 0 && (
+          <div className="np-mono" style={{ fontSize: 12, color: NR.muted }}>No documents match “{q.trim()}”.</div>
+        )}
+
+        {docs && filtered.length > 0 && (
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+            {filtered.map(d => {
+              const { title, preview } = docMeta(d);
+              const slug = slugify(title) || "untitled";
+              const nSrc = (d.sources || []).length;
+              return (
+                <div key={d.id} onClick={() => onOpen(d.id)} role="button" tabIndex={0}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(d.id); } }}
+                  className="nr-doc-card" style={{ position: "relative", textAlign: "left", cursor: "pointer", background: NR.field, border: "1px solid " + NR.line, padding: "14px 14px 12px", display: "flex", flexDirection: "column", gap: 8, minHeight: 152, outline: "none" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <I.doc style={{ fontSize: 18, color: "var(--yellow)" }} />
+                    <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{slug}.md</span>
+                    <span style={{ flex: 1 }} />
+                    {d.room && <span title="Has a collaborative draft room" className="np-mono" style={{ fontSize: 9, color: NR.soft, border: "1px solid " + NR.line, padding: "1px 5px" }}>room</span>}
+                  </div>
+                  <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 19, color: NR.text, lineHeight: 1.06 }}>{title}</div>
+                  <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, color: NR.soft, lineHeight: 1.42, flex: 1, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{preview || "Empty document"}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, borderTop: "1px solid " + NR.line, paddingTop: 8 }}>
+                    {d.column && <span className="np-mono" style={{ fontSize: 9.5, color: NR.soft }}>{d.column}</span>}
+                    {nSrc > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: NR.soft, display: "inline-flex", alignItems: "center", gap: 3 }}><I.archive style={{ fontSize: 11 }} /> {nSrc}</span>}
+                    <span style={{ flex: 1 }} />
+                    <span className="np-mono" style={{ fontSize: 9.5, color: NR.muted, display: "inline-flex", alignItems: "center", gap: 3 }}><I.clock style={{ fontSize: 11 }} /> {fmtWhen(d.updated)}</span>
+                  </div>
+                  <button onClick={e => { e.stopPropagation(); setConfirmDel(d.id); }} title="Delete document" className="nr-doc-del"
+                    style={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,.35)", border: "1px solid " + NR.line, color: NR.muted, width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                    <I.x style={{ fontSize: 13 }} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {confirmDel && (
+        <div className="fade-in" onClick={() => !busy && setConfirmDel(null)} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.86)", zIndex: 5000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 420, maxWidth: "100%", background: "#14130f", border: "1.5px solid " + NR.line, padding: "20px 22px" }}>
+            <div style={{ fontFamily: "var(--display)", fontSize: 23, color: NR.text, marginBottom: 8 }}>Delete this document?</div>
+            <div className="np-mono" style={{ fontSize: 11.5, color: NR.muted, lineHeight: 1.55, marginBottom: 18 }}>It's removed from this device and your Matrix account. Already-published articles are unaffected. This can't be undone.</div>
+            <div style={{ display: "flex", gap: 9, justifyContent: "flex-end" }}>
+              <button onClick={() => setConfirmDel(null)} disabled={busy} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "9px 15px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => doDelete(confirmDel)} disabled={busy} className="np-cond" style={{ background: "#e6736a", color: "#1a0d0c", border: 0, padding: "9px 15px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>{busy ? <React.Fragment><Spinner /> Deleting…</React.Fragment> : "Delete"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* The newsroom shell: the document explorer is the landing page; opening or
+   creating a document mounts the editor on that draft id. Keying the editor on
+   the id guarantees a clean editor per document. */
+function NewsroomApp({ session, onExit, onPublished }) {
+  const [openDoc, setOpenDoc] = useState(null);
+  if (openDoc) {
+    return <Newsroom key={openDoc} session={session} draftId={openDoc} onExit={() => setOpenDoc(null)} onPublished={onPublished} />;
+  }
+  return <NewsroomExplorer session={session}
+    onOpen={(id) => { setOpenDoc(id); window.scrollTo(0, 0); }}
+    onNew={() => { setOpenDoc("doc-" + Date.now().toString(36)); window.scrollTo(0, 0); }}
+    onExit={onExit} />;
+}
+
+Object.assign(window, { Newsroom, NewsroomLocked, NewsroomExplorer, NewsroomApp });
