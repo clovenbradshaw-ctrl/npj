@@ -47,6 +47,20 @@
   }
   function dropLocal(id) { try { localStorage.removeItem(lsKey(id)); } catch (e) {} }
 
+  // Every local draft in this browser, newest first. Synchronous, works signed
+  // out — this is what the signed-out Documents page and the locked newsroom
+  // use to prove "your work didn't vanish".
+  function localList() {
+    const out = [];
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(LS_PREFIX) === 0) { const d = loadLocal(k.slice(LS_PREFIX.length)); if (d && d.id) out.push(d); }
+      }
+    } catch (e) {}
+    return out.sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
+  }
+
   /* ---- Matrix (account data) layer ---- */
   async function remoteStore() {
     if (!signedIn() || !window.MatrixAuth.getAccountData) return null;
@@ -57,17 +71,20 @@
     try { const s = await remoteStore(); return s && s.drafts ? (s.drafts[id] || null) : null; }
     catch (e) { return null; }
   }
+  function prune(store) {
+    const ids = Object.keys(store.drafts);
+    if (ids.length > MAX_REMOTE_DRAFTS) {
+      ids.sort((a, b) => String(store.drafts[a].updated || "").localeCompare(String(store.drafts[b].updated || "")));
+      while (Object.keys(store.drafts).length > MAX_REMOTE_DRAFTS) delete store.drafts[ids.shift()];
+    }
+  }
   async function pushRemote(id, draft) {
     if (!signedIn() || !window.MatrixAuth.setAccountData) return false;
     const store = (await remoteStore()) || { v: 1, drafts: {} };
     store.drafts = store.drafts || {};
     store.drafts[id] = draft;
     store.updated = nowIso();
-    const ids = Object.keys(store.drafts);
-    if (ids.length > MAX_REMOTE_DRAFTS) {
-      ids.sort((a, b) => String(store.drafts[a].updated || "").localeCompare(String(store.drafts[b].updated || "")));
-      while (Object.keys(store.drafts).length > MAX_REMOTE_DRAFTS) delete store.drafts[ids.shift()];
-    }
+    prune(store);
     await window.MatrixAuth.setAccountData(ACCOUNT_TYPE, store);
     return true;
   }
@@ -99,6 +116,31 @@
     catch (e) { setStatus("error", id); }
   }
 
+  // Push EVERY local draft that's newer than its account copy, in one write.
+  // Called on sign-in (heal local-only work) and — critically — by signOut()
+  // BEFORE the token is invalidated, so the last debounce window of typing
+  // can't die with the session. Returns how many drafts were pushed.
+  async function flushAll() {
+    Object.keys(timers).forEach(id => clearTimeout(timers[id]));
+    if (!signedIn()) return 0;
+    const locals = localList();
+    if (!locals.length) return 0;
+    let store;
+    try { store = (await remoteStore()) || { v: 1, drafts: {} }; } catch (e) { return 0; }
+    store.drafts = store.drafts || {};
+    let pushed = 0;
+    locals.forEach(d => {
+      const r = store.drafts[d.id];
+      if (!r || String(d.updated || "") > String(r.updated || "")) { store.drafts[d.id] = d; pushed++; }
+    });
+    if (!pushed) { setStatus("synced"); return 0; }
+    store.updated = nowIso();
+    prune(store);
+    try { setStatus("syncing"); await window.MatrixAuth.setAccountData(ACCOUNT_TYPE, store); setStatus("synced"); }
+    catch (e) { setStatus("error"); return 0; }
+    return pushed;
+  }
+
   // Read both layers; keep the newer; heal the stale one. Returns the draft or null.
   async function restore(id) {
     const local = loadLocal(id);
@@ -111,16 +153,21 @@
     return chosen || null;
   }
 
-  // All known drafts (remote ∪ local), newest first — for a "your drafts" recovery list.
+  // All known drafts (remote ∪ local), newest first — for a "your drafts" recovery
+  // list. Each entry carries `where`, so the UI can say truthfully which copy it is:
+  //   "synced" — on the account (and usually here too)
+  //   "ahead"  — this browser has a NEWER copy than the account (sync pending)
+  //   "local"  — this browser only (signed out, never reached an account)
   async function list() {
     const map = {};
-    try { const s = await remoteStore(); if (s && s.drafts) Object.assign(map, s.drafts); } catch (e) {}
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const k = localStorage.key(i);
-        if (k && k.indexOf(LS_PREFIX) === 0) { const d = loadLocal(k.slice(LS_PREFIX.length)); if (d && (!map[d.id] || newer(d, map[d.id]))) map[d.id] = d; }
-      }
-    } catch (e) {}
+    let remote = {};
+    try { const s = await remoteStore(); if (s && s.drafts) remote = s.drafts; } catch (e) {}
+    Object.keys(remote).forEach(id => { map[id] = { ...remote[id], where: "synced" }; });
+    localList().forEach(d => {
+      const r = remote[d.id];
+      if (!r) map[d.id] = { ...d, where: signedIn() ? "ahead" : "local" };
+      else if (String(d.updated || "") > String(r.updated || "")) map[d.id] = { ...d, where: "ahead" };
+    });
     return Object.values(map).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
   }
 
@@ -142,5 +189,15 @@
     } catch (e) { return false; }
   }
 
-  window.NpjDrafts = { save, flush, restore, list, loadLocal, discard, remove, onStatus, ACCOUNT_TYPE };
+  // React to the session: sign-in heals (pushes local-only work to the account);
+  // sign-out cancels doomed sync timers and flips the status pill to the truth
+  // immediately — no more "✓ synced" lingering after the token is gone.
+  if (window.MatrixAuth && window.MatrixAuth.onChange) {
+    window.MatrixAuth.onChange(s => {
+      if (s) { flushAll(); }
+      else { Object.keys(timers).forEach(id => clearTimeout(timers[id])); setStatus("localonly"); }
+    });
+  }
+
+  window.NpjDrafts = { save, flush, flushAll, restore, list, localList, loadLocal, discard, remove, onStatus, ACCOUNT_TYPE };
 })();

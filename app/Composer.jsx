@@ -1,5 +1,13 @@
 /* NPJ — collaborative composer. Anyone can create content and edit it together.
-   Rich text + whitelisted embed widgets + live collaborators + a target feed. */
+   Rich text + whitelisted embed widgets + live collaborators + a target feed.
+
+   Durability: this surface used to keep EVERYTHING in React state — headline,
+   standfirst, tags and body died on sign-out/refresh, with a "Sign out" button
+   sitting right next to the canvas. It now autosaves through NpjDrafts exactly
+   like the newsroom (this browser on every change + Matrix account a moment
+   later) and restores when you come back. */
+
+const POST_DRAFT_ID = "post"; // the one working post draft; shows under Documents
 
 const EMBEDS = [
   { key: "data-map", label: "Data map", icon: "data", hint: "eviction map, parcel map, choropleth" },
@@ -29,12 +37,63 @@ function Composer({ user, session, onSignOut }) {
   const [cited, setCited] = useState([]);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const feeds = (window.NPJ.FEEDS || []).map(f => f.id);
+  const titleRef = useRef(null);
+  const dekRef = useRef(null);
 
   // let Clippy drop suggested tags straight in
   useEffect(() => {
     window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags };
     return () => { if (window.__draftTags) delete window.__draftTags; };
   });
+
+  // ---- durable draft: restore on open, autosave on every change ----
+  const restored = useRef(false); // gate autosave until the first restore lands
+  const saveTimer = useRef(null);
+  const htmlRef = useRef("");     // last seen body HTML, for the unmount flush
+
+  const persist = useCallback(() => {
+    if (!restored.current) return;
+    const html = ed.current ? ed.current.innerHTML : htmlRef.current;
+    window.NpjDrafts.save(POST_DRAFT_ID, { kind: "post", html, title, dek, tags, feed, room });
+    saveTimer.current = null;
+  }, [title, dek, tags, feed, room]);
+  const persistRef = useRef(persist);
+  useEffect(() => { persistRef.current = persist; });
+  const scheduleSave = useCallback(() => {
+    if (!restored.current) return;
+    if (ed.current) htmlRef.current = ed.current.innerHTML;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(persist, 500);
+  }, [persist]);
+  // unmounting (sign-out swaps in the gate, or you navigate away) with a save
+  // still pending? write it now instead of dropping the last keystrokes
+  useEffect(() => () => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); try { persistRef.current(); } catch (e) {} }
+  }, []);
+
+  const fitArea = (el) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } };
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let d = null;
+      try { d = await window.NpjDrafts.restore(POST_DRAFT_ID); } catch (e) {}
+      if (alive && d) {
+        if (ed.current && d.html) { ed.current.innerHTML = d.html; htmlRef.current = d.html; }
+        if (d.title) setTitle(d.title);
+        if (d.dek) setDek(d.dek);
+        if (Array.isArray(d.tags)) setTags(d.tags);
+        if (d.feed && feeds.includes(d.feed)) setFeed(d.feed);
+        if (d.room) setRoom(d.room);
+        const t = ed.current ? ed.current.innerText.trim() : "";
+        setWc(t ? t.split(/\s+/).length : 0);
+        setTimeout(() => { fitArea(titleRef.current); fitArea(dekRef.current); }, 30);
+      }
+      restored.current = true;
+    })();
+    return () => { alive = false; };
+  }, []);
+  useEffect(() => { scheduleSave(); }, [title, dek, tags, feed, room, scheduleSave]);
+  useEffect(() => { if (session) window.NpjDrafts.flush(POST_DRAFT_ID); }, [session]); // back up local-only work after sign-in
 
   // real Matrix room invite — create the draft room on first invite so it's
   // recoverable from any browser, then invite the collaborator into it.
@@ -71,7 +130,7 @@ function Composer({ user, session, onSignOut }) {
     else { focusEd(); }
   };
   const exec = (cmd, val) => { focusEd(); restore(); document.execCommand(cmd, false, val); updateWc(); };
-  const updateWc = () => { const t = ed.current ? ed.current.innerText.trim() : ""; setWc(t ? t.split(/\s+/).length : 0); };
+  const updateWc = () => { const t = ed.current ? ed.current.innerText.trim() : ""; setWc(t ? t.split(/\s+/).length : 0); scheduleSave(); };
 
   const insertHTML = (html) => {
     focusEd(); restore();
@@ -92,6 +151,7 @@ function Composer({ user, session, onSignOut }) {
     span.className = "claim"; span.style.background = "rgba(255,236,1,.5)"; span.style.borderBottom = "1.5px solid var(--ink)";
     try { sel.getRangeAt(0).surroundContents(span); } catch (e) { /* crosses nodes */ }
     sel.removeAllRanges();
+    scheduleSave();
   };
 
   const citeData = (d) => {
@@ -115,6 +175,8 @@ function Composer({ user, session, onSignOut }) {
       <div style={{ position: "sticky", top: 0, zIndex: 1600, background: "var(--ink)", color: "var(--paper)", borderBottom: "1.5px solid var(--ink)" }}>
         <div style={{ maxWidth: 1080, margin: "0 auto", padding: "9px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <span className="np-eyebrow" style={{ color: "var(--yellow)" }}>New post</span>
+          <DraftStatusPill id={POST_DRAFT_ID} signedIn={!!session} user={user}
+            what="headline, standfirst, tags and body" style={{ borderColor: "rgba(255,255,255,.25)" }} />
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span className="np-mono" style={{ fontSize: 11, opacity: .6 }}>to</span>
             <select value={feed} onChange={(e) => setFeed(e.target.value)} className="np-cond"
@@ -164,13 +226,15 @@ function Composer({ user, session, onSignOut }) {
       <div style={{ maxWidth: 720, margin: "0 auto", padding: "30px 22px 90px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><Handle mxid={user} showName /><span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>· drafting</span></span>
-          <button className="btn btn-sm btn-ghost" onClick={onSignOut}>Sign out</button>
+          {/* save synchronously first — the pending debounce dies with the unmount otherwise */}
+          <button className="btn btn-sm btn-ghost" onClick={() => { try { persistRef.current(); } catch (e) {} onSignOut(); }}
+            title="Your draft stays saved — in this browser and on your Matrix account.">Sign out</button>
         </div>
 
-        <textarea value={title} onChange={(e) => setTitle(e.target.value)} rows={1} placeholder="Headline"
+        <textarea ref={titleRef} value={title} onChange={(e) => setTitle(e.target.value)} rows={1} placeholder="Headline"
           onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
           style={{ width: "100%", border: 0, outline: "none", resize: "none", background: "transparent", fontFamily: "var(--display)", fontSize: 52, lineHeight: .98, marginBottom: 8, overflow: "hidden" }} />
-        <textarea value={dek} onChange={(e) => setDek(e.target.value)} rows={1} placeholder="Add a standfirst…"
+        <textarea ref={dekRef} value={dek} onChange={(e) => setDek(e.target.value)} rows={1} placeholder="Add a standfirst…"
           onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
           style={{ width: "100%", border: 0, outline: "none", resize: "none", background: "transparent", fontFamily: "var(--serif)", fontSize: 21, fontStyle: "italic", lineHeight: 1.35, color: "var(--ink-soft)", marginBottom: 16, overflow: "hidden" }} />
 
@@ -262,6 +326,9 @@ function ComposerSent({ user, feed, title, collabs }) {
       <h1 style={{ fontFamily: "var(--display)", fontSize: 46, lineHeight: .95, margin: "0 0 12px" }}>Draft saved to {fname}.</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "46ch", margin: "0 auto 18px" }}>
         “{title || "Untitled"}” is open for collaborative editing. {collabs.length - 1} collaborator{collabs.length - 1 !== 1 ? "s were" : " was"} notified and can write alongside you. Nothing publishes until a source is bound to every claim.
+      </p>
+      <p className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: "52ch", margin: "0 auto 18px", lineHeight: 1.5 }}>
+        The draft itself is saved in this browser and backed up to your Matrix account — sign out or switch devices and it's under Documents.
       </p>
       <div className="np-mono" style={{ fontSize: 11, background: "var(--ink)", color: "#e9e4d4", display: "inline-block", padding: "8px 12px" }}>
         ● INS draft@{fname.toLowerCase().replace(/[^a-z]/g, "").slice(0, 6)} · by {user} · {collabs.length} editors · open

@@ -107,6 +107,34 @@ function SourceCard({ srcKey, onClose, pinned }) {
   );
 }
 
+/* ---------- draft save-status pill (Newsroom + Composer) ----------
+   One source of truth for "what is being saved, where, right now". Subscribes
+   to NpjDrafts status events for this draft id and never claims more than is
+   true: signed out (or after logout) it says "this browser only", and the
+   hover tooltip spells out exactly which fields autosave and what survives
+   a sign-out / browser wipe / device switch. */
+function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", style }) {
+  const [state, setState] = useState(null);
+  useEffect(() => {
+    if (!window.NpjDrafts) return;
+    return window.NpjDrafts.onStatus(s => { if (!s.id || s.id === id) setState(s.state); });
+  }, [id]);
+  const text =
+    state === "saving" ? "saving…"
+    : state === "syncing" ? "backing up to your account…"
+    : state === "synced" ? "✓ saved · this browser + your account"
+    : state === "error" ? "saved in this browser · account backup failed"
+    : state === "localonly" ? "saved in this browser only" + (signedIn ? "" : " — sign in to back it up")
+    : (signedIn ? "autosaves · this browser + your account" : "autosaves · this browser only");
+  const color = state === "error" ? "#e6b07f" : state === "synced" ? "#9fe0b8" : "#9b9585";
+  const tip = signedIn
+    ? "Everything in this draft — " + what + " — autosaves to this browser as you type, then backs up to your Matrix account (" + (user || "signed in") + ") a moment later. Sign out, wipe the browser or switch devices: the account copy survives."
+    : "This draft autosaves to this browser as you type (" + what + ") — but it is NOT backed up to an account. Sign in with Matrix and it will be.";
+  return (
+    <span className="np-mono" title={tip} style={{ fontSize: 10.5, color, border: "1px solid rgba(255,255,255,.18)", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
+  );
+}
+
 /* ---------- share bar: archive.org permalink + basic socials ---------- */
 function ShareBar({ url, title, archiveUrl, dark = false }) {
   const [copied, setCopied] = useState(null);
@@ -147,4 +175,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill });
