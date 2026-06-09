@@ -489,6 +489,15 @@
       }
     }
 
+    // Public API for hosts (the newsroom feeds pasted images/links in
+    // programmatically): the current effective image URL, and the two
+    // ingestion paths.
+    get url() {
+      return this._userUrl || this.getAttribute('src') || null;
+    }
+    ingestFile(file) { return this._ingest(file); }
+    ingestUrl(url) { return this._ingestUrl(url); }
+
     // A remote (archive.org) image rides the `src` ATTRIBUTE — light DOM, so
     // hosts that persist innerHTML (drafts, publish) carry it — never the
     // sidecar. data-cdn marks it as slot-set so Remove can tell it apart from
@@ -557,6 +566,9 @@
         // Keep a session-local copy for id-less slots so the drop still
         // shows, even though it cannot persist.
         if (!this.id) { this._local = val; this._render(); }
+        // a local fill changes no attribute, so tell hosts (media rails,
+        // autosave) that this slot's content moved
+        this._announce(null);
       } catch (err) {
         if (gen !== this._gen) return;
         this._setError('Could not read that image.');

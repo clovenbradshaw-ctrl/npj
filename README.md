@@ -60,7 +60,21 @@ a claim that points nowhere fails the publish build.
 **Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
 PDFs — loses its original formatting at the door: the editors rebuild the
 clipboard's plain text into clean paragraphs (blank line = new ¶), so stray
-fonts, colors and backgrounds never enter a draft.
+fonts, colors and backgrounds never enter a draft. **Images paste too**: a
+screenshot or a copied image lands as a regular image figure (and if it was
+copied off archive.org, the durable CDN link is kept instead of raw bytes).
+
+**The page knows its own media.** The contents rail keeps a census of every
+image and embed in the piece; image thumbnails open a full-size viewer
+(arrows page through, esc closes, "show in document" jumps to the figure).
+
+**Every article has a subtitle.** A dek line sits under the headline (older
+drafts get the field on restore); it publishes as the italic standfirst and
+rides the `.md`'s meta comment as `subtitle:`.
+
+**The filename is the author's call.** It follows the headline by default,
+but the publish gate has a rename field — a custom name sticks with the
+draft and the committed file is named accordingly.
 
 ## Images ride archive.org — it's the media CDN
 

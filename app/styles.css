@@ -266,6 +266,12 @@ a { color: inherit; }
 /* banner bleeds to the page border (kills the stray floating outline) */
 .md-preview figure.nr-banner { margin: 0 calc(-1 * var(--page-pad, 0px)) 26px; }
 .nr-page > figure.nr-banner:first-child { margin-top: calc(-1 * var(--page-pad-top)); }
+/* the dek — one subtitle line under the headline. The placeholder shows while
+   it's empty (covering both a truly empty <p> and the <p><br></p> editors
+   normalize it to). */
+.nr-page .nr-dek { font-family: var(--serif); font-style: italic; font-size: 21px; line-height: 1.35; color: var(--nr-soft); margin: 2px 0 18px; }
+.nr-page .nr-dek:empty::before,
+.nr-page .nr-dek:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); pointer-events: none; }
 /* the drop-slot's shadow-DOM colors are black-on-black in the dark room —
    re-skin its exposed parts to the theme */
 .newsroom image-slot::part(frame) { background: var(--nr-code-bg); }
