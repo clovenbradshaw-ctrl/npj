@@ -43,6 +43,8 @@
 <script src="app/drafts.js"></script>
 <script src="app/clippy-data.js"></script>
 <script src="app/image-slot.js"></script>
+<!-- the published record: EO event logs in articles/*.jsonl — list, fold, publish, append edits -->
+<script src="app/articles.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
@@ -55,6 +57,7 @@
 <script type="text/babel" src="app/SuggestionRail.jsx"></script>
 <script type="text/babel" src="app/FrontPage.jsx"></script>
 <script type="text/babel" src="app/ArticleRead.jsx"></script>
+<script type="text/babel" src="app/ArticleEdit.jsx"></script>
 <script type="text/babel" src="app/Newsroom.jsx"></script>
 <script type="text/babel" src="app/Standards.jsx"></script>
 <script type="text/babel" src="app/Submit.jsx"></script>
@@ -136,6 +139,17 @@ function App() {
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
   const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
   const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
+  // ---- the published record (EO event logs in articles/*.jsonl) ----
+  // frontRev repaints the front page once the committed line-up loads;
+  // articleRev remounts the reader when an article is opened or edited.
+  const [frontRev, setFrontRev] = useState(0);
+  const [articleRev, setArticleRev] = useState(0);
+  // #article;read=<slug> deep link — resolved on mount, and it must hold the
+  // "no article → go home" guard open while the log is being fetched
+  const pendingRead = useRef((() => {
+    const part = hp.find(p => /^read=/.test(p));
+    return part ? decodeURIComponent(part.slice(5)) : null;
+  })());
   // which doc is open survives a refresh (hash) and a new visit (localStorage) —
   // otherwise the newsroom silently reopens the default "working" draft and a
   // freshly created doc looks like it vanished
@@ -189,14 +203,50 @@ function App() {
   useEffect(() => { setReadMode(t.auditDefault ? "audit" : "clean"); }, [t.auditDefault]);
   useEffect(() => { setFilter(t.trustDefault); }, [t.trustDefault]);
 
-  // no article? never sit on the article route
-  useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE) setRoute("home"); }, [route]);
+  // Open a published article: fetch its EO log, fold it, install it, route.
+  // Accepts a slug (front page, docs, deep link) or an already-folded article
+  // object (the Newsroom hands one over right after publishing, so the reader
+  // never races the raw CDN for the file it just committed).
+  const openArticle = useCallback(async (slugOrArticle) => {
+    if (slugOrArticle && typeof slugOrArticle === "object" && slugOrArticle.body) {
+      window.NPJ.ARTICLE = slugOrArticle;
+      setArticleRev(r => r + 1); setRoute("article"); window.scrollTo(0, 0);
+      return;
+    }
+    if (!slugOrArticle) { if (window.NPJ.ARTICLE) { setRoute("article"); window.scrollTo(0, 0); } return; }
+    try {
+      const a = await window.NpjArticles.loadArticle(String(slugOrArticle));
+      if (a) { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); setRoute("article"); window.scrollTo(0, 0); }
+    } catch (e) { /* unreadable log → stay where we are */ }
+  }, []);
 
-  // keep the URL hash in sync so a refresh restores the view
+  // boot: pull the committed line-up onto the front page, and resolve a deep link
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try { await window.NpjArticles.loadFront(); if (alive) setFrontRev(r => r + 1); } catch (e) {}
+    })();
+    (async () => {
+      const slug = pendingRead.current;
+      if (!slug) return;
+      try { await openArticle(slug); } finally {
+        pendingRead.current = null;
+        if (alive && !window.NPJ.ARTICLE) setRoute(r => (r === "article" ? "home" : r));
+      }
+    })();
+    return () => { alive = false; };
+  }, [openArticle]);
+
+  // no article? never sit on the article route (unless a deep link is still loading)
+  useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE && !pendingRead.current) setRoute("home"); }, [route]);
+
+  // keep the URL hash in sync so a refresh restores the view — including which
+  // article is open (#article;read=<slug> is also the canonical share link)
   useEffect(() => {
     if (route === "home") { history.replaceState(null, "", location.pathname + location.search); return; }
     const f = [route];
     if (route === "article") {
+      if (window.NPJ.ARTICLE && window.NPJ.ARTICLE.slug) f.push("read=" + encodeURIComponent(window.NPJ.ARTICLE.slug));
       if (readMode === "audit") f.push("audit");
       f.push(direction);
       if (showSugg) f.push("sugg");
@@ -204,9 +254,8 @@ function App() {
     }
     if (route === "newsroom" && draftId && draftId !== "working") f.push("doc=" + encodeURIComponent(draftId));
     history.replaceState(null, "", "#" + f.join(";"));
-  }, [route, readMode, direction, showSugg, entityOpen, draftId]);
+  }, [route, readMode, direction, showSugg, entityOpen, draftId, articleRev]);
 
-  const goArticle = () => { if (!window.NPJ.ARTICLE) { setRoute("home"); return; } setRoute("article"); window.scrollTo(0, 0); };
   const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };
   // "Newsroom" lands on the document explorer (your docs + projects); the
   // editor itself opens from there via openDoc. #newsroom deep-links still
@@ -243,9 +292,9 @@ function App() {
 
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
-      {route === "home" && <FrontPage onOpen={goArticle} onNewsroom={goNewsroom} onHome={goHome} />}
+      {route === "home" && <FrontPage key={"front-" + frontRev} onOpen={openArticle} onNewsroom={goNewsroom} onHome={goHome} />}
       {route === "article" && window.NPJ.ARTICLE && (
-        <ArticleRead
+        <ArticleRead key={(window.NPJ.ARTICLE.slug || "a") + ":" + articleRev}
           readMode={readMode} setReadMode={setReadMode}
           direction={direction} setDirection={setDirection}
           showSugg={showSugg} setShowSugg={setShowSugg}
@@ -253,15 +302,16 @@ function App() {
           filter={filter} setFilter={setFilter} isEditor={isEditor} setIsEditor={setIsEditor}
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
-          me={me} onHome={goHome} onNewsroom={goNewsroom} />
+          me={me} onHome={goHome} onNewsroom={goNewsroom}
+          onEdited={(a) => { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); window.NpjArticles.loadFront().then(() => setFrontRev(r => r + 1)).catch(() => {}); }} />
       )}
       {route === "newsroom" && (isEditorRole
-        ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={goArticle} />
+        ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
-      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenPost={goSubmit} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
+      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenPost={goSubmit} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />

@@ -12,16 +12,33 @@ founding admin curates the site and grows the network from there.
 | Path | What it is |
 |---|---|
 | `index.html` | the app shell — loads everything below (served at the repo root) |
+| `articles/` | **the published record** — one append-only EO event log per article (`<slug>.jsonl`) |
 | `app/` | the React (in-browser Babel) front end |
+| `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds logs into readable articles, publishes (INS) and appends edits (REC) |
+| `app/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
 | `app/data.js` | content layer — **framework only**, seeded empty |
 | `app/layout.jsx` | the editable site chrome + the permission model |
 | `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
+| `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
 | `app/Clippy.jsx` | drafting assistant — suggests **tags** (never citations) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
+
+## Articles are append-only EO event logs
+
+Publishing commits **one JSONL line** — an `INS` event carrying the whole piece
+(headline, dek, body blocks, span-bound sources, authors, assignees) — to
+`articles/<slug>.jsonl`. Every edit after publish appends **one `REC` line** to
+the *same file* through the webhook's `append` mode, so the log is the
+article's complete, auditable change history; nothing is ever rewritten. The
+front page lists the logs straight from GitHub, the reader folds a log into the
+formatted article (`#article;read=<slug>` is the share link), and the version
+badge opens a word-level diff between any two events. **Edit after publish** is
+gated to the admin and the article's `assignees` (the publisher by default) —
+enforced in the n8n webhook against the log's own genesis line, not just in the UI.
 
 ## Identity & permissions (rooted in Matrix)
 
@@ -70,7 +87,7 @@ image and embed in the piece; image thumbnails open a full-size viewer
 
 **Every article has a subtitle.** A dek line sits under the headline (older
 drafts get the field on restore); it publishes as the italic standfirst and
-rides the `.md`'s meta comment as `subtitle:`.
+rides the article's EO genesis event as `dek`.
 
 **The filename is the author's call.** It follows the headline by default,
 but the publish gate has a rename field — a custom name sticks with the
@@ -86,10 +103,10 @@ the item's link onto any image slot in the Newsroom — a details page, a direct
 them to the item's primary image file via the IA metadata API. The slot renders
 straight from archive.org, the URL travels inside the draft HTML (so it syncs
 to your Matrix account and other devices with the draft), and the published
-`.md` hotlinks the same copy: `![caption](https://archive.org/download/…)`.
+article hotlinks the same copy in its `img` block.
 
 Local file drops still preview instantly, but they have no durable URL — they
-stay out of the published markdown until they're on archive.org.
+stay out of the published article until they're on archive.org.
 
 ## The Data explorer (`#explore`) is fed by archive.org tags
 

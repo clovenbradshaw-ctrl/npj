@@ -156,25 +156,30 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
   );
 }
 
-/* line-up renderer (used once pieces exist) */
+/* line-up renderer (used once pieces exist) — every item carries the slug of
+   its committed EO log, and opening it loads + folds that log into the reader */
 function FrontLineup({ items, onOpen }) {
   const lead = items.find(a => a._lead) || items[0];
   const rest = items.filter(a => a !== lead);
+  const open = (a) => onOpen && onOpen(a.slug);
   return (
     <div className="npj-lineup" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 0 }}>
       <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
-        <button onClick={onOpen} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
+        <button onClick={() => open(lead)} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
           <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8 }}>{lead.kicker}</div>
           <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .92, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
+        {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}</div>}
         {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
       </section>
       <aside style={{ paddingLeft: 24 }}>
         <div className="np-eyebrow" style={{ borderBottom: "2px solid var(--ink)", paddingBottom: 6, marginBottom: 12 }}>More</div>
         {rest.map((s, i) => (
-          <article key={i} style={{ padding: "12px 0", borderBottom: "1px solid var(--rule)" }}>
-            <h3 onClick={onOpen} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
+          <article key={s.slug || i} style={{ padding: "12px 0", borderBottom: "1px solid var(--rule)" }}>
+            <h3 onClick={() => open(s)} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
+            {s.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.35, color: "var(--ink-soft)", margin: "0 0 6px" }}>{s.dek}</p>}
+            {s.published && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 4 }}>{shortDate(s.published)}</div>}
             {(s.tags || []).length > 0 && <TagRow tags={s.tags} small />}
           </article>
         ))}

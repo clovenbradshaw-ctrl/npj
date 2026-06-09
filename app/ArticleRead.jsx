@@ -1,24 +1,36 @@
 /* NPJ article reading experience — the spine.
-   Clean Read / Audit Mode + 3 evidence layouts (Ledger / Receipts / Split). */
+   Clean Read / Audit Mode + 3 evidence layouts (Ledger / Receipts / Split).
+   Articles arrive as folded EO event logs (app/articles.js); the body block
+   shapes rendered here are exactly what the log carries. */
 
-function useClaimModel() {
+// A source key always resolves to SOMETHING renderable, even if the global
+// ledger is missing the record (a torn log line, a stale cache) — a hole in
+// the ledger must never take the whole article down with it.
+function srcOf(key) {
+  return window.NPJ.SOURCES[key] || { id: key, type: "primary", title: key, outlet: "", retrieved: "", archive_url: "", original_url: "" };
+}
+
+function useClaimModel(A) {
   return React.useMemo(() => {
-    const A = window.NPJ.ARTICLE;
     const claimList = [];
     const sourceNums = new Map();
     let n = 0;
-    A.body.forEach(b => (b.tokens || []).forEach(t => {
-      if (t.c) {
+    const scan = (t) => {
+      if (t && t.c && Array.isArray(t.src)) {
         t.src.forEach(k => { if (!sourceNums.has(k)) sourceNums.set(k, ++n); });
         claimList.push({ id: t.id, text: t.c, src: t.src, num: t.src.map(k => sourceNums.get(k)).join(", ") });
       }
-    }));
+    };
+    (A.body || []).forEach(b => {
+      (b.tokens || []).forEach(scan);
+      (b.items || []).forEach(it => it.forEach(scan)); // claims inside lists count too
+    });
     const claimById = Object.fromEntries(claimList.map(c => [c.id, c]));
     const sourceList = [...sourceNums.entries()].map(([key, num]) => ({
       key, num, claims: claimList.filter(c => c.src.includes(key)).map(c => c.id)
     }));
     return { claimList, claimById, sourceNums, sourceList };
-  }, []);
+  }, [A]);
 }
 
 /* ---- floating source hover card ---- */
@@ -42,7 +54,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
           {srcKeys.map((k, i) => (
             <button key={k} onClick={() => setTab(i)} className="np-mono" style={{ flex: 1, fontSize: 10, padding: "4px 6px",
               border: 0, borderRight: i < srcKeys.length - 1 ? "1px solid var(--rule)" : 0,
-              background: tab === i ? "var(--yellow)" : "var(--card)", fontWeight: 600 }}>{window.NPJ.SOURCES[k].id}</button>
+              background: tab === i ? "var(--yellow)" : "var(--card)", fontWeight: 600 }}>{srcOf(k).id}</button>
           ))}
         </div>
       )}
@@ -60,14 +72,19 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
 function ArticleRead(props) {
   const { readMode, setReadMode, direction, setDirection, showSugg, setShowSugg,
           suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
-          isEditor, setIsEditor, me, onHome, onNewsroom,
-          entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
+          isEditor, setIsEditor, me, onHome, onNewsroom, onEdited } = props;
+  const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
   const A = window.NPJ.ARTICLE;
-  const { claimList, claimById, sourceNums, sourceList } = useClaimModel();
+  const { isAdmin } = React.useContext(window.LayoutCtx);
+  const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
   const [composeId, setComposeId] = useState(null);
   const [showVersions, setShowVersions] = useState(false);
+  const [editing, setEditing] = useState(false);
+  // edit-after-publish: the admin always; otherwise only the article's
+  // assignees (the publisher is one by default — see genesisFromContent)
+  const canEditArticle = isAdmin || (Array.isArray(A.assignees) && A.assignees.includes(me));
   const leaveTimer = useRef(null);
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
@@ -92,11 +109,23 @@ function ArticleRead(props) {
 
   const startCompose = (claimId) => { setComposeId(claimId); setShowSugg(true); setHover(null); };
 
-  // render tokens for a paragraph
+  // render tokens for a paragraph: plain strings, style tokens ({t}) and
+  // source-bound claims ({c, src, id}) — the EO log's full inline vocabulary
   const ent = activeEntity ? activeEntity.name : null;
-  const renderTokens = (tokens) => tokens.map((t, i) => {
+  const renderTokens = (tokens) => (tokens || []).map((t, i) => {
     if (typeof t === "string") return <React.Fragment key={i}>{ent ? markEntities(t, ent, "p" + i) : t}</React.Fragment>;
+    if (t && t.t) {
+      if (t.t === "br") return <br key={i} />;
+      if (t.t === "strong") return <strong key={i}>{t.text}</strong>;
+      if (t.t === "em") return <em key={i}>{t.text}</em>;
+      if (t.t === "s") return <s key={i}>{t.text}</s>;
+      if (t.t === "code") return <code key={i} className="np-mono" style={{ fontSize: "0.85em", background: "var(--paper-2)", padding: "0 4px" }}>{t.text}</code>;
+      if (t.t === "a") return <a key={i} href={t.href} target="_blank" rel="noopener" style={{ color: "inherit", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{t.text}</a>;
+      if (t.t === "sup") return <sup key={i} className="np-mono" style={{ fontSize: 11 }}>{t.text}</sup>;
+      return <React.Fragment key={i}>{t.text || ""}</React.Fragment>;
+    }
     const claim = claimById[t.id];
+    if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
     return (
       <span key={i} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
         onMouseEnter={(e) => enterClaim(e, claim)} onMouseLeave={scheduleLeave}
@@ -107,7 +136,7 @@ function ArticleRead(props) {
     );
   });
 
-  const receiptsFor = (block) => (block.tokens || []).filter(t => t.c);
+  const receiptsFor = (block) => (block.tokens || []).filter(t => t && t.c && claimById[t.id]);
 
   const Body = (
     <article style={{ fontFamily: "var(--serif)" }}>
@@ -120,9 +149,34 @@ function ArticleRead(props) {
           <blockquote key={i} style={{ margin: "26px 0", paddingLeft: 20, borderLeft: "4px solid var(--yellow-deep)",
             fontFamily: "var(--cond)", fontWeight: 500, fontSize: 27, lineHeight: 1.18 }}>
             {b.text}
-            <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer>
+            {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
           </blockquote>
         );
+        if (b.type === "img") return (
+          <figure key={i} style={{ margin: "26px 0" }}>
+            <img src={b.src} alt={b.caption || ""} loading="lazy" style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+            {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
+          </figure>
+        );
+        if (b.type === "embed") return (
+          <figure key={i} style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
+            <a href={b.url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>
+              ↗ {b.url}
+            </a>
+            {b.caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{b.caption}</figcaption>}
+          </figure>
+        );
+        if (b.type === "ul" || b.type === "ol") {
+          const Tag = b.type;
+          return (
+            <Tag key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", paddingLeft: 26 }}>
+              {(b.items || []).map((it, j) => <li key={j} style={{ marginBottom: 6 }}>{renderTokens(it)}</li>)}
+            </Tag>
+          );
+        }
+        if (b.type === "hr") return <hr key={i} style={{ border: 0, borderTop: "2.5px solid var(--ink)", width: 110, margin: "30px auto" }} />;
+        if (b.type === "code") return <pre key={i} className="np-mono np-scroll" style={{ fontSize: 13, lineHeight: 1.55, background: "var(--paper-2)", border: "1.5px solid var(--ink)", padding: "12px 14px", overflowX: "auto", margin: "0 0 20px" }}>{b.text}</pre>;
+        if (b.type === "verse") return <pre key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17.5, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 20px", padding: "0 0 0 20px", borderLeft: "3px solid var(--rule-strong, var(--ink))" }}>{b.text}</pre>;
         return (
           <React.Fragment key={i}>
             <p style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>
@@ -142,7 +196,8 @@ function ArticleRead(props) {
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
       <ControlBar {...{ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
-        entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null }} />
+        entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
+        canEdit: canEditArticle, onEdit: () => setEditing(true) }} />
 
       <div style={{ maxWidth: 1180, padding: "30px 22px 80px",
         marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
@@ -162,7 +217,9 @@ function ArticleRead(props) {
             </span>
           </div>
           <div style={{ paddingTop: 14 }}>
-            <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleUrl(A.slug)}`} title={A.headline} />
+            {/* share link opens the reader; the wayback action targets the raw
+                EO log — the committed artifact is what gets archived */}
+            <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleRawUrl(A.slug)}`} title={A.headline} />
           </div>
           {headings.length >= 2 && (
             <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
@@ -206,12 +263,17 @@ function ArticleRead(props) {
         onSubmit={(d) => { onAddSuggestion(composeId, d); setComposeId(null); }}
         onCancelCompose={() => setComposeId(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)} />}
+      {editing && window.ArticleEdit && (
+        <window.ArticleEdit article={A} me={me} isAdmin={isAdmin}
+          onClose={() => setEditing(false)}
+          onSaved={(updated) => { setEditing(false); if (onEdited) onEdited(updated); }} />
+      )}
     </div>
   );
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount }) {
+function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit }) {
   const divider = <span style={{ width: 1, height: 22, background: "var(--rule)" }} />;
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -230,6 +292,12 @@ function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, 
         </div>
 
         <span style={{ flex: 1 }} />
+
+        {canEdit && (
+          <button className="btn btn-sm" onClick={onEdit} title="Edit this published article — your change is appended to its EO event log" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊛</span> Edit
+          </button>
+        )}
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
@@ -250,7 +318,7 @@ function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, 
 
 /* ---- evidence layouts ---- */
 function Receipt({ claim, onEnter, onLeave, onSuggest, openCount }) {
-  const k = claim.src[0]; const s = window.NPJ.SOURCES[k];
+  const k = claim.src[0]; const s = srcOf(k);
   return (
     <div onMouseEnter={(e) => onEnter(e, claim)} onMouseLeave={onLeave}
       style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "7px 9px", maxWidth: 240, cursor: "help",
@@ -275,9 +343,9 @@ function Ledger({ sourceList, activeSrc, setActiveSrc }) {
       </div>
       <div className="np-scroll" style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto", paddingRight: 4 }}>
         {sourceList.map(({ key, num }) => {
-          const s = window.NPJ.SOURCES[key]; const on = activeSrc === key;
+          const s = srcOf(key); const on = activeSrc === key;
           return (
-            <a key={key} href={s.archive_url} target="_blank" rel="noopener"
+            <a key={key} href={s.archive_url || s.original_url} target="_blank" rel="noopener"
               onMouseEnter={() => setActiveSrc(key)} onMouseLeave={() => setActiveSrc(null)}
               style={{ display: "block", textDecoration: "none", padding: "8px 8px", marginBottom: 4,
                 background: on ? "var(--yellow)" : "transparent", borderLeft: "3px solid " + (on ? "var(--ink)" : "transparent") }}>
@@ -332,13 +400,13 @@ function MethodsFooter({ sourceList, claimCount }) {
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", marginTop: 10 }}>
         {sourceList.map(({ key, num }) => {
-          const s = window.NPJ.SOURCES[key];
+          const s = srcOf(key);
           return (
-            <a key={key} href={s.archive_url} target="_blank" rel="noopener" className="headline-link"
+            <a key={key} href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="headline-link"
               style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none", borderBottom: "1px solid var(--rule)" }}>
               <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
               <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)" }}>archived {s.retrieved} ↗</span>
+                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)" }}>{s.archive_url ? "archived " + (s.retrieved || "") : "live link"} ↗</span>
               </span>
             </a>
           );

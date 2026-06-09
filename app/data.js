@@ -48,9 +48,12 @@
   };
 
   // Build the canonical event string for a suggestion (an EVA deposit).
+  // Reads window.NPJ.ARTICLE (not the shipped null above) — articles are now
+  // loaded at runtime from their committed EO logs (app/articles.js).
   function eoEvent(s) {
-    const slug = (ARTICLE && ARTICLE.slug) || "untitled";
-    const base = (ARTICLE && ARTICLE.base_sha) || "0000000";
+    const A = window.NPJ.ARTICLE;
+    const slug = (A && A.slug) || "untitled";
+    const base = (A && A.base_sha) || "0000000";
     const range = s.range ? `[${s.range[0]},${s.range[1]}]` : "";
     const target = `${slug}@${base}${range}`;
     const operand = JSON.stringify(s.proposed);
@@ -83,10 +86,13 @@
 
   // Plain prose of the article body — fed to the eoreader3 engine for
   // entity/prominence extraction. Returns "" when nothing is published.
+  // Reads the LIVE article (window.NPJ.ARTICLE is set by the EO log loader).
   window.NPJ.articlePlainText = function () {
-    if (!ARTICLE || !Array.isArray(ARTICLE.body)) return "";
-    return ARTICLE.body.filter(b => b.type === "p")
-      .map(b => b.tokens.map(t => (typeof t === "string" ? t : t.c)).join(""))
+    const A = window.NPJ.ARTICLE;
+    if (!A || !Array.isArray(A.body)) return "";
+    if (window.NpjArticles) return window.NpjArticles.plainText(A.body);
+    return A.body.filter(b => b.type === "p")
+      .map(b => b.tokens.map(t => (typeof t === "string" ? t : (t.c != null ? t.c : t.text || ""))).join(""))
       .join("\n\n");
   };
 

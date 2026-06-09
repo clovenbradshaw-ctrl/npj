@@ -318,7 +318,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) inner = `<audio controls src="${esc}" style="width:100%"></audio>`;
     else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) inner = `<video controls src="${esc}" style="width:100%;max-height:420px;background:#000"></video>`;
     else inner = `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
-    insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published .md keeps the link</figcaption></figure><p><br/></p>`);
+    insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
   // a numbered footnote: marker in the text, a markdown-ready definition at the end
@@ -481,7 +481,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
-          <span className="np-mono" title={fileSlug ? "custom filename — set at the publish gate" : "filename follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted }}>{fileSlug || slugify(title) || "untitled"}.md</span>
+          <span className="np-mono" title={fileSlug ? "custom filename — set at the publish gate" : "filename follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted }}>{fileSlug || slugify(title) || "untitled"}.jsonl</span>
           <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
             what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
         </div>
@@ -583,7 +583,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <input autoFocus value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && insertEmbed()} placeholder="YouTube, Vimeo, .mp3, .mp4, URL…" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 11.5, outline: "none" }} />
                 <button className="btn btn-sm btn-primary" onClick={insertEmbed}>Add</button>
               </div>
-              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>video &amp; audio play in the draft; the published .md keeps the permalink</div>
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>video &amp; audio play in the draft; the published article keeps the permalink</div>
             </div>
           )}
         </div>
@@ -852,12 +852,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const [phase, setPhase] = useState("confirm");          // confirm | run
   const [outcome, setOutcome] = useState(null);           // null | {ok:true} | {ok:false,msg}
   const [steps, setSteps] = useState(() => ([
-    { code: "EVA", label: "Pull the finished piece", detail: "draft → plaintext markdown", state: "wait" },
+    { code: "EVA", label: "Pull the finished piece", detail: "draft → EO event (INS — the genesis line)", state: "wait" },
     { code: "SEG", label: "Build: resolve every bound span", detail: flight.spans + " bound span" + (flight.spans === 1 ? "" : "s") + " to check", state: "wait" },
     { code: "INS", label: "Sources archived on archive.org", detail: flight.srcTotal ? flight.archived + " of " + flight.srcTotal + " archived" : "no sources bound", state: "wait", sources: true },
-    { code: "DEF", label: "Commit markdown to GitHub", detail: "→ clovenbradshaw-ctrl/npj · " + slug + ".md", state: "wait" },
+    { code: "DEF", label: "Commit the EO event log to GitHub", detail: "→ clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl", state: "wait" },
     { code: "REC", label: "Live & open to suggestion", detail: articleUrl, state: "wait" }
   ]));
+  const published = useRef(null); // the folded article, for "open it" without re-fetching
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   const upd = (i, patch) => { if (alive.current) setSteps(list => list.map((s, j) => j === i ? { ...s, ...patch } : s)); };
@@ -867,12 +868,12 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const run = async () => {
     setPhase("run");
     // the gate may have renamed the file after the steps were initialized
-    upd(3, { detail: "→ clovenbradshaw-ctrl/npj · " + slug + ".md" });
+    upd(3, { detail: "→ clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" });
     upd(4, { detail: articleUrl });
     // 1 — pull the piece
     upd(0, { state: "active" }); await tick(400);
     if (!flight.words) return halt(0, "the draft is empty", "Write the piece first — there's no text to publish.");
-    upd(0, { state: "done", detail: flight.words + " words → " + slug + ".md" });
+    upd(0, { state: "done", detail: flight.words + " words → articles/" + slug + ".jsonl" });
     // 2 — build: every bound span must resolve to a source record
     upd(1, { state: "active" }); await tick(400);
     if (flight.missing.length) return halt(1, flight.missing.length + " unresolved · build failed",
@@ -892,25 +893,24 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       if (snap) { rec.archive_url = snap; archivedNow++; }
     }));
     upd(2, { state: "done", detail: !flight.srcTotal ? "no sources bound" : archivedNow === flight.srcTotal ? "all " + flight.srcTotal + " verified on archive.org" : archivedNow + " of " + flight.srcTotal + " verified — the rest cite their original URL" });
-    // 4 — the actual commit (markdown serialized now, so footnotes carry any
-    // archive URLs found in step 3); authority is re-verified server-side
+    // 4 — the actual commit. The piece is serialized NOW (so claims carry any
+    // archive URLs found in step 3) into ONE EO event: the INS genesis line of
+    // articles/<slug>.jsonl. Every later edit appends to that same file, which
+    // makes the log itself the article's complete change history. Authority is
+    // re-verified server-side by the webhook.
     upd(3, { state: "active" });
-    const contentRaw = window.NpjArticleMarkdown(flight.content);
+    const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
+    const gen = window.NpjArticles.genesisFromContent(flight.content, { slug, headline: title, actor });
+    published.current = gen.article;
     const token = window.MatrixAuth.token();
     if (!token) return halt(3, "no verified Matrix session", "Sign in with your admin Matrix account to publish.");
-    let endpoint = "https://n8n.intelechia.com/webhook/site/publish-npj";
-    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.endpoint) endpoint = c.endpoint; } catch (e) {}
     let res;
     try {
-      res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ filename: slug + ".md", mode: "overwrite", contentRaw, message: "publish: " + slug })
-      });
+      res = await window.NpjArticles.publishGenesis({ slug, line: gen.line, token, message: "publish: " + slug });
     } catch (e) { return halt(3, "webhook unreachable", "Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing was committed."); }
     if (res.status === 401) return halt(3, "rejected — not authorized (401)", "That Matrix account isn't authorized to publish.");
     if (!res.ok) return halt(3, "HTTP " + res.status, "The publish webhook answered " + res.status + " — nothing was committed.");
-    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · " + slug + ".md" });
+    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" });
     // 5 — live once Pages redeploys (≈ a minute after the commit)
     upd(4, { state: "active" }); await tick(400);
     upd(4, { state: "done" });
@@ -948,8 +948,8 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                 <input value={slugVal} onChange={e => editSlug(e.target.value)} placeholder={auto} title="Name the file anything — it doesn't have to match the headline" className="np-mono" spellCheck={false}
                   style={{ width: "min(300px, 56vw)", border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
-                <span className="np-mono" style={{ fontSize: 11 }}>.md</span>
-                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ clovenbradshaw-ctrl/npj{slugVal !== slug ? " · saved as " + slug + ".md" : ""}</span>
+                <span className="np-mono" style={{ fontSize: 11 }}>.jsonl</span>
+                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ clovenbradshaw-ctrl/npj · articles/{slugVal !== slug ? " · saved as " + slug + ".jsonl" : ""}</span>
               </span>
             </Row>
             <Row k="Live at">{articleUrl}</Row>
@@ -993,9 +993,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                 {outcome.ok
                   ? <React.Fragment>
                       <div style={{ fontFamily: "var(--display)", fontSize: 26, color: "var(--yellow)", marginBottom: 4 }}>COMMITTED — GOING LIVE</div>
-                      <div className="np-mono" style={{ fontSize: 11, color: NR.muted, marginBottom: 16, lineHeight: 1.5 }}>{slug + ".md is in clovenbradshaw-ctrl/npj. GitHub Pages serves it at the link below after the next deploy (about a minute)."}</div>
+                      <div className="np-mono" style={{ fontSize: 11, color: NR.muted, marginBottom: 16, lineHeight: 1.5 }}>{"articles/" + slug + ".jsonl is in clovenbradshaw-ctrl/npj — the article's EO event log, line 1. Every future edit appends to it. The front page lists it and the link below opens the formatted reader."}</div>
                       <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
-                        <ShareBar dark url={articleUrl} archiveUrl={"https://web.archive.org/save/" + articleUrl} title={title} />
+                        <ShareBar dark url={articleUrl} archiveUrl={"https://web.archive.org/save/" + window.npjArticleRawUrl(slug)} title={title} />
                       </div>
                     </React.Fragment>
                   : <React.Fragment>
@@ -1003,6 +1003,11 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                       <div className="np-mono" style={{ fontSize: 11.5, color: NR.soft, lineHeight: 1.5, maxWidth: 440, margin: "0 auto 16px" }}>{outcome.msg} Your draft is safe — it stays saved on this device and synced to your Matrix account.</div>
                     </React.Fragment>}
                 <div style={{ display: "flex", gap: 9, justifyContent: "center" }}>
+                  {outcome.ok && (
+                    <button onClick={() => onPublished && onPublished(published.current || slug)} className="np-cond" style={{ background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", padding: "10px 18px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <I.arrow style={{ fontSize: 14 }} /> Open the article
+                    </button>
+                  )}
                   <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Back to editor</button>
                 </div>
               </div>
@@ -1014,9 +1019,11 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   );
 }
 
-/* Serialize the contentEditable draft to plaintext markdown for the commit.
+/* Serialize the contentEditable draft to plaintext markdown. LEGACY: publishing
+   now commits an EO event log (app/articles.js → genesisFromContent), not a .md
+   file — this serializer stays only for plaintext export/debugging.
    Bound source spans become numbered footnotes whose definitions point at the
-   archived (or original) URL — so the published .md keeps every claim auditable. */
+   archived (or original) URL — so the markdown keeps every claim auditable. */
 function htmlToMarkdown(html) {
   const root = document.createElement("div"); root.innerHTML = html || "";
   const inline = (node) => {
