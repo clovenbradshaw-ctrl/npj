@@ -27,6 +27,8 @@
 <script src="app/data.js"></script>
 <!-- live sources: pulls archive.org items tagged "npj-source" into DATASETS/SOURCES -->
 <script src="app/archive-sources.js"></script>
+<!-- media CDN: resolves archive.org links to direct image URLs for <image-slot> -->
+<script src="app/archive-cdn.js"></script>
 <!-- expose hooks globally so every babel file uses them bare without colliding -->
 <script>
   window.useState = React.useState;

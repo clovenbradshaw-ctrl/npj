@@ -16,7 +16,7 @@ const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
 const START_DOC =
-  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo" style="width:100%;height:300px;display:block"></image-slot></figure>' +
+  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
   '<h1>Untitled</h1><p><br/></p>';
 
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60); }
@@ -155,7 +155,44 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
-  const insertImage = () => insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" shape="rect" placeholder="Drop a photo" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image, then caption &amp; credit</figcaption></figure><p><br/></p>`);
+  const insertImage = () => insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`);
+
+  // ---- text comes in clean ----
+  // Paste (and text dragged in from elsewhere) is rebuilt from text/plain via
+  // NpjPlainText, so the source page's fonts/colors/backgrounds never land in
+  // the draft. Drags that START here keep the browser's native move/copy —
+  // the content is already clean.
+  const dragFromSelf = useRef(false);
+  const onPaste = (e) => {
+    if (!e.clipboardData) return;
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+    window.NpjPlainText.insert(text);
+    scanHeadings(); scheduleSave();
+  };
+  const onDropText = (e) => {
+    if (dragFromSelf.current || !e.dataTransfer) return; // internal rearrange — native handles it
+    e.preventDefault(); // never let the browser insert the formatted flavor (or navigate to a dropped file)
+    if (e.dataTransfer.files && e.dataTransfer.files.length) return; // files belong on image slots, which catch their own drops
+    const text = e.dataTransfer.getData("text/plain");
+    if (!text) return;
+    let r = null;
+    if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(e.clientX, e.clientY);
+    else if (document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(e.clientX, e.clientY); if (p) { r = document.createRange(); r.setStart(p.offsetNode, p.offset); r.collapse(true); } }
+    if (r && ed.current && ed.current.contains(r.startContainer)) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+    window.NpjPlainText.insert(text);
+    scanHeadings(); scheduleSave();
+  };
+
+  // image slots persist archive.org images by mutating their own src
+  // attribute — onInput never fires for that, so save on their change event
+  useEffect(() => {
+    const el = ed.current; if (!el) return;
+    const f = () => scheduleSave();
+    el.addEventListener("image-slot-change", f);
+    return () => el.removeEventListener("image-slot-change", f);
+  }, [scheduleSave]);
 
   // ---- rich formatting (toolbar additions) ----
   const wrapInline = (tag) => {
@@ -502,6 +539,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         <div className="np-scroll" ref={scroller} style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           <div className="md-preview nr-page" ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+            onPaste={onPaste} onDrop={onDropText}
+            onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
         </div>
@@ -795,8 +834,17 @@ function htmlToMarkdown(html) {
       lines.push("");
     }
     else if (tag === "figure") {
+      const cap = node.querySelector("figcaption");
+      const capText = cap ? cap.textContent.trim() : "";
+      // an image slot that resolved an archive.org link carries it in `src` —
+      // the published .md hotlinks the IA copy (archive.org is the media CDN);
+      // local-only drops have no durable URL and stay out of the .md
+      const slot = node.querySelector("image-slot");
+      const img = slot && slot.getAttribute("src");
+      if (img && window.NpjArchiveCDN && window.NpjArchiveCDN.isMediaUrl(img))
+        lines.push("![" + capText.replace(/[\[\]\n]/g, " ").trim() + "](" + img + ")", "");
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
-      const cap = node.querySelector("figcaption"); if (cap && cap.textContent.trim()) lines.push("*" + cap.textContent.trim() + "*", "");
+      if (capText) lines.push("*" + capText + "*", "");
     }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });

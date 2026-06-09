@@ -35,6 +35,28 @@ const SRC_TYPE = {
   reporting: { label: "Reporting", icon: I.mic,  color: "var(--review)" }
 };
 
+/* ---------- plain-text paste ----------
+   Text copied in loses its original formatting: every editor rebuilds the
+   clipboard's text/plain — blank line = new paragraph, single newline = <br> —
+   so fonts, colors and backgrounds never ride in from the source page. */
+const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+window.NpjPlainText = {
+  toHtml(text) {
+    return String(text).replace(/\r\n?/g, "\n").split(/\n{2,}/)
+      .map(b => "<p>" + (escHtml(b).replace(/\n/g, "<br/>") || "<br/>") + "</p>").join("");
+  },
+  // insert at the caret; inside a <pre> (code block, verse) the raw text goes
+  // in as-is so its newlines survive instead of becoming paragraphs
+  insert(text) {
+    const sel = window.getSelection();
+    const n = sel && sel.anchorNode;
+    const el = n && (n.nodeType === 1 ? n : n.parentElement);
+    const inPre = !!(el && el.closest && el.closest("pre"));
+    if (inPre || String(text).indexOf("\n") < 0) document.execCommand("insertText", false, text);
+    else document.execCommand("insertHTML", false, this.toHtml(text));
+  }
+};
+
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
