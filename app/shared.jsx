@@ -57,6 +57,13 @@ window.NpjPlainText = {
   }
 };
 
+/* ---------- real site URLs ----------
+   Where this site actually lives — GitHub Pages, a custom domain, localhost —
+   derived from the page URL, never a hardcoded domain. A published article is
+   the committed markdown file at the site root. */
+function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
+function npjArticleUrl(slug) { return npjSiteBase() + slug + ".md"; }
+
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -185,9 +192,10 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: dark ? "rgba(216,211,196,.7)" : "var(--ink-soft)" }}>Permanent link</span>
-        <button onClick={() => copy(archiveUrl, "arc")} title="Copy archive.org permalink" style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)" }}>
-          <I.archive style={{ fontSize: 14 }} /> {copied === "arc" ? "Copied!" : "archive.org snapshot"}
-        </button>
+        {/* a real wayback action (view or trigger a capture), not a copied string */}
+        <a href={archiveUrl} target="_blank" rel="noopener" title="Open this page on archive.org" style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)" }}>
+          <I.archive style={{ fontSize: 14 }} /> archive.org snapshot
+        </a>
         <button onClick={() => copy(url, "url")} style={pill}>{copied === "url" ? "Copied!" : <React.Fragment><I.ext style={{ fontSize: 13 }} /> Copy link</React.Fragment>}</button>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
@@ -202,4 +210,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl });

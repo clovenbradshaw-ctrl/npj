@@ -71,5 +71,32 @@
     throw new Error("That archive.org link isn't an item or an image file.");
   }
 
-  window.NpjArchiveCDN = { isMediaUrl, resolve };
+  /* ---- real source snapshots (wayback machine) ----
+     "Archived" is never painted on hope: a snapshot only counts once the
+     CORS-open availability API confirms a capture exists. Saving goes through
+     anonymous Save Page Now — that request is opaque to CORS (no-cors), so
+     ensureSnapshot() requests, then polls availability for the confirmation. */
+  async function waybackAvailable(url) {
+    const res = await fetch("https://archive.org/wayback/available?url=" + encodeURIComponent(url), { headers: { Accept: "application/json" } });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const c = j && j.archived_snapshots && j.archived_snapshots.closest;
+    return (c && c.available && c.url) ? String(c.url).replace(/^http:/, "https:") : null;
+  }
+  function requestSnapshot(url) {
+    try { fetch("https://web.archive.org/save/" + url, { mode: "no-cors", cache: "no-store" }).catch(() => {}); } catch (e) {}
+  }
+  async function ensureSnapshot(url, tries = 2, waitMs = 3500) {
+    let snap = await waybackAvailable(url).catch(() => null);
+    if (snap) return snap;
+    requestSnapshot(url);
+    for (let i = 0; i < tries; i++) {
+      await new Promise(r => setTimeout(r, waitMs));
+      snap = await waybackAvailable(url).catch(() => null);
+      if (snap) return snap;
+    }
+    return null; // honestly unconfirmed — SPN can take a while; a later check may find it
+  }
+
+  window.NpjArchiveCDN = { isMediaUrl, resolve, waybackAvailable, requestSnapshot, ensureSnapshot };
 })();
