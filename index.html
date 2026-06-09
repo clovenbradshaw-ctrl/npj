@@ -132,7 +132,14 @@ function App() {
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
   const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
   const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
-  const [draftId, setDraftId] = useState("working");
+  // which doc is open survives a refresh (hash) and a new visit (localStorage) —
+  // otherwise the newsroom silently reopens the default "working" draft and a
+  // freshly created doc looks like it vanished
+  const [draftId, setDraftId] = useState(() => {
+    const part = hp.find(p => /^doc=/.test(p));
+    if (part) return decodeURIComponent(part.slice(4));
+    try { return localStorage.getItem("npj_last_doc") || "working"; } catch (e) { return "working"; }
+  });
   const [readMode, setReadMode] = useState(hp.includes("audit") ? "audit" : "clean");
   const [direction, setDirection] = useState(initDir);
   const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
@@ -191,8 +198,9 @@ function App() {
       if (showSugg) f.push("sugg");
       if (entityOpen) f.push("figures");
     }
+    if (route === "newsroom" && draftId && draftId !== "working") f.push("doc=" + encodeURIComponent(draftId));
     history.replaceState(null, "", "#" + f.join(";"));
-  }, [route, readMode, direction, showSugg, entityOpen]);
+  }, [route, readMode, direction, showSugg, entityOpen, draftId]);
 
   const goArticle = () => { if (!window.NPJ.ARTICLE) { setRoute("home"); return; } setRoute("article"); window.scrollTo(0, 0); };
   const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };
@@ -201,7 +209,12 @@ function App() {
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
   const goDocs = () => { setRoute("docs"); window.scrollTo(0, 0); };
-  const openDoc = (id) => { setDraftId(id || "working"); setRoute("newsroom"); window.scrollTo(0, 0); };
+  const openDoc = (id) => {
+    const did = id || "working";
+    setDraftId(did);
+    try { localStorage.setItem("npj_last_doc", did); } catch (e) {}
+    setRoute("newsroom"); window.scrollTo(0, 0);
+  };
 
   const signIn = (sess) => {
     setSession(sess);
@@ -209,7 +222,14 @@ function App() {
       window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: "#b23a26" };
     }
   };
-  const signOut = async () => { try { await window.MatrixAuth.logout(); } catch (e) {} setSession(null); };
+  // Sign out flushes every pending draft to the account FIRST — the Matrix
+  // /logout kills the token, so any sync still in its debounce window would
+  // otherwise die with it. Capped so a dead homeserver can't block signing out.
+  const signOut = async () => {
+    try { if (window.NpjDrafts) await Promise.race([window.NpjDrafts.flushAll(), new Promise(r => setTimeout(r, 4000))]); } catch (e) {}
+    try { await window.MatrixAuth.logout(); } catch (e) {}
+    setSession(null);
+  };
 
   window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
@@ -234,7 +254,7 @@ function App() {
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
-      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
+      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenPost={goSubmit} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />

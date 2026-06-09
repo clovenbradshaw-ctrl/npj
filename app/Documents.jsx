@@ -21,7 +21,7 @@ function draftWords(d) {
   return text.trim() ? text.trim().split(/\s+/).length : 0;
 }
 
-function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
+function DocumentsPage({ session, onOpen, onOpenPost, onHome, onNewsroom, onSignIn }) {
   const signedIn = !!session;
   const [drafts, setDrafts] = useState(null);       // null = loading
   const [rooms, setRooms] = useState(null);
@@ -29,15 +29,19 @@ function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
   const [confirmId, setConfirmId] = useState(null);
   const [q, setQ] = useState("");
 
-  // drafts: both layers, newest first (app/drafts.js heals local vs Matrix)
+  // drafts: both layers, newest first (app/drafts.js heals local vs Matrix).
+  // Re-list whenever a background sync lands so "backing up…" flips to
+  // "on your account" without a reload.
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
-    (async () => {
+    const load = async () => {
       try { const list = await window.NpjDrafts.list(); if (alive) setDrafts(list || []); }
       catch (e) { if (alive) setDrafts([]); }
-    })();
-    return () => { alive = false; };
+    };
+    load();
+    const off = window.NpjDrafts.onStatus(s => { if (s.state === "synced") load(); });
+    return () => { alive = false; off(); };
   }, [signedIn]);
 
   // collaboration rooms: recovered from the homeserver, never from this browser
@@ -85,16 +89,7 @@ function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
       <Masthead route="docs" onHome={onHome} onNewsroom={onNewsroom} />
       <main style={{ maxWidth: 980, margin: "0 auto", padding: "34px 22px 80px" }}>
         {!signedIn ? (
-          <div style={{ maxWidth: 560, margin: "50px auto", textAlign: "center" }}>
-            <I.doc style={{ fontSize: 38 }} />
-            <h1 style={{ fontFamily: "var(--display)", fontSize: 46, lineHeight: .94, margin: "14px 0 12px" }}>Your documents live on your account.</h1>
-            <p style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 22px" }}>
-              Drafts are synced to your Matrix account and recovered from the homeserver — sign in and they follow you to any browser.
-            </p>
-            <button className="btn btn-primary" onClick={onSignIn} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-              <I.lock style={{ fontSize: 14 }} /> Sign in with Matrix
-            </button>
-          </div>
+          <SignedOutDocs onSignIn={onSignIn} />
         ) : (
           <React.Fragment>
             <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 14, flexWrap: "wrap", borderBottom: "3px solid var(--ink)", paddingBottom: 14, marginBottom: 18 }}>
@@ -126,19 +121,25 @@ function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
             )}
             {drafts && shownDrafts.map(d => {
               const words = draftWords(d);
-              const synced = window.MatrixAuth.isSignedIn();
+              // per-draft truth from drafts.list(): synced to the account, or only here
+              const wb = d.where === "synced"
+                ? { color: "var(--verified)", text: "● on your account + this browser" }
+                : d.where === "ahead"
+                ? { color: "var(--review)", text: "● newest copy in this browser — backing up to your account…" }
+                : { color: "var(--review)", text: "● this browser only" };
               return (
                 <div key={d.id} style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "4px 4px 0 rgba(22,20,13,.10)", padding: "13px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 220 }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
                       <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 20, lineHeight: 1.05 }}>{d.title || "Untitled"}</span>
                       {d.id === "working" && <span className="np-mono" style={{ fontSize: 9.5, border: "1px solid var(--ink)", background: "var(--yellow)", padding: "1px 6px" }}>working draft</span>}
+                      {d.kind === "post" && <span className="np-mono" style={{ fontSize: 9.5, border: "1px solid var(--ink)", background: "var(--paper-2)", padding: "1px 6px" }}>post · from Submit</span>}
                     </div>
                     <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
                       <span>{timeAgo(d.updated)}</span>
                       <span>{words} word{words === 1 ? "" : "s"}</span>
                       {d.column && <span>→ {d.column}</span>}
-                      <span style={{ color: synced ? "var(--verified)" : "var(--review)" }}>{synced ? "● synced to Matrix" : "● this device only"}</span>
+                      <span style={{ color: wb.color }}>{wb.text}</span>
                     </div>
                     {(d.tags || []).length > 0 && (
                       <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 6 }}>
@@ -147,7 +148,7 @@ function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
                     )}
                   </div>
                   <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                    <button className="btn btn-primary btn-sm" onClick={() => onOpen(d.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <button className="btn btn-primary btn-sm" onClick={() => (d.kind === "post" && onOpenPost) ? onOpenPost() : onOpen(d.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
                       <I.arrow style={{ fontSize: 12 }} /> Open
                     </button>
                     {confirmId === d.id ? (
@@ -209,6 +210,65 @@ function DocumentsPage({ session, onOpen, onHome, onNewsroom, onSignIn }) {
           </React.Fragment>
         )}
       </main>
+    </div>
+  );
+}
+
+/* Signed out ≠ gone. Drafts autosave to this browser even while signed out, and
+   signing out doesn't delete them — so show them, say exactly where they live,
+   and make sign-in the way to open them (and re-sync them to the account).
+   Before this, the page hid everything behind the sign-in wall and a freshly
+   written doc looked like it had been erased. */
+function SignedOutDocs({ onSignIn }) {
+  const local = (window.NpjDrafts && window.NpjDrafts.localList) ? window.NpjDrafts.localList() : [];
+  return (
+    <div style={{ maxWidth: 640, margin: "50px auto" }}>
+      <div style={{ textAlign: "center" }}>
+        <I.doc style={{ fontSize: 38 }} />
+        <h1 style={{ fontFamily: "var(--display)", fontSize: 46, lineHeight: .94, margin: "14px 0 12px" }}>
+          {local.length ? "Your drafts are still here." : "Your documents live on your account."}
+        </h1>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 22px" }}>
+          {local.length
+            ? "You're signed out, so these drafts are saved in this browser only right now. Sign in and they sync back to your Matrix account — and open for editing."
+            : "Drafts autosave to the browser you write in and back up to your Matrix account — sign in and they follow you to any device."}
+        </p>
+        <button className="btn btn-primary" onClick={onSignIn} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <I.lock style={{ fontSize: 14 }} /> Sign in with Matrix
+        </button>
+      </div>
+
+      {local.length > 0 && (
+        <div style={{ marginTop: 38 }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
+            <I.doc style={{ fontSize: 14 }} /> Saved in this browser · {local.length}
+          </div>
+          {local.map(d => {
+            const words = draftWords(d);
+            return (
+              <div key={d.id} style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "4px 4px 0 rgba(22,20,13,.10)", padding: "12px 16px", marginBottom: 10, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 18, lineHeight: 1.05 }}>{d.title || "Untitled"}</span>
+                    {d.kind === "post" && <span className="np-mono" style={{ fontSize: 9.5, border: "1px solid var(--ink)", background: "var(--paper-2)", padding: "1px 6px" }}>post · from Submit</span>}
+                  </div>
+                  <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                    <span>{timeAgo(d.updated)}</span>
+                    <span>{words} word{words === 1 ? "" : "s"}</span>
+                    <span style={{ color: "var(--review)" }}>● this browser only — not on an account</span>
+                  </div>
+                </div>
+                <button className="btn btn-sm" onClick={onSignIn} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <I.lock style={{ fontSize: 11 }} /> Sign in to open
+                </button>
+              </div>
+            );
+          })}
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.5, marginTop: 4 }}>
+            These survive a refresh and a sign-out, but not a browser wipe or another device — signing in backs them up to your account.
+          </div>
+        </div>
+      )}
     </div>
   );
 }
