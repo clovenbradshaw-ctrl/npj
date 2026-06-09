@@ -109,6 +109,7 @@
       const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
       if (s && s.access_token && s.user_id) { session = s; session.admin = s.user_id === ADMIN_MXID; }
     } catch (e) { session = null; }
+    if (session) emit(); // boot-restored session counts as a sign-in (drafts re-sync on it)
     return current();
   }
   async function logout() {

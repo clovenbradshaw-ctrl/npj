@@ -29,9 +29,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
-  const [saveState, setSaveState] = useState("idle"); // idle|localonly|saving|syncing|synced|error
   const restored = useRef(false);                      // gate autosave until the first restore lands
   const saveTimer = useRef(null);
+  const htmlRef = useRef("");                          // last seen editor HTML (survives unmount, when ed.current is gone)
 
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
@@ -70,16 +70,25 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // authoritative copy that survives a browser wipe / new device (app/drafts.js).
   const persist = useCallback(() => {
     if (!restored.current) return;
-    const html = ed.current ? ed.current.innerHTML : "";
+    const html = ed.current ? ed.current.innerHTML : htmlRef.current;
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     window.NpjDrafts.save(draftId, { html, title, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
+    saveTimer.current = null;
   }, [draftId, title, tags, column, sources, room]);
+  const persistRef = useRef(persist);
+  useEffect(() => { persistRef.current = persist; });
   const scheduleSave = useCallback(() => {
     if (!restored.current) return;
+    if (ed.current) htmlRef.current = ed.current.innerHTML;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(persist, 500);
   }, [persist]);
+  // leaving the editor (sign-out, route change) with a save still in its
+  // debounce window? write it now — those last keystrokes used to be lost
+  useEffect(() => () => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); try { persistRef.current(); } catch (e) {} }
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -102,7 +111,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return () => { alive = false; };
   }, [draftId]);
 
-  useEffect(() => window.NpjDrafts.onStatus(s => { if (!s.id || s.id === draftId) setSaveState(s.state); }), [draftId]);
   useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
   useEffect(() => { scheduleSave(); }, [title, tags, column, sources, room, scheduleSave]);
 
@@ -311,10 +319,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   const versions = [{ sha: "draft", ts: new Date().toISOString().slice(0, 10), author: (session && session.user_id) || me, message: "Current working draft", text: ed.current ? (ed.current.innerText || "") : "" }];
 
-  const synced = !!session;
-  const saveText = ({ saving: "saving…", syncing: "syncing…", synced: "✓ synced to Matrix", error: "saved locally · sync failed", localonly: "saved on this device" })[saveState] || (synced ? "draft · autosaving" : "draft · autosaves on this device");
-  const saveColor = saveState === "error" ? NR.warn : saveState === "synced" ? NR.ok : NR.muted;
-
   const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{children}</button>;
   const Sep = () => <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />;
   const popStyle = { position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 40, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8 };
@@ -334,7 +338,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
           <span className="np-mono" style={{ fontSize: 11.5, color: NR.muted }}>{slugify(title) || "untitled"}.md</span>
-          <span className="np-mono" title={synced ? "Your draft is saved here and mirrored to your Matrix account — refresh or switch devices and it comes back." : "Saved on this device. Sign in with Matrix to back it up server-side."} style={{ fontSize: 10.5, color: saveColor, border: "1px solid " + NR.line, padding: "1px 6px", whiteSpace: "nowrap" }}>{saveText}</span>
+          <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
+            what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
         </div>
         <span style={{ flex: 1 }} />
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -808,6 +813,7 @@ window.NpjArticleMarkdown = function (content) {
 
 /* Closed-network gate: until the admin adds you, the newsroom is read-only-off. */
 function NewsroomLocked({ signedIn, me, onSignIn, onHome }) {
+  const localDrafts = (window.NpjDrafts && window.NpjDrafts.localList) ? window.NpjDrafts.localList() : [];
   return (
     <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 22px", textAlign: "center" }}>
       <div style={{ maxWidth: 520 }}>
@@ -817,6 +823,11 @@ function NewsroomLocked({ signedIn, me, onSignIn, onHome }) {
           People's Journalism is being built by its founding admin. For now, only the admin and the contributors they've added can draft and edit here — that opens up as the network grows.
         </p>
         {signedIn && <p className="np-mono" style={{ fontSize: 12, color: NR.warn, margin: "12px 0 0", lineHeight: 1.5 }}>You're verified as {me}, but you're not on the contributor allowlist yet. Ask the admin to add you.</p>}
+        {!signedIn && localDrafts.length > 0 && (
+          <p className="np-mono" style={{ fontSize: 12, color: NR.ok, margin: "12px 0 0", lineHeight: 1.5 }}>
+            Nothing was lost: {localDrafts.length} draft{localDrafts.length === 1 ? " is" : "s are"} still saved in this browser. Sign back in to keep editing — they'll re-sync to your account.
+          </p>
+        )}
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 24, flexWrap: "wrap" }}>
           {!signedIn && <button onClick={onSignIn} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Sign in with Matrix</button>}
           <button onClick={onHome} className="btn" style={{ background: "transparent", color: NR.text, borderColor: NR.line }}>Back to the public site</button>
