@@ -206,7 +206,10 @@ function App() {
 
   const goArticle = () => { if (!window.NPJ.ARTICLE) { setRoute("home"); return; } setRoute("article"); window.scrollTo(0, 0); };
   const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };
-  const goNewsroom = () => { setRoute("newsroom"); window.scrollTo(0, 0); };
+  // "Newsroom" lands on the document explorer (your docs + projects); the
+  // editor itself opens from there via openDoc. #newsroom deep-links still
+  // reach the editor directly.
+  const goNewsroom = () => { setRoute("docs"); window.scrollTo(0, 0); };
   const goStandards = () => { setRoute("standards"); window.scrollTo(0, 0); };
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };

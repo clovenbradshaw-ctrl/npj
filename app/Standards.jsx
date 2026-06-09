@@ -3,7 +3,7 @@
 /* ============================ Standards ============================ */
 function StandardsPage({ onHome, onNewsroom, onSubmit }) {
   const principles = [
-    [I.archive, "Every claim is bound to a frozen source.", "When we cite a fact, it is linked to an archive.org snapshot taken the moment we pulled it — not a live link that can rot or quietly change. The archived copy is canonical."],
+    [I.source, "Every claim is bound to a frozen source.", "When we cite a fact, it is linked to an archive.org snapshot taken the moment we pulled it — not a live link that can rot or quietly change. The archived copy is canonical."],
     [I.shield, "Sourcing is enforced, not promised.", "A claim that points to a missing source fails the build. The site literally cannot publish a citation that goes nowhere. Integrity is a machine check, not a vibe."],
     [I.chat, "The record stays open after publication.", "Every published piece is a living document. Anyone with an account can propose an edit against any claim, in public — proposed, then reviewed, then accepted or rejected, all on the record."],
     [I.shield, "One identity, across reading and writing.", "Editors and community contributors share one Matrix identity — bring any account, from any homeserver. Who proposed what, and who resolved it, is always attributable, and you can filter the record to the people you trust."],

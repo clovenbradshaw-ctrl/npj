@@ -271,7 +271,7 @@ function Ledger({ sourceList, activeSrc, setActiveSrc }) {
   return (
     <aside style={{ position: "sticky", top: 64, borderLeft: "1.5px solid var(--ink)", paddingLeft: 18 }}>
       <div className="np-eyebrow" style={{ borderBottom: "2px solid var(--ink)", paddingBottom: 6, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
-        <I.archive style={{ fontSize: 14 }} /> Source ledger
+        <I.source style={{ fontSize: 14 }} /> Source ledger
       </div>
       <div className="np-scroll" style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto", paddingRight: 4 }}>
         {sourceList.map(({ key, num }) => {
@@ -301,7 +301,7 @@ function EvidencePanel({ sourceList, activeSrc, setActiveSrc }) {
   return (
     <aside style={{ position: "sticky", top: 64 }}>
       <div className="np-eyebrow" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <I.archive style={{ fontSize: 14 }} /> Evidence · {sourceList.length} archived
+        <I.source style={{ fontSize: 14 }} /> Evidence · {sourceList.length} archived
       </div>
       <div className="np-scroll" style={{ maxHeight: "calc(100vh - 150px)", overflowY: "auto", paddingRight: 4 }}>
         {sourceList.map(({ key, num }) => {

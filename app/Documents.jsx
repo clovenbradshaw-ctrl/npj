@@ -1,6 +1,6 @@
 /* NPJ — Documents. The signed-in document explorer: every draft this account
    can recover (localStorage ∪ Matrix account data, via app/drafts.js), the
-   collaborative draft rooms recovered straight from the homeserver, and the
+   collaborative projects recovered straight from the homeserver, and the
    pieces already committed to GitHub. Gated to a signed-in session — guests
    are pointed at the Matrix sign-in on the Submit page. */
 
@@ -84,6 +84,18 @@ function DocumentsPage({ session, onOpen, onOpenPost, onHome, onNewsroom, onSign
   const match = (d) => !query || ((d.title || "") + " " + (d.column || "") + " " + (d.tags || []).join(" ")).toLowerCase().includes(query);
   const shownDrafts = (drafts || []).filter(match);
 
+  // projects = shared Matrix rooms (indexed ∪ joined, control room excluded).
+  // A project can hold several documents and shares one set of invitees.
+  const projects = (() => {
+    if (!rooms) return [];
+    const seen = {}; const out = [];
+    (rooms.drafts || []).forEach(d => { if (d.roomId && !seen[d.roomId]) { seen[d.roomId] = 1; out.push({ roomId: d.roomId, title: d.title, ts: d.ts, topic: "" }); } });
+    (rooms.joined || []).forEach(r => { if (r.kind !== "control" && !seen[r.roomId]) { seen[r.roomId] = 1; out.push({ roomId: r.roomId, title: r.name, topic: r.topic || "" }); } });
+    return out;
+  })();
+  const projectTitle = (room) => room ? ((projects.find(p => p.roomId === room.roomId) || {}).title || room.title || "project") : null;
+  const docsInProject = (roomId) => (drafts || []).filter(d => d.room && d.room.roomId === roomId);
+
   return (
     <div className="fade-in">
       <Masthead route="docs" onHome={onHome} onNewsroom={onNewsroom} />
@@ -139,6 +151,7 @@ function DocumentsPage({ session, onOpen, onOpenPost, onHome, onNewsroom, onSign
                       <span>{timeAgo(d.updated)}</span>
                       <span>{words} word{words === 1 ? "" : "s"}</span>
                       {d.column && <span>→ {d.column}</span>}
+                      {d.room && <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.folder style={{ fontSize: 11 }} /> {projectTitle(d.room)}</span>}
                       <span style={{ color: wb.color }}>{wb.text}</span>
                     </div>
                     {(d.tags || []).length > 0 && (
@@ -165,28 +178,38 @@ function DocumentsPage({ session, onOpen, onOpenPost, onHome, onNewsroom, onSign
               );
             })}
 
-            {/* ---- collaboration rooms ---- */}
+            {/* ---- projects (shared Matrix rooms: many documents, one set of invitees) ---- */}
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.archive style={{ fontSize: 14 }} /> Draft rooms · from your homeserver
+              <I.folder style={{ fontSize: 14 }} /> Projects · from your homeserver
             </div>
-            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", margin: "0 0 10px", lineHeight: 1.5 }}>Recovered from Matrix, not this browser — wipe or switch devices and they're still here after you sign in.</div>
+            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", margin: "0 0 10px", lineHeight: 1.5 }}>A project holds any number of documents and shares one set of invitees — everyone in a project can work on all of its documents. Recovered from Matrix, not this browser — wipe or switch devices and they're still here after you sign in.</div>
             {!rooms && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> loading from the homeserver…</div>}
-            {rooms && (rooms.drafts.length + rooms.joined.length === 0) && (
-              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>No rooms yet. Invite a collaborator from the Newsroom and a draft room is created for you.</div>
+            {rooms && projects.length === 0 && (
+              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>No projects yet. Invite a collaborator from the Newsroom and a project is created for you.</div>
             )}
-            {rooms && rooms.drafts.map(d => (
-              <div key={d.roomId} style={{ borderBottom: "1px solid var(--rule)", padding: "8px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-                <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15 }}>{d.title || "Untitled draft"}</span>
-                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{d.roomId}</span>
-                {d.ts && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{timeAgo(d.ts)}</span>}
-              </div>
-            ))}
-            {rooms && rooms.joined.filter(r => !rooms.drafts.find(d => d.roomId === r.roomId)).map(r => (
-              <div key={r.roomId} style={{ borderBottom: "1px solid var(--rule)", padding: "8px 2px" }}>
-                <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15 }}>{r.name}</span>
-                {r.topic && <span style={{ fontFamily: "var(--serif)", fontSize: 12, color: "var(--ink-soft)", marginLeft: 10 }}>{r.topic}</span>}
-              </div>
-            ))}
+            {rooms && projects.map(p => {
+              const docs = docsInProject(p.roomId);
+              return (
+                <div key={p.roomId} style={{ border: "1.5px solid var(--rule-strong)", background: "var(--paper-2)", padding: "10px 13px", marginBottom: 8 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> {p.title || "Untitled project"}</span>
+                    <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{docs.length} document{docs.length !== 1 ? "s" : ""} · shared invitees</span>
+                    {p.ts && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{timeAgo(p.ts)}</span>}
+                  </div>
+                  {p.topic && <div style={{ fontFamily: "var(--serif)", fontSize: 12, color: "var(--ink-soft)", marginTop: 2 }}>{p.topic}</div>}
+                  <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 2 }}>{p.roomId}</div>
+                  {docs.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                      {docs.map(d => (
+                        <button key={d.id} onClick={() => onOpen(d.id)} title="Open this document" className="np-cond" style={{ display: "inline-flex", alignItems: "center", gap: 5, border: "1px solid var(--ink)", background: "var(--card)", padding: "3px 9px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>
+                          <I.doc style={{ fontSize: 12 }} /> {d.title || "Untitled"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
             {rooms && rooms.error && <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", marginTop: 6 }}>{rooms.error}</div>}
 
             {/* ---- the published record ---- */}

@@ -172,7 +172,7 @@ function AdminEditor() {
 
             {/* Roles / contributors */}
             <Section label="Contributors &amp; permissions">
-              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>The network starts closed. <b style={{ color: AE.text }}>admin</b> can publish + manage roles; <b style={{ color: AE.text }}>editor</b> can draft &amp; edit. Authority flows from you — invite them to the draft room too.</div>
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>The network starts closed. <b style={{ color: AE.text }}>admin</b> can publish + manage roles; <b style={{ color: AE.text }}>editor</b> can draft &amp; edit. Authority flows from you — invite them to the project too.</div>
               <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
                 <span className="np-mono" style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: "#9fe0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{admin}</span>
                 <span className="np-mono" style={{ fontSize: 10, color: "#9fe0b8", border: "1px solid #2f5b45", padding: "2px 6px" }}>founder · admin</span>

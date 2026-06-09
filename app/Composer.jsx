@@ -95,8 +95,8 @@ function Composer({ user, session, onSignOut }) {
   useEffect(() => { scheduleSave(); }, [title, dek, tags, feed, room, scheduleSave]);
   useEffect(() => { if (session) window.NpjDrafts.flush(POST_DRAFT_ID); }, [session]); // back up local-only work after sign-in
 
-  // real Matrix room invite — create the draft room on first invite so it's
-  // recoverable from any browser, then invite the collaborator into it.
+  // real Matrix invite — create the project (a shared room that can hold many
+  // documents) on first invite, then invite the collaborator into it.
   const doInvite = async () => {
     const raw = inviteVal.trim(); if (!raw) return;
     if (!session) { setInviteMsg("Sign in with Matrix to invite collaborators."); return; }
@@ -108,7 +108,7 @@ function Composer({ user, session, onSignOut }) {
       if (!rm) { rm = await window.MatrixAuth.createDraftRoom(title || "Untitled draft"); setRoom(rm); }
       await window.MatrixAuth.invite(rm.roomId, id.mxid);
       setCollabs(c => c.includes(id.mxid) ? c : [...c, id.mxid]);
-      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " to the draft room.");
+      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " into the project — they can work on every document in it.");
     } catch (e) {
       setInviteMsg("Invite failed: " + (e.message || "try again"));
     }
@@ -211,8 +211,8 @@ function Composer({ user, session, onSignOut }) {
                   <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
                 </div>
                 {inviteMsg && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.4 }}>{inviteMsg}</div>}
-                {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>room: {room.alias}</div>}
-                <div style={{ fontFamily: "var(--serif)", fontSize: 12, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.4 }}>They're invited into the Matrix draft room and can write alongside you — recoverable from any browser.</div>
+                {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>project: {room.alias}</div>}
+                <div style={{ fontFamily: "var(--serif)", fontSize: 12, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.4 }}>They're invited into the project's Matrix room and can write alongside you — recoverable from any browser.</div>
               </div>
             )}
           </div>
@@ -263,7 +263,7 @@ function Composer({ user, session, onSignOut }) {
           <TBtn onClick={() => exec("formatBlock", "<blockquote>")}>“”</TBtn>
           <TBtn onClick={() => exec("insertUnorderedList")}>• List</TBtn>
           <Sep />
-          <TBtn onClick={bindSource} title="Bind selected text to a source"><span style={{ fontFamily: "var(--mono)" }}>⊨</span> Source</TBtn>
+          <TBtn onClick={bindSource} title="Bind selected text to a source — the claim stands on it"><I.source style={{ fontSize: 14 }} /> Source</TBtn>
           <Sep />
           <div style={{ position: "relative" }}>
             <TBtn onClick={() => setInsertOpen(o => !o)} style={{ background: insertOpen ? "var(--ink)" : "transparent", color: insertOpen ? "var(--yellow)" : "var(--ink)" }}><I.plus style={{ fontSize: 14 }} /> Insert</TBtn>
@@ -291,7 +291,7 @@ function Composer({ user, session, onSignOut }) {
         <div style={{ marginTop: 22, borderTop: "1.5px solid var(--rule)", paddingTop: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <I.shield style={{ fontSize: 18, color: "var(--ink-soft)", flex: "0 0 auto", marginTop: 1 }} />
           <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>
-            Highlight a fact and hit <strong>⊨ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
+            Highlight a fact and hit <strong>⊥ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
           </p>
         </div>
       </div>
