@@ -12,7 +12,7 @@ const START_DOC =
 
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60); }
 
-function Newsroom({ session, draftId = "working", onExit, onPublished }) {
+function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
   const canPub = window.canPublish(layout, session && session.user_id);
@@ -135,12 +135,61 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
   const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   const insertImage = () => insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" shape="rect" placeholder="Drop a photo" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image, then caption &amp; credit</figcaption></figure><p><br/></p>`);
 
+  // ---- rich formatting (toolbar additions) ----
+  const wrapInline = (tag) => {
+    const r = selRange.current; if (!r || r.collapsed) return;
+    const el = document.createElement(tag);
+    try { r.surroundContents(el); } catch (e) { const frag = r.extractContents(); el.appendChild(frag); r.insertNode(el); }
+    window.getSelection().removeAllRanges(); setRev(v => v + 1); scheduleSave();
+  };
+  const applyHighlight = () => {
+    ed.current && ed.current.focus(); restore();
+    try { document.execCommand("styleWithCSS", false, true); } catch (e) {}
+    try { document.execCommand("hiliteColor", false, "rgba(255,236,1,.45)"); } catch (e) { document.execCommand("backColor", false, "rgba(255,236,1,.45)"); }
+    scheduleSave();
+  };
+  const applyColor = (c) => {
+    ed.current && ed.current.focus(); restore();
+    try { document.execCommand("styleWithCSS", false, true); } catch (e) {}
+    document.execCommand("foreColor", false, c);
+    setFmtMenu(null); scheduleSave();
+  };
+  const insertEmbed = () => {
+    const u = embedUrl.trim(); if (!/^https?:\/\//.test(u)) return;
+    let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+    const esc = u.replace(/"/g, "&quot;");
+    const yt = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
+    const vm = u.match(/vimeo\.com\/(\d+)/);
+    let inner;
+    if (yt) inner = `<iframe src="https://www.youtube-nocookie.com/embed/${yt[1]}" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen></iframe>`;
+    else if (vm) inner = `<iframe src="https://player.vimeo.com/video/${vm[1]}" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen></iframe>`;
+    else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) inner = `<audio controls src="${esc}" style="width:100%"></audio>`;
+    else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) inner = `<video controls src="${esc}" style="width:100%;max-height:420px;background:#000"></video>`;
+    else inner = `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
+    insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published .md keeps the link</figcaption></figure><p><br/></p>`);
+    setEmbedUrl(""); setFmtMenu(null);
+  };
+  // a numbered footnote: marker in the text, a markdown-ready definition at the end
+  const insertFootnote = () => {
+    const n = (ed.current ? ed.current.querySelectorAll("sup[data-fn]").length : 0) + 1;
+    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="fn${n}" contenteditable="false" title="footnote ${n}">fn${n}</sup>&nbsp;`);
+    if (ed.current) { const p = document.createElement("p"); p.textContent = `[^fn${n}]: footnote text…`; ed.current.appendChild(p); }
+    setFmtMenu(null); scheduleSave();
+  };
+  const insertVerse = () => { insertHTML(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
+  const insertPoll = () => {
+    insertHTML(`<div class="cmp-widget" data-widget="poll"><div class="cmp-widget-h"><span class="np-mono">◳ POLL</span><span class="cmp-tag">placeholder · interactive at publish</span></div><div class="cmp-widget-b"><strong>Ask the readers a question…</strong><span>Option one</span><br/><span>Option two</span></div><div class="cmp-widget-f">readers vote on the published page; results stay public</div></div><p><br/></p>`);
+    setFmtMenu(null);
+  };
+
   // ---- floating selection toolbar: format + link/jumplink + source ----
   const [sel, setSel] = useState(null);
   const [menu, setMenu] = useState(null); // 'src' | 'link'
   const [srcQuery, setSrcQuery] = useState("");
   const [srcUrl, setSrcUrl] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
+  const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
+  const [embedUrl, setEmbedUrl] = useState("");
   useEffect(() => {
     const onUp = (e) => {
       if (e && e.target && e.target.closest && e.target.closest(".sel-tb")) return;
@@ -235,6 +284,9 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
   const saveColor = saveState === "error" ? "#e6b07f" : saveState === "synced" ? "#9fe0b8" : NR.muted;
 
   const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{children}</button>;
+  const Sep = () => <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />;
+  const popStyle = { position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 40, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8 };
+  const popItem = { display: "flex", gap: 10, alignItems: "center", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "8px 6px", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, cursor: "pointer", whiteSpace: "nowrap" };
   const FB = ({ onClick, children, hot, title }) => <button title={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
 
   return (
@@ -252,6 +304,7 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
         </div>
         <span style={{ flex: 1 }} />
         <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark />
+        {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> Docs</button>}
         <div style={{ position: "relative" }}>
           <button onClick={openRooms} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.archive style={{ fontSize: 13 }} /> Rooms</button>
           {showRooms && <RoomsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
@@ -281,19 +334,82 @@ function Newsroom({ session, draftId = "working", onExit, onPublished }) {
       {/* formatting toolbar */}
       <div style={{ borderBottom: "1px solid " + NR.line, padding: "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
+        <TB onClick={() => exec("undo")} title="Undo">↶</TB>
+        <TB onClick={() => exec("redo")} title="Redo">↷</TB>
+        <Sep />
         <TB onClick={() => exec("formatBlock", "<h1>")} title="Title">H1</TB>
         <TB onClick={() => exec("formatBlock", "<h2>")} title="Heading">H2</TB>
         <TB onClick={() => exec("formatBlock", "<h3>")} title="Subheading">H3</TB>
         <TB onClick={() => exec("formatBlock", "<p>")} title="Body text">¶</TB>
-        <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />
+        <Sep />
         <TB onClick={() => exec("bold")} title="Bold"><b>B</b></TB>
         <TB onClick={() => exec("italic")} title="Italic"><i>I</i></TB>
         <TB onClick={() => exec("strikeThrough")} title="Strikethrough"><s>S</s></TB>
+        <TB onClick={() => wrapInline("code")} title="Inline code"><span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{"</>"}</span></TB>
+        <TB onClick={applyHighlight} title="Highlight"><span style={{ background: "var(--yellow)", color: "var(--ink)", padding: "0 4px", fontWeight: 700 }}>A</span></TB>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "color" ? null : "color")} title="Text color"><span style={{ borderBottom: "3px solid var(--reject)", fontWeight: 700 }}>A</span> ▾</TB>
+          {fmtMenu === "color" && (
+            <div style={{ ...popStyle, width: 168 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Text color</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {["#b23a26", "#2b5f8a", "#1f6f4a", "#9a6a12", "#e3ddcc"].map(c => (
+                  <button key={c} onMouseDown={e => e.preventDefault()} onClick={() => applyColor(c)} title={c}
+                    style={{ width: 26, height: 26, background: c, border: "1.5px solid var(--ink)", cursor: "pointer" }} />
+                ))}
+              </div>
+              <button onMouseDown={e => e.preventDefault()} onClick={() => { exec("removeFormat"); setFmtMenu(null); }} className="np-mono" style={{ marginTop: 8, width: "100%", border: "1px dashed var(--rule-strong)", background: "transparent", fontSize: 10.5, padding: "5px", cursor: "pointer" }}>clear color &amp; marks</button>
+            </div>
+          )}
+        </div>
+        <Sep />
         <TB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote">“”</TB>
         <TB onClick={() => exec("insertUnorderedList")} title="Bulleted list">•</TB>
+        <TB onClick={() => exec("insertOrderedList")} title="Numbered list">1.</TB>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "align" ? null : "align")} title="Alignment">≡ ▾</TB>
+          {fmtMenu === "align" && (
+            <div style={{ ...popStyle, width: 150 }}>
+              {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"]].map(([cmd, label]) => (
+                <button key={cmd} onMouseDown={e => e.preventDefault()} onClick={() => { exec(cmd); setFmtMenu(null); }} style={popItem}>{label}</button>
+              ))}
+            </div>
+          )}
+        </div>
         <TB onClick={() => exec("insertHorizontalRule")} title="Divider">—</TB>
-        <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />
+        <Sep />
         <TB onClick={insertImage} title="Inline image"><I.archive style={{ fontSize: 14, verticalAlign: "-2px" }} /> Image</TB>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed video, audio or a link card">▶ Embed</TB>
+          {fmtMenu === "embed" && (
+            <div style={{ ...popStyle, width: 280 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Embed media</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input autoFocus value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && insertEmbed()} placeholder="YouTube, Vimeo, .mp3, .mp4, URL…" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 11.5, outline: "none" }} />
+                <button className="btn btn-sm btn-primary" onClick={insertEmbed}>Add</button>
+              </div>
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>video &amp; audio play in the draft; the published .md keeps the permalink</div>
+            </div>
+          )}
+        </div>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "more" ? null : "more")} title="More blocks">⋯ More ▾</TB>
+          {fmtMenu === "more" && (
+            <div style={{ ...popStyle, left: "auto", right: 0, width: 190 }}>
+              {[
+                ["{ }", "Code block", () => { exec("formatBlock", "<pre>"); setFmtMenu(null); }],
+                ["—", "Divider", () => { exec("insertHorizontalRule"); setFmtMenu(null); }],
+                ["*", "Footnote", insertFootnote],
+                ["❝", "Poetry", insertVerse],
+                ["◳", "Poll", insertPoll]
+              ].map(([g, label, fn]) => (
+                <button key={label} onMouseDown={e => e.preventDefault()} onClick={fn} style={popItem}>
+                  <span className="np-mono" style={{ width: 22, textAlign: "center", flex: "0 0 auto" }}>{g}</span> {label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <span style={{ flex: 1 }} />
         <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source span</span>
       </div>
@@ -583,6 +699,7 @@ function htmlToMarkdown(html) {
   const lines = [];
   const footnotes = {};
   root.querySelectorAll("sup.md-cite").forEach(sup => {
+    if (sup.hasAttribute("data-fn")) return; // manual footnote — its definition is typed in the doc
     const key = sup.getAttribute("data-cite"); if (!key) return;
     const rec = window.NPJ.SOURCES[key] || {};
     footnotes[key] = rec.archive_url || rec.original_url || rec.title || key;
@@ -598,7 +715,20 @@ function htmlToMarkdown(html) {
     else if (tag === "ul") { node.querySelectorAll(":scope > li").forEach(li => lines.push("- " + inline(li).trim())); lines.push(""); }
     else if (tag === "ol") { Array.from(node.querySelectorAll(":scope > li")).forEach((li, i) => lines.push((i + 1) + ". " + inline(li).trim())); lines.push(""); }
     else if (tag === "hr") lines.push("---", "");
-    else if (tag === "figure") { const cap = node.querySelector("figcaption"); if (cap && cap.textContent.trim()) lines.push("*" + cap.textContent.trim() + "*", ""); }
+    else if (tag === "pre") {
+      if (node.classList.contains("verse")) { String(node.innerText || "").replace(/\n+$/, "").split("\n").forEach(l => lines.push(l.trimEnd() + "  ")); lines.push(""); }
+      else lines.push("```", String(node.innerText || "").replace(/\n+$/, ""), "```", "");
+    }
+    else if (node.classList && node.classList.contains("cmp-widget") && node.getAttribute("data-widget") === "poll") {
+      const qEl = node.querySelector(".cmp-widget-b strong");
+      lines.push("> **Poll:** " + (qEl ? qEl.textContent.trim() : ""));
+      node.querySelectorAll(".cmp-widget-b span").forEach(s => { const t = s.textContent.trim(); if (t) lines.push("> - " + t); });
+      lines.push("");
+    }
+    else if (tag === "figure") {
+      const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
+      const cap = node.querySelector("figcaption"); if (cap && cap.textContent.trim()) lines.push("*" + cap.textContent.trim() + "*", "");
+    }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });
   let md = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";

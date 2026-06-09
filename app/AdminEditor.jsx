@@ -34,7 +34,10 @@ function AdminEditor() {
   // admin signs in, so an early return placed before some of the hooks changes
   // the hook count between renders and React throws ("rendered more hooks than
   // during the previous render"). Keeping the order stable fixes that crash.
-  if (!isAdmin) return null;
+  // Admin-only, belt and braces: the launcher needs BOTH the layout role AND a
+  // live verified Matrix session resolving to admin — never a cached flag alone.
+  const liveSession = window.MatrixAuth && window.MatrixAuth.current && window.MatrixAuth.current();
+  if (!isAdmin || !liveSession || window.roleOf(layout, liveSession.user_id) !== "admin") return null;
 
   const patch = (next) => setLayout({ ...layout, ...next });
   const setSections = (sections) => patch({ sections });

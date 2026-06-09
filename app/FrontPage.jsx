@@ -34,6 +34,11 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
         <span className="np-mono" style={{ fontSize: 11, opacity: .82, whiteSpace: "nowrap" }}>People's Journalism · community newsroom</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 18, textTransform: "uppercase", letterSpacing: ".08em", whiteSpace: "nowrap", flexWrap: "wrap", justifyContent: "flex-end" }}>
           {utility.map((u, i) => <button key={i} onClick={() => navFor(u.nav)()} style={navBtn}>{u.label}</button>)}
+          {(window.__nav && window.__nav.user) && (
+            <button onClick={() => window.__nav.docs && window.__nav.docs()} style={navBtn}>
+              <I.doc style={{ fontSize: 13 }} /> Documents
+            </button>
+          )}
           <button onClick={() => window.__nav && window.__nav.account()} style={navBtn}>{(window.__nav && window.__nav.user) ? window.__nav.user.split(":")[0].replace(/^@/, "") : "Sign in"}</button>
           <button onClick={onNewsroom} style={{ ...navBtn, color: "var(--yellow)" }}>
             <I.lock style={{ fontSize: 13 }} /> Newsroom
@@ -107,7 +112,7 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
       <div style={{ background: "var(--ink)", color: "var(--paper)" }}>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", gap: 26,
           alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 13.5 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="claim-marker" style={{ verticalAlign: "baseline" }}>1</span> Hover any claim to audit its archived source.</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="ground-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
           <span style={{ opacity: .4 }}>/</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.eye style={{ fontSize: 15 }} /> Switch between Clean Read and Audit Mode.</span>
           <span style={{ opacity: .4 }}>/</span>
