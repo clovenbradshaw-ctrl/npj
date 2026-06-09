@@ -23,10 +23,12 @@ function useClaimModel() {
 
 /* ---- floating source hover card ---- */
 function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
+  // Hooks first, before any early return, so the hook order is stable whether
+  // or not a claim is being hovered (data toggles null↔set on hover).
+  const [tab, setTab] = useState(0);
+  React.useEffect(() => setTab(0), [data && data.claim && data.claim.id]);
   if (!data) return null;
   const { claim, x, y, srcKeys } = data;
-  const [tab, setTab] = useState(0);
-  React.useEffect(() => setTab(0), [claim && claim.id]);
   const vw = window.innerWidth, vh = window.innerHeight;
   const w = 340;
   let left = Math.min(Math.max(12, x), vw - w - 12);

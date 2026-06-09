@@ -26,7 +26,14 @@ function AdminEditor() {
   const [cfg, setCfg] = useState(loadPublishCfg);
   const [pub, setPub] = useState({ state: "idle", msg: "" }); // idle | busy | ok | err
   const [showCfg, setShowCfg] = useState(false);
+  const [newMember, setNewMember] = useState("");
+  const [newRole, setNewRole] = useState("editor");
+  const [expandCol, setExpandCol] = useState(null);
 
+  // Every hook stays ABOVE this guard. isAdmin flips false→true the moment the
+  // admin signs in, so an early return placed before some of the hooks changes
+  // the hook count between renders and React throws ("rendered more hooks than
+  // during the previous render"). Keeping the order stable fixes that crash.
   if (!isAdmin) return null;
 
   const patch = (next) => setLayout({ ...layout, ...next });
@@ -35,9 +42,6 @@ function AdminEditor() {
   const setUtility = (utility) => patch({ utility });
   const setRoles = (roles) => patch({ roles });
   const setBrand = (brand) => patch({ brand: { ...(layout.brand || {}), ...brand } });
-  const [newMember, setNewMember] = useState("");
-  const [newRole, setNewRole] = useState("editor");
-  const [expandCol, setExpandCol] = useState(null);
   const addRole = () => {
     const id = window.MatrixAuth.parseMxid(newMember);
     if (!id) { setPub({ state: "err", msg: "Contributor needs a full Matrix ID (@name:server)" }); return; }
