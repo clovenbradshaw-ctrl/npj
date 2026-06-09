@@ -126,5 +126,21 @@
 
   function discard(id) { dropLocal(id); clearTimeout(timers[id]); }
 
-  window.NpjDrafts = { save, flush, restore, list, loadLocal, discard, onStatus, ACCOUNT_TYPE };
+  // Delete a draft from BOTH layers (used by the document explorer). Best-effort
+  // on the remote side: a homeserver hiccup leaves only the local copy gone.
+  async function remove(id) {
+    discard(id);
+    if (!signedIn()) return false;
+    try {
+      const store = await remoteStore();
+      if (store && store.drafts && store.drafts[id]) {
+        delete store.drafts[id];
+        store.updated = nowIso();
+        await window.MatrixAuth.setAccountData(ACCOUNT_TYPE, store);
+      }
+      return true;
+    } catch (e) { return false; }
+  }
+
+  window.NpjDrafts = { save, flush, restore, list, loadLocal, discard, remove, onStatus, ACCOUNT_TYPE };
 })();

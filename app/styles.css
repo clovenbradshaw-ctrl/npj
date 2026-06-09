@@ -96,6 +96,15 @@ a { color: inherit; }
 }
 .read-clean .claim-marker { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
 
+/* the ground glyph — a swatch of the claim underline, used in legends to mean
+   "this mark under text is a grounded claim" (e.g. the front-page manifesto strip) */
+.ground-glyph {
+  display: inline-block;
+  width: 17px;
+  height: 9px;
+  border-bottom: 3px dashed var(--yellow);
+}
+
 /* claim with open suggestions gets a small flag */
 .claim[data-sugg="1"]::after {
   content: "";
@@ -240,6 +249,16 @@ a { color: inherit; }
 .md-preview ol { margin: 0 0 13px; padding-left: 22px; }
 .md-preview strong { font-weight: 700; }
 .md-preview:focus { outline: none; }
+
+/* poetry / verse block — serif italic, line breaks preserved */
+.md-preview pre.verse { background: transparent; font-family: var(--serif); font-style: italic; font-size: 16.5px; line-height: 1.7; padding: 4px 0 4px 18px; border-left: 3px solid var(--yellow); white-space: pre-wrap; }
+
+/* composer widgets dropped into the dark newsroom editor */
+.md-preview .cmp-widget { border-color: rgba(255,255,255,.3); background: rgba(255,255,255,.04); margin: 0 0 13px; }
+.md-preview .cmp-widget-h .np-mono { color: var(--yellow); }
+.md-preview .cmp-widget-b span { color: #b3ad9c; }
+.md-preview .cmp-widget-f { color: #8c8676; }
+.md-preview .cmp-tag { color: #b3ad9c; border-color: rgba(255,255,255,.25); }
 
 /* ============================================================
    Responsive layer

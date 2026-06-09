@@ -3,11 +3,32 @@
 > **Auth is the Matrix token now.** The live publish webhook
 > (`POST https://n8n.intelechia.com/webhook/site/publish-npj`) takes
 > `Authorization: Bearer <Matrix access token>`, re-checks it with `whoami` on
-> hyphae.social, and only commits if `user_id` is the founding admin. No separate
-> publish secret. Body: `{ filename, mode, contentRaw, message }`. It serves
-> articles (`<slug>.md`), the site layout + roles (`site/layout.json`, via
-> `npj-layout.client.js`), and `chain_head.json`. Permissions also mirror to a
-> Matrix control-room state event (`press.npj.permissions`) only admins can write.
+> hyphae.social, and authorizes against the roles committed in
+> `site/layout.json`. No separate publish secret. Body:
+> `{ filename, mode, contentRaw, message }`. It serves articles (`<slug>.md`),
+> the site layout + roles (`site/layout.json`, via `npj-layout.client.js`), and
+> `chain_head.json`. Permissions also mirror to a Matrix control-room state
+> event (`press.npj.permissions`) only admins can write.
+
+> ⚠️ **Re-import `npj-publish.n8n.json` after pulling this version.** The
+> earlier export still gated the publish webhook on a `body.token ===
+> CHANGE_ME_SECRET` check — but the app sends the Matrix token in the
+> `Authorization` header and no `token` field, so every layout/article publish
+> died with a 401. The workflow now actually implements the documented auth:
+>
+> ```
+> Publish Webhook → Whoami (hyphae.social) → Fetch Roles (raw site/layout.json)
+>                 → Authorize → Authorized? → GH Get File → … → GH Update/Create
+> ```
+>
+> Per-file rules enforced by the `Authorize` node:
+> - `site/layout.json` (layout + roles) → **admin** only
+> - everything else (articles, …) → **admin or editor**, per the committed roles
+> - nothing committed yet (bootstrap) → only the founding admin passes
+>
+> After importing: re-bind the GitHub OAuth2 credential on the `GH *` nodes and
+> activate the workflow. The static secret now only guards the separate
+> chain-head webhook.
 
 > **n8n is publish-only now.** No app data is stored in n8n. When a piece is
 > published it is committed to **GitHub** and frozen to **archive.org**; the
@@ -16,12 +37,12 @@
 > (`npj-api.n8n.json` + Data Table) is therefore optional/deprecated — keep it
 > only if you want server-side suggestion storage instead of GitHub JSONL.
 
-n8n workflow (`npj-publish.n8n.json`) — **your original, unchanged.** Two
-webhooks that commit to `github.com/clovenbradshaw-ctrl/npj` (main). It commits
-whatever `contentRaw` it receives; everything stays plaintext and auditable.
+n8n workflow (`npj-publish.n8n.json`) — two webhooks that commit to
+`github.com/clovenbradshaw-ctrl/npj` (main). It commits whatever `contentRaw`
+it receives; everything stays plaintext and auditable.
 
 ```
-Publish Webhook → Auth Check → GH Get File → Build Content → Exists? → GH Update / GH Create → OK
+Publish Webhook → Whoami → Fetch Roles → Authorize → Authorized? → GH Get File → Build Content → Exists? → GH Update / GH Create → OK
 ```
 
 ## Optional: EO-notation formatting (client-side)
@@ -48,8 +69,9 @@ Skip it entirely and POST `contentRaw` directly if you'd rather keep raw markdow
 
 | What | Where |
 |---|---|
-| `CHANGE_ME_SECRET` | `Auth Check` / `Auth Check1` rightValue — the publish token |
 | GitHub OAuth2 cred | the `GH *` nodes — write access to `clovenbradshaw-ctrl/npj` |
+| `CHANGE_ME_SECRET` | `Auth Check1` rightValue — the **chain-head** scraper token only; the publish path needs no secret (Matrix whoami) |
+| Founding admin mxid | the `Authorize` code node (`ADMIN`) — must match `MatrixAuth.ADMIN_MXID` |
 
 ## Suggestion API (`npj-api.n8n.json`)
 

@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>People's Journalism</title>
 
+<link rel="icon" type="image/png" href="https://storage.googleapis.com/intelechia-content/NPJ%20LOGO%20(2).png" />
+<link rel="apple-touch-icon" href="https://storage.googleapis.com/intelechia-content/NPJ%20LOGO%20(2).png" />
 <link rel="stylesheet" href="app/styles.css" />
 <!-- all fonts via link (keeps CSS captureable / offline-friendly) -->
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -54,6 +56,7 @@
 <script type="text/babel" src="app/Submit.jsx"></script>
 <script type="text/babel" src="app/Composer.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
+<script type="text/babel" src="app/Documents.jsx"></script>
 <script type="text/babel" src="app/Clippy.jsx"></script>
 <script type="text/babel" src="app/AdminEditor.jsx"></script>
 </head>
@@ -88,7 +91,9 @@ function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
 
   // ---- layout config + Matrix-backed permissions ----
-  const [layout, setLayoutState] = useState(() => window.loadLayout());
+  // boot() below resolves the committed layout BEFORE the first render, so the
+  // site paints with the admin's published settings — never default-then-swap.
+  const [layout, setLayoutState] = useState(() => window.__bootLayout || window.loadLayout());
   const setLayout = useCallback((next) => {
     setLayoutState(prev => {
       const n = window.normalizeLayout(typeof next === "function" ? next(prev) : next);
@@ -101,8 +106,10 @@ function App() {
   const isAdmin = role === "admin";
   const isEditorRole = role === "admin" || role === "editor";
 
-  // overlay the committed layout (GitHub) so visitors see the published chrome
+  // refresh from the committed layout (GitHub) — skipped when boot() already
+  // seeded it this session, so the chrome never visibly swaps after first paint
   useEffect(() => {
+    if (window.__bootLayout) return;
     let alive = true;
     (async () => {
       try { const committed = await window.NpjLayout.loadCommittedLayout(); if (alive && committed) setLayout(committed); } catch (e) {}
@@ -124,7 +131,8 @@ function App() {
 
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
   const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
-  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore"].find(r => hp.includes(r)) || "home");
+  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
+  const [draftId, setDraftId] = useState("working");
   const [readMode, setReadMode] = useState(hp.includes("audit") ? "audit" : "clean");
   const [direction, setDirection] = useState(initDir);
   const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
@@ -192,6 +200,8 @@ function App() {
   const goStandards = () => { setRoute("standards"); window.scrollTo(0, 0); };
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
+  const goDocs = () => { setRoute("docs"); window.scrollTo(0, 0); };
+  const openDoc = (id) => { setDraftId(id || "working"); setRoute("newsroom"); window.scrollTo(0, 0); };
 
   const signIn = (sess) => {
     setSession(sess);
@@ -201,7 +211,7 @@ function App() {
   };
   const signOut = async () => { try { await window.MatrixAuth.logout(); } catch (e) {} setSession(null); };
 
-  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore,
+  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
   return (
@@ -219,11 +229,12 @@ function App() {
           me={me} onHome={goHome} onNewsroom={goNewsroom} />
       )}
       {route === "newsroom" && (isEditorRole
-        ? <Newsroom session={session} draftId="working" onExit={goHome} onPublished={goArticle} />
+        ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={goArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
+      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />
@@ -254,7 +265,33 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+// Boot: paint with the admin's committed settings, never default-then-swap.
+// A returning visitor renders instantly from the local cache (last committed
+// layout); a first visit blocks briefly on site/layout.json (3.5s cap) so the
+// very first paint already carries the published chrome + brand.
+(async function boot() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem("npj_layout_v1") || "null"); } catch (e) {}
+  if (!cached && window.NpjLayout) {
+    try {
+      const committed = await Promise.race([
+        window.NpjLayout.loadCommittedLayout(),
+        new Promise(res => setTimeout(() => res(null), 3500))
+      ]);
+      if (committed) {
+        window.__bootLayout = window.normalizeLayout(committed);
+        window.saveLayoutLocal(window.__bootLayout);
+      }
+    } catch (e) {}
+  }
+  // brand vars before the first frame — effects re-apply these identically
+  const b = ((window.__bootLayout || window.normalizeLayout(cached)).brand) || {};
+  const r = document.documentElement.style;
+  if (b.accent) { r.setProperty("--yellow", b.accent); r.setProperty("--yellow-deep", `color-mix(in srgb, ${b.accent} 78%, #000)`); }
+  if (b.headline) r.setProperty("--display", `'${b.headline}', 'Arial Narrow', sans-serif`);
+  if (b.body) r.setProperty("--serif", `'${b.body}', Georgia, serif`);
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+})();
 </script>
 </body>
 </html>
