@@ -5,25 +5,50 @@
 > `Authorization: Bearer <Matrix access token>`, re-checks it with `whoami` on
 > hyphae.social, and authorizes against the roles committed in
 > `site/layout.json`. No separate publish secret. Body:
-> `{ filename, mode, contentRaw, message }`. It serves articles (`<slug>.md`),
-> the site layout + roles (`site/layout.json`, via `npj-layout.client.js`), and
-> `chain_head.json`. Permissions also mirror to a Matrix control-room state
-> event (`press.npj.permissions`) only admins can write.
+> `{ filename, mode, contentRaw, message }`. It serves the EO article logs
+> (`articles/<slug>.jsonl`), the site layout + roles (`site/layout.json`, via
+> `npj-layout.client.js`), and `chain_head.json`. Permissions also mirror to a
+> Matrix control-room state event (`press.npj.permissions`) only admins can write.
 
-> ⚠️ **Re-import `npj-publish.n8n.json` after pulling this version.** The
-> earlier export still gated the publish webhook on a `body.token ===
-> CHANGE_ME_SECRET` check — but the app sends the Matrix token in the
-> `Authorization` header and no `token` field, so every layout/article publish
-> died with a 401. The workflow now actually implements the documented auth:
+## Articles are EO event logs (`articles/<slug>.jsonl`)
+
+A published article is **not** a markdown file: it's an append-only JSONL log
+of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
+
+```jsonl
+{"v":"npj/article-eo/1","op":"INS","target":"article/<slug>","ts":"…","actor":"@…",
+ "operand":{"slug","headline","dek","column","tags","authors","assignees","published","body","sources"}}
+{"v":"npj/article-eo/1","op":"REC","target":"article/<slug>","ts":"…","actor":"@…",
+ "note":"why","operand":{ …only the fields that changed… }}
+```
+
+- **Publish** → the Newsroom POSTs `mode:'overwrite'` with the single `INS`
+  genesis line (INS — mint an enduring anchor).
+- **Edit after publish** → the reader's Edit overlay POSTs `mode:'append'` with
+  one `REC` line (REC — restructure the frame). Nothing is rewritten; the file
+  IS the article's complete change history, and the reader folds it into the
+  current text + the version/diff viewer.
+- `operand.assignees` (set at publish, editable by the admin) is the edit
+  allowlist for that article: **admin + assignees** may edit. Future ops (e.g.
+  EVA suggestion deposits) can append to the same log without breaking readers.
+- One-off migration for legacy `.md` articles: `node backend/md-to-eo.mjs <file.md>`.
+
+> ⚠️ **Re-import `npj-publish.n8n.json` after pulling this version** — the live
+> instance must pick up the editor/assignee rules. The flow is:
 >
 > ```
 > Publish Webhook → Whoami (hyphae.social) → Fetch Roles (raw site/layout.json)
->                 → Authorize → Authorized? → GH Get File → … → GH Update/Create
+>                 → Authorize → Authorized? → GH Get File → Build Content
+>                 → Forbidden? → GH Update / GH Create → OK
 > ```
 >
-> Per-file rules enforced by the `Authorize` node:
+> Rules enforced server-side (`Authorize` + `Build Content`):
 > - `site/layout.json` (layout + roles) → **admin** only
-> - everything else (articles, …) → **admin or editor**, per the committed roles
+> - any other file → **admin** only
+> - `articles/<slug>.jsonl` → **admin**, or an **editor** (per the committed
+>   roles) — and a non-admin touching an *existing* log must be in that log's
+>   genesis `assignees` (checked against the fetched file; otherwise **403**).
+>   A brand-new log (fresh publish) just needs the editor role.
 > - nothing committed yet (bootstrap) → only the founding admin passes
 >
 > After importing: re-bind the GitHub OAuth2 credential on the `GH *` nodes and

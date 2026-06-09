@@ -59,10 +59,12 @@ window.NpjPlainText = {
 
 /* ---------- real site URLs ----------
    Where this site actually lives — GitHub Pages, a custom domain, localhost —
-   derived from the page URL, never a hardcoded domain. A published article is
-   the committed markdown file at the site root. */
+   derived from the page URL, never a hardcoded domain. The share link opens the
+   formatted reader; the raw URL is the committed EO event log itself
+   (articles/<slug>.jsonl) — the durable, archivable artifact. */
 function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
-function npjArticleUrl(slug) { return npjSiteBase() + slug + ".md"; }
+function npjArticleUrl(slug) { return npjSiteBase() + "#article;read=" + encodeURIComponent(slug); }
+function npjArticleRawUrl(slug) { return npjSiteBase() + "articles/" + slug + ".jsonl"; }
 
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00");
@@ -210,4 +212,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl });

@@ -16,7 +16,7 @@
         128
       ],
       "webhookId": "site-publish",
-      "notes": "POST /webhook/site/publish-npj\nAuthorization: Bearer <Matrix access token>\nBody: {filename, mode: 'append'|'overwrite', contentRaw, message, compress?}\nCreates or updates the file in clovenbradshaw-ctrl/npj (main).\nAuthorized via Matrix whoami + the roles committed in site/layout.json — see Whoami / Fetch Roles / Authorize."
+      "notes": "POST /webhook/site/publish-npj\nAuthorization: Bearer <Matrix access token>\nBody: {filename, mode: 'append'|'overwrite', contentRaw, message, compress?}\nCreates or updates the file in clovenbradshaw-ctrl/npj (main).\n\nAuthorization (Whoami -> Fetch Roles -> Authorize -> Build Content):\n  admin  -> any file, any mode (site/layout.json is admin-only).\n  editor -> articles/<slug>.jsonl ONLY (the EO article logs):\n            create a new log, or append/rewrite an existing one ONLY if\n            they are listed in the log's genesis assignees (checked in\n            Build Content against the fetched file). 403 otherwise.\n  anyone else -> 401.\nArticles are append-only EO event logs: publish writes the INS genesis\nline; every edit POSTs mode:'append' with one REC line."
     },
     {
       "parameters": {
@@ -84,7 +84,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Authorize — Matrix identity → role → decision.\n// Identity comes ONLY from the homeserver's whoami answer; roles come from the\n// last layout the admin committed (site/layout.json). Bootstrap: before any\n// layout exists, only the founding admin passes.\n//   site/layout.json (layout + roles)  → admin only\n//   everything else (articles, chain)  → admin or editor\nconst ADMIN = '@collective_boundary730383:hyphae.social';\n\nconst hook = $('Publish Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\n\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id || null;\n\nlet roles = {};\ntry {\n  const raw = $('Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = parsed && (parsed.layout || parsed);\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) { /* no committed layout yet → founder only */ }\n\nconst role = userId === ADMIN ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst isLayout = filename === 'site/layout.json';\nconst authorized = !!userId && !!filename && (isLayout ? role === 'admin' : (role === 'admin' || role === 'editor'));\n\nreturn [{ json: { authorized, user_id: userId, role, filename } }];"
+        "jsCode": "// Authorize — Matrix identity -> role -> decision.\n// Identity comes ONLY from the homeserver's whoami answer; roles come from the\n// last layout the admin committed (site/layout.json). Bootstrap: before any\n// layout exists, only the founding admin passes.\n//   site/layout.json (layout + roles)        -> admin only\n//   articles/<slug>.jsonl (EO article logs)  -> admin or editor\n//     (editors are further checked against the log's genesis assignees in\n//      Build Content, where the existing file is at hand)\n//   everything else (site files, chain)      -> admin only\nconst ADMIN = '@collective_boundary730383:hyphae.social';\nconst ARTICLE_RE = /^articles\\/[a-z0-9][a-z0-9-]*\\.jsonl$/;\n\nconst hook = $('Publish Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst mode = body && body.mode ? String(body.mode) : 'overwrite';\n\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id || null;\n\nlet roles = {};\ntry {\n  const raw = $('Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = parsed && (parsed.layout || parsed);\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) { /* no committed layout yet -> founder only */ }\n\nconst role = userId === ADMIN ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst isArticle = ARTICLE_RE.test(filename);\nconst modeOk = mode === 'append' || mode === 'overwrite';\nconst authorized = !!userId && !!filename && modeOk &&\n  (role === 'admin' || (role === 'editor' && isArticle));\n\nreturn [{ json: { authorized, user_id: userId, role, filename, mode, isArticle } }];"
       },
       "id": "8e7b9d54-2c11-4f3e-9f6a-aa8d4b663303",
       "name": "Authorize",
@@ -184,7 +184,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Build Content — ORIGINAL (unchanged n8n node). Builds file content + captures\n// SHA, then routes to GH Update/Create. Encryption + EO formatting happen\n// CLIENT-SIDE before the POST (see seal-operand.client.js); n8n just commits\n// whatever `contentRaw` it receives.\nconst hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\n\nconst filename   = parsed.filename;\nconst mode       = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message    = parsed.message || `update ${filename}`;\nconst compress   = !!parsed.compress;\n\nif (!filename) {\n  throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\n}\n\n// GH Get File returns { content (base64), sha } on success, or an error\n// object on 404. continueOnFail is on, so we get both shapes here.\n// IMPORTANT: sha must be '' (not null) when absent — n8n's notEmpty check\n// coerces null to the string \"null\", which misroutes new files to Update\n// and GitHub 404s the edit.\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\nconst existingB64 = ghResp.content || '';\n\nlet existingText = '';\nif (existingB64) {\n  try {\n    existingText = Buffer.from(existingB64, 'base64').toString('utf8');\n  } catch (e) {\n    existingText = '';\n  }\n}\n\n// Build final text\nlet finalText;\nif (mode === 'append') {\n  const prev = existingText ? (existingText.endsWith('\\n') ? existingText : existingText + '\\n') : '';\n  const next = contentRaw.endsWith('\\n') ? contentRaw : contentRaw + '\\n';\n  finalText = prev + next;\n} else {\n  finalText = contentRaw;\n}\n\n// Optional gzip\nlet b64;\nif (compress) {\n  const zlib = require('zlib');\n  b64 = zlib.gzipSync(Buffer.from(finalText, 'utf8')).toString('base64');\n} else {\n  b64 = Buffer.from(finalText, 'utf8').toString('base64');\n}\n\nreturn [{ json: {\n  filename,\n  message,\n  contentBase64: b64,\n  sha: existingSha,\n  bytes: finalText.length,\n}}];"
+        "jsCode": "// Build Content — builds the file content + captures SHA, then routes to\n// GH Update/Create. ALSO the per-article permission gate for editors: the\n// existing file was just fetched, so this is the one place the log's genesis\n// assignees can be checked against the verified requester.\nconst hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\n\nconst filename   = parsed.filename;\nconst mode       = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message    = parsed.message || `update ${filename}`;\nconst compress   = !!parsed.compress;\n\nif (!filename) {\n  throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\n}\n\n// GH Get File returns { content (base64), sha } on success, or an error\n// object on 404. continueOnFail is on, so we get both shapes here.\n// IMPORTANT: sha must be '' (not null) when absent — n8n's notEmpty check\n// coerces null to the string \"null\", which misroutes new files to Update\n// and GitHub 404s the edit.\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\nconst existingB64 = ghResp.content || '';\n\nlet existingText = '';\nif (existingB64) {\n  try {\n    existingText = Buffer.from(existingB64, 'base64').toString('utf8');\n  } catch (e) {\n    existingText = '';\n  }\n}\n\n// ---- editor gate (admins skip this) ----------------------------------\n// Editors only reach this node for articles/<slug>.jsonl (see Authorize).\n// A NEW log (no existing file) is a fresh publish — allowed. Touching an\n// EXISTING log (append an edit, or re-publish over it) requires being in\n// the genesis line's assignees. The genesis is line 1 of the log.\nconst auth = $('Authorize').first().json || {};\nif (auth.role !== 'admin' && existingText) {\n  let assignees = [];\n  try {\n    const genesis = JSON.parse(existingText.split('\\n').find(l => l.trim()) || '{}');\n    const op = genesis.operand || {};\n    assignees = Array.isArray(op.assignees) ? op.assignees : [];\n  } catch (e) { /* unreadable genesis -> nobody but the admin */ }\n  if (!assignees.includes(auth.user_id)) {\n    return [{ json: { __forbidden: true, user_id: auth.user_id, filename,\n      error: 'not an assignee on this article' } }];\n  }\n}\n\n// Build final text\nlet finalText;\nif (mode === 'append') {\n  const prev = existingText ? (existingText.endsWith('\\n') ? existingText : existingText + '\\n') : '';\n  const next = contentRaw.endsWith('\\n') ? contentRaw : contentRaw + '\\n';\n  finalText = prev + next;\n} else {\n  finalText = contentRaw;\n}\n\n// Optional gzip\nlet b64;\nif (compress) {\n  const zlib = require('zlib');\n  b64 = zlib.gzipSync(Buffer.from(finalText, 'utf8')).toString('base64');\n} else {\n  b64 = Buffer.from(finalText, 'utf8').toString('base64');\n}\n\nreturn [{ json: {\n  __forbidden: false,\n  filename,\n  message,\n  contentBase64: b64,\n  sha: existingSha,\n  bytes: finalText.length,\n}}];"
       },
       "id": "258c0552-ac2a-4720-b3f5-568f445a2855",
       "name": "Build Content",
@@ -219,7 +219,7 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
-        784,
+        1008,
         128
       ]
     },
@@ -246,7 +246,7 @@
       "type": "n8n-nodes-base.github",
       "typeVersion": 1,
       "position": [
-        1008,
+        1232,
         0
       ],
       "webhookId": "159b2129-b74d-4f5d-b274-ccd1a6c54e1d",
@@ -279,7 +279,7 @@
       "type": "n8n-nodes-base.github",
       "typeVersion": 1,
       "position": [
-        1008,
+        1232,
         240
       ],
       "webhookId": "e37a3b28-9124-4f6f-b27f-05d65b604ee1",
@@ -311,7 +311,7 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        1232,
+        1456,
         128
       ]
     },
@@ -605,6 +605,60 @@
         1536,
         960
       ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.__forbidden }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "9f2c41aa-7d31-4b88-9c4e-2e61f50aa901",
+      "name": "Forbidden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error || 'forbidden', user: $json.user_id || null, filename: $json.filename || null }) }}",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b7d8e2f0-58c3-49a1-8a55-3d9adcb1c402",
+      "name": "Respond Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        896,
+        368
+      ]
     }
   ],
   "connections": {
@@ -685,7 +739,7 @@
       "main": [
         [
           {
-            "node": "Exists?",
+            "node": "Forbidden?",
             "type": "main",
             "index": 0
           }
@@ -835,6 +889,24 @@
         [
           {
             "node": "OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forbidden?": {
+      "main": [
+        [
+          {
+            "node": "Respond Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Exists?",
             "type": "main",
             "index": 0
           }

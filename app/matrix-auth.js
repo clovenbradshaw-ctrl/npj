@@ -277,6 +277,19 @@
     }
     return rooms;
   }
+  // Who is in a project room — joined members AND pending invitees, straight
+  // from the homeserver. The document explorer shows this per project so it's
+  // always visible who an invite actually went to.
+  async function roomMembers(roomId) {
+    if (!session) return [];
+    try {
+      const out = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/members?not_membership=leave", { token: session.access_token });
+      return ((out && out.chunk) || [])
+        .map(ev => ({ mxid: ev.state_key, membership: (ev.content && ev.content.membership) || "join" }))
+        .filter(m => m.mxid && (m.membership === "join" || m.membership === "invite"));
+    } catch (e) { return []; }
+  }
+
   // Per-account durable index (server-side, private, survives wipe).
   const DRAFTS_TYPE = "press.npj.drafts";
   async function getAccountData(type) {
@@ -327,6 +340,6 @@
     isSignedIn, isAdmin, resolveRoom, invite, tagRoom, ensureControlRoom, readPermissions, writePermissions,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
-    joinedRooms, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
+    joinedRooms, roomMembers, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
   };
 })();

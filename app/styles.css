@@ -96,13 +96,25 @@ a { color: inherit; }
 }
 .read-clean .claim-marker { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
 
-/* the ground glyph — a swatch of the claim underline, used in legends to mean
-   "this mark under text is a grounded claim" (e.g. the front-page manifesto strip) */
+/* the grounded glyph (⊥) — a claim standing on its source: a stem planted on
+   solid ground. Used in legends (e.g. the front-page manifesto strip) to mean
+   "this mark means the text above it is grounded in an archived source". */
 .ground-glyph {
+  position: relative;
   display: inline-block;
-  width: 17px;
-  height: 9px;
-  border-bottom: 3px dashed var(--yellow);
+  width: 15px;
+  height: 13px;
+  border-bottom: 3px solid var(--yellow);
+}
+.ground-glyph::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: 3px;
+  height: 10px;
+  background: var(--yellow);
 }
 
 /* claim with open suggestions gets a small flag */
