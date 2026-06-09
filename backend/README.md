@@ -79,7 +79,7 @@ new → `DEF`, republish → `REC`. Nothing encrypted; the n8n side doesn't chan
 ```js
 import { publish } from './eo-event.client.js';
 await publish({
-  endpoint: 'https://YOUR-N8N/webhook/site/publish',
+  endpoint: 'https://YOUR-N8N/webhook/site/publish-npj',
   token:    '…',
   filename: 'the-37013-squeeze.md',
   content:  '# The 37013 Squeeze\n…',

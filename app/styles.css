@@ -127,6 +127,27 @@ a { color: inherit; }
   border-radius: 50%;
 }
 
+/* every span a source backs lights up when you hover that source in the
+   ledger / evidence panel — you SEE the precise passages it grounds */
+.claim[data-active="1"] {
+  background: rgba(255,236,1,0.7) !important;
+  border-bottom: 1.5px solid var(--ink);
+}
+/* clicking one of a source's cited passages scrolls to it and flashes it */
+@keyframes claimflash {
+  0%, 30% { background: var(--yellow); box-shadow: 0 0 0 4px var(--yellow); }
+  100% { background: rgba(255,236,1,0); box-shadow: 0 0 0 4px rgba(255,236,1,0); }
+}
+.claim-flash { animation: claimflash 1.7s ease-out; border-radius: 2px; }
+/* a clickable passage snippet (source → its spans in the article) */
+.cite-span {
+  display: flex; gap: 7px; align-items: baseline; width: 100%; text-align: left;
+  background: transparent; border: 0; border-top: 1px solid var(--rule);
+  padding: 6px 8px; cursor: pointer; font: inherit;
+}
+.cite-span:hover { background: var(--paper-2); }
+.cite-span[data-current="1"] { background: rgba(255,236,1,0.35); }
+
 /* ---- source hover card ---- */
 .srccard {
   position: fixed;
@@ -330,6 +351,10 @@ a { color: inherit; }
 .newsroom.nr-light .md-cite { color: var(--ink); background: rgba(255,236,1,.55); border-color: rgba(22,20,13,.4); }
 .md-preview .claim-src { background: rgba(255,236,1,.2); border-bottom: 1.5px solid var(--yellow); padding: 0 1px; }
 .newsroom.nr-light .md-preview .claim-src { background: rgba(255,236,1,.4); border-bottom-color: var(--yellow-deep); }
+/* "armed" — a source is picked and waiting for you to select the words it
+   backs; the page invites a text selection */
+.md-preview.nr-arming { cursor: text; box-shadow: inset 0 0 0 2px var(--yellow); }
+.md-preview.nr-arming ::selection { background: rgba(255,236,1,.6); color: var(--ink); }
 .md-preview pre { background: var(--nr-code-bg, rgba(255,255,255,.06)); padding: 10px 13px; font-family: var(--mono); font-size: 13px; line-height: 1.5; overflow-x: auto; margin: 0 0 13px; }
 .md-preview ol { margin: 0 0 13px; padding-left: 22px; }
 .md-preview strong { font-weight: 700; }

@@ -33,8 +33,30 @@ function useClaimModel(A) {
   }, [A]);
 }
 
+/* A source's cited passages, as clickable snippets — click one to scroll to
+   that exact span in the article and flash it. Reused by the hover card, the
+   ledger, the evidence panel and the methods footer. */
+function snippet(text, max = 96) {
+  const t = String(text || "").trim();
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
+}
+function CitedSpanList({ claims, onJump, currentId }) {
+  if (!claims || !claims.length) return null;
+  return (
+    <div>
+      {claims.map(c => (
+        <button key={c.id} className="cite-span" data-current={c.id === currentId ? "1" : "0"}
+          onClick={() => onJump(c.id)} title="Jump to this passage in the article">
+          <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)", flex: "0 0 auto" }}>↳</span>
+          <span style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.3, color: "var(--ink)" }}>“{snippet(c.text)}”</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /* ---- floating source hover card ---- */
-function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
+function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSource, onJump }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
@@ -46,6 +68,8 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
   let left = Math.min(Math.max(12, x), vw - w - 12);
   let top = y + 8;
   const flip = top > vh - 260;
+  // the other passages this same source backs — so you can hop between them
+  const spans = spansForSource ? spansForSource(srcKeys[tab]) : [];
   return (
     <div className="srccard" style={{ left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto" }}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
@@ -59,6 +83,12 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount }) {
         </div>
       )}
       <SourceCard srcKey={srcKeys[tab]} />
+      {spans.length > 1 && (
+        <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: 124, overflowY: "auto" }} className="np-scroll">
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — click to jump</div>
+          <CitedSpanList claims={spans} onJump={onJump} currentId={claim.id} />
+        </div>
+      )}
       <div style={{ display: "flex", borderTop: "1.5px solid var(--ink)" }}>
         <button onClick={() => onSuggest(claim.id)} className="np-cond" style={{ flex: 1, padding: "8px", border: 0, background: "var(--card)",
           fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
@@ -107,6 +137,23 @@ function ArticleRead(props) {
   }, []);
   const cancelLeave = useCallback(() => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
+  // every passage a given source backs (newest model: sourceList carries the
+  // claim ids; claimById carries each span's text) — drives the click-to-jump
+  // lists in the hover card, ledger, evidence panel and methods footer
+  const spansForSource = useCallback((key) => {
+    const e = sourceList.find(s => s.key === key);
+    return e ? e.claims.map(id => claimById[id]).filter(Boolean) : [];
+  }, [sourceList, claimById]);
+  // scroll to a claim span in the body and flash it
+  const jumpToClaim = useCallback((id) => {
+    setHover(null); setActiveSrc(null);
+    const el = document.getElementById("claim-" + id);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("claim-flash"); void el.offsetWidth; el.classList.add("claim-flash");
+    setTimeout(() => el.classList.remove("claim-flash"), 1800);
+  }, []);
+
   const startCompose = (claimId) => { setComposeId(claimId); setShowSugg(true); setHover(null); };
 
   // render tokens for a paragraph: plain strings, style tokens ({t}) and
@@ -127,7 +174,8 @@ function ArticleRead(props) {
     const claim = claimById[t.id];
     if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
     return (
-      <span key={i} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
+      <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
+        data-active={claim.src.includes(activeSrc) ? "1" : "0"}
         onMouseEnter={(e) => enterClaim(e, claim)} onMouseLeave={scheduleLeave}
         onClick={() => { setShowSugg(true); }}>
         {ent ? markEntities(t.c, ent, "c" + i) : t.c}
@@ -235,23 +283,23 @@ function ArticleRead(props) {
         {direction === "split" ? (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 320px", gap: 36, alignItems: "start" }}>
             <div style={{ maxWidth: 680 }}>{Body}</div>
-            <EvidencePanel sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} />
+            <EvidencePanel sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
           </div>
         ) : direction === "ledger" ? (
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 286px", gap: 40, alignItems: "start" }}>
             <div style={{ maxWidth: 680, marginLeft: "auto" }}>{Body}</div>
-            <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} />
+            <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
           </div>
         ) : (
           <div style={{ maxWidth: 680, margin: "0 auto" }}>{Body}</div>
         )}
 
         {/* methods footer */}
-        <MethodsFooter sourceList={sourceList} claimCount={claimList.length} />
+        <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
       </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
-        suggCount={hover ? openByClaim[hover.claim.id] : 0} />
+        suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} />
 
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
         entityData={entityData} active={activeEntity} setActive={setActiveEntity} />
@@ -335,7 +383,7 @@ function Receipt({ claim, onEnter, onLeave, onSuggest, openCount }) {
   );
 }
 
-function Ledger({ sourceList, activeSrc, setActiveSrc }) {
+function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump }) {
   return (
     <aside style={{ position: "sticky", top: 64, borderLeft: "1.5px solid var(--ink)", paddingLeft: 18 }}>
       <div className="np-eyebrow" style={{ borderBottom: "2px solid var(--ink)", paddingBottom: 6, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
@@ -343,42 +391,25 @@ function Ledger({ sourceList, activeSrc, setActiveSrc }) {
       </div>
       <div className="np-scroll" style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto", paddingRight: 4 }}>
         {sourceList.map(({ key, num }) => {
-          const s = srcOf(key); const on = activeSrc === key;
-          return (
-            <a key={key} href={s.archive_url || s.original_url} target="_blank" rel="noopener"
-              onMouseEnter={() => setActiveSrc(key)} onMouseLeave={() => setActiveSrc(null)}
-              style={{ display: "block", textDecoration: "none", padding: "8px 8px", marginBottom: 4,
-                background: on ? "var(--yellow)" : "transparent", borderLeft: "3px solid " + (on ? "var(--ink)" : "transparent") }}>
-              <div style={{ display: "flex", gap: 7 }}>
-                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
-                <div>
-                  <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.08 }}>{s.title}</div>
-                  <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 3 }}>{s.outlet}</div>
-                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 5 }}><SourceTag type={s.type} /></div>
-                </div>
-              </div>
-            </a>
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
-
-function EvidencePanel({ sourceList, activeSrc, setActiveSrc }) {
-  return (
-    <aside style={{ position: "sticky", top: 64 }}>
-      <div className="np-eyebrow" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <I.source style={{ fontSize: 14 }} /> Evidence · {sourceList.length} archived
-      </div>
-      <div className="np-scroll" style={{ maxHeight: "calc(100vh - 150px)", overflowY: "auto", paddingRight: 4 }}>
-        {sourceList.map(({ key, num }) => {
-          const on = activeSrc === key;
+          const s = srcOf(key); const on = activeSrc === key; const spans = spansForSource(key);
+          // hovering the source lights up its exact spans in the body (data-active)
+          // and reveals them here as click-to-jump passages
           return (
             <div key={key} onMouseEnter={() => setActiveSrc(key)} onMouseLeave={() => setActiveSrc(null)}
-              style={{ border: "1.5px solid var(--ink)", marginBottom: 9, transform: on ? "translateX(-4px)" : "none",
-                boxShadow: on ? "5px 5px 0 var(--yellow-deep)" : "3px 3px 0 rgba(22,20,13,.08)", transition: "all .14s", background: "var(--card)" }}>
-              <SourceCard srcKey={key} />
+              style={{ marginBottom: 4, background: on ? "var(--yellow)" : "transparent", borderLeft: "3px solid " + (on ? "var(--ink)" : "transparent") }}>
+              <div style={{ display: "flex", gap: 7, padding: "8px 8px 6px" }}>
+                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.08 }}>{s.title}</div>
+                  <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 3 }}>{s.outlet}</div>
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <SourceTag type={s.type} />
+                    {spans.length > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>· {spans.length} passage{spans.length !== 1 ? "s" : ""}</span>}
+                    <a href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="np-mono" title="Open the archived snapshot" style={{ fontSize: 9.5, color: "var(--verified)", textDecoration: "none" }}>snapshot ↗</a>
+                  </div>
+                </div>
+              </div>
+              {on && spans.length > 0 && <div className="fade-in"><CitedSpanList claims={spans} onJump={onJump} /></div>}
             </div>
           );
         })}
@@ -387,7 +418,35 @@ function EvidencePanel({ sourceList, activeSrc, setActiveSrc }) {
   );
 }
 
-function MethodsFooter({ sourceList, claimCount }) {
+function EvidencePanel({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump }) {
+  return (
+    <aside style={{ position: "sticky", top: 64 }}>
+      <div className="np-eyebrow" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <I.source style={{ fontSize: 14 }} /> Evidence · {sourceList.length} archived
+      </div>
+      <div className="np-scroll" style={{ maxHeight: "calc(100vh - 150px)", overflowY: "auto", paddingRight: 4 }}>
+        {sourceList.map(({ key, num }) => {
+          const on = activeSrc === key; const spans = spansForSource(key);
+          return (
+            <div key={key} onMouseEnter={() => setActiveSrc(key)} onMouseLeave={() => setActiveSrc(null)}
+              style={{ border: "1.5px solid var(--ink)", marginBottom: 9, transform: on ? "translateX(-4px)" : "none",
+                boxShadow: on ? "5px 5px 0 var(--yellow-deep)" : "3px 3px 0 rgba(22,20,13,.08)", transition: "all .14s", background: "var(--card)" }}>
+              <SourceCard srcKey={key} />
+              {on && spans.length > 0 && (
+                <div className="fade-in" style={{ borderTop: "1.5px solid var(--ink)" }}>
+                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Cited in {spans.length} passage{spans.length !== 1 ? "s" : ""} — click to jump</div>
+                  <CitedSpanList claims={spans} onJump={onJump} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
   return (
     <footer style={{ maxWidth: 760, margin: "44px auto 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -398,17 +457,21 @@ function MethodsFooter({ sourceList, claimCount }) {
         Every figure above resolves to an archive.org snapshot taken the day we pulled it. The live URL is secondary and may rot; the snapshot is canonical.
         A broken <span className="np-mono">src:</span> reference fails the build, so this page cannot deploy with a citation that points nowhere.
       </p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", marginTop: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px", marginTop: 10 }}>
         {sourceList.map(({ key, num }) => {
-          const s = srcOf(key);
+          const s = srcOf(key); const spans = spansForSource ? spansForSource(key) : [];
           return (
-            <a key={key} href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="headline-link"
-              style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none", borderBottom: "1px solid var(--rule)" }}>
-              <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
-              <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)" }}>{s.archive_url ? "archived " + (s.retrieved || "") : "live link"} ↗</span>
-              </span>
-            </a>
+            <div key={key} style={{ borderBottom: "1px solid var(--rule)", paddingBottom: 6 }}>
+              <a href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="headline-link"
+                style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none" }}>
+                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
+                <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
+                  <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)" }}>{s.archive_url ? "archived " + (s.retrieved || "") : "live link"} ↗</span>
+                </span>
+              </a>
+              {/* the exact passages this source grounds — click to jump back up */}
+              <CitedSpanList claims={spans} onJump={onJump} />
+            </div>
           );
         })}
       </div>
