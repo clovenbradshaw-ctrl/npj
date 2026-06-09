@@ -1,0 +1,118 @@
+/* NPJ — Submit. Two paths: sign in with a real Matrix account (contributor tools,
+   gated to allowlisted roles) OR email a tip to anyone, no account needed.
+   Identity is verified against the homeserver (whoami); access to the tools is
+   then gated on the layout roles, so randos can't draft until the admin adds them. */
+
+const TIP_EMAIL = "peoplesjournalism@proton.com";
+
+function SubmitPage({ session, onSignIn, onSignOut, onHome, onNewsroom }) {
+  const signedIn = !!session;
+  return (
+    <div className="fade-in">
+      <Masthead route="submit" onHome={onHome} onNewsroom={onNewsroom} />
+      {signedIn
+        ? <Composer user={session.user_id} session={session} onSignOut={onSignOut} />
+        : <div style={{ maxWidth: 760, margin: "0 auto", padding: "52px 22px 80px" }}><AccountGate onSignIn={onSignIn} /></div>}
+    </div>
+  );
+}
+
+function AccountGate({ onSignIn }) {
+  const { layout } = React.useContext(window.LayoutCtx);
+  const [mxid, setMxid] = useState("");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const m = window.MatrixAuth.parseMxid(mxid);
+  const server = m ? m.domain : "";
+  const valid = !!m && pw.length >= 1;
+
+  const doSignIn = async () => {
+    if (!valid || busy) return;
+    setBusy(true); setErr("");
+    try {
+      const sess = await window.MatrixAuth.login(m.mxid, pw);
+      // identity is proven; now gate on the role allowlist (authority flows from the admin)
+      let roles = null;
+      try { roles = await window.MatrixAuth.readPermissions(); } catch (e) {}
+      const merged = roles ? window.normalizeLayout({ ...layout, roles: { ...layout.roles, ...window.normalizeRoles(roles) } }) : layout;
+      if (!window.isMember(merged, sess.user_id)) {
+        await window.MatrixAuth.logout();
+        setErr("You're verified as " + sess.user_id + ", but People's Journalism isn't open to new contributors yet. Email a tip below, or ask the team to add you.");
+        setBusy(false); return;
+      }
+      onSignIn(sess);
+    } catch (e) {
+      setErr(e && e.message ? e.message : "Couldn't sign in. Check your ID and password.");
+    }
+    setBusy(false);
+  };
+
+  const mailto = "mailto:" + TIP_EMAIL + "?subject=" + encodeURIComponent("Tip for People's Journalism") +
+    "&body=" + encodeURIComponent("What happened:\n\n\nWhere / when:\n\n\nDocuments or links (we archive everything):\n\n\nHow to reach you (optional):\n");
+
+  return (
+    <div>
+      <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>Get involved</div>
+      <h1 className="npj-submit-h" style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .9, margin: "0 0 14px" }}>Two ways in.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "58ch", margin: "0 0 28px" }}>
+        Send us a tip from anywhere — no account needed. Or, if you're a contributor, sign in with <strong style={{ color: "var(--ink)" }}>Matrix</strong> to draft and edit alongside the newsroom.
+      </p>
+
+      <div className="npj-two" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, alignItems: "start" }}>
+        {/* email path — open to everyone */}
+        <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "6px 6px 0 rgba(22,20,13,.12)", padding: "18px 18px 20px" }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Anyone · no account</div>
+          <h2 style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 24, margin: "0 0 8px", lineHeight: 1.05 }}>Email a tip</h2>
+          <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 14px" }}>
+            Send what you know to our newsroom inbox. Attach documents or links — we archive every source.
+          </p>
+          <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
+            <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
+          </a>
+          <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 12 }}>opens your mail app · {TIP_EMAIL}</div>
+        </div>
+
+        {/* matrix path — contributors */}
+        <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "6px 6px 0 rgba(22,20,13,.12)", padding: "18px 18px 20px" }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Contributors</div>
+          <h2 style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 24, margin: "0 0 8px", lineHeight: 1.05 }}>Sign in with Matrix</h2>
+          <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 6 }}>Matrix ID</label>
+          <input value={mxid} onChange={(e) => { setMxid(e.target.value); setErr(""); }} placeholder="@you:matrix.org"
+            className="np-mono" style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 14, padding: "10px 11px", outline: "none", marginBottom: 10 }} />
+          <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 6 }}>Password</label>
+          <input type="password" value={pw} onChange={(e) => { setPw(e.target.value); setErr(""); }} placeholder="••••••••"
+            onKeyDown={(e) => e.key === "Enter" && doSignIn()}
+            style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 14, padding: "10px 11px", fontFamily: "var(--mono)", outline: "none", marginBottom: 12 }} />
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <span className="np-mono" style={{ fontSize: 10.5, color: server ? "var(--verified)" : "var(--ink-soft)" }}>{server ? "→ " + server : "homeserver from your ID"}</span>
+            <button className="btn btn-primary" disabled={!valid || busy} onClick={doSignIn}
+              style={{ fontSize: 14, padding: "10px 18px", opacity: (valid && !busy) ? 1 : .45, cursor: (valid && !busy) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {busy ? <Spinner /> : <I.lock style={{ fontSize: 13 }} />}{busy ? "Verifying…" : "Sign in"}
+            </button>
+          </div>
+          {err && <div style={{ marginTop: 12, padding: "9px 11px", background: "color-mix(in srgb, var(--reject) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--reject) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, color: "var(--reject)" }}>{err}</div>}
+          <div style={{ fontFamily: "var(--serif)", fontSize: 13, color: "var(--ink-soft)", marginTop: 12 }}>
+            No Matrix account? <a href="https://matrix.org/ecosystem/hosting/" target="_blank" rel="noopener" style={{ color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2 }}>Pick a homeserver and make one ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <div className="npj-feature-row" style={{ display: "flex", gap: 22, marginTop: 34, paddingTop: 20, borderTop: "1.5px solid var(--rule)" }}>
+        {[
+          [I.lock, "Your account, your server", "Your password goes straight to your homeserver. We never see it; federated identity means no one platform owns who you are."],
+          [I.shield, "One identity, in the open", "The same account drafts, edits and is invited into the Matrix room — every contribution stays attributable."],
+          [I.archive, "Evidence over identity", "Use a pseudonym on any homeserver. What gets published is the archived evidence, not you."]
+        ].map(([Ic, t, d], i) => (
+          <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+            <Ic style={{ fontSize: 20 }} />
+            <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, lineHeight: 1.1 }}>{t}</div>
+            <div style={{ fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.4, color: "var(--ink-soft)" }}>{d}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { SubmitPage, TIP_EMAIL });

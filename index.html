@@ -1,1 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>People's Journalism</title>
 
+<link rel="stylesheet" href="app/styles.css" />
+<!-- all fonts via link (keeps CSS captureable / offline-friendly) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Spline+Sans+Mono:wght@400;500;600&family=Oswald:wght@500;700&family=Lora:ital,wght@0,400;0,500;1,400&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+
+<style>
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127,216,166,.6); } 70% { box-shadow: 0 0 0 7px rgba(127,216,166,0); } 100% { box-shadow: 0 0 0 0 rgba(127,216,166,0); } }
+  html, body { background: var(--paper); }
+  #root { min-height: 100vh; }
+</style>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="app/data.js"></script>
+<!-- expose hooks globally so every babel file uses them bare without colliding -->
+<script>
+  window.useState = React.useState;
+  window.useEffect = React.useEffect;
+  window.useRef = React.useRef;
+  window.useCallback = React.useCallback;
+  window.useMemo = React.useMemo;
+</script>
+
+<!-- plain scripts: matrix auth, durable drafts, clippy frame data -->
+<script src="app/matrix-auth.js"></script>
+<script src="app/drafts.js"></script>
+<script src="app/clippy-data.js"></script>
+<script src="app/image-slot.js"></script>
+<!-- layout publish client (ES module → window.NpjLayout) -->
+<script type="module" src="backend/npj-layout.client.js"></script>
+
+<!-- babel app: layout context first, then shared UI, then features -->
+<script type="text/babel" src="tweaks-panel.jsx"></script>
+<script type="text/babel" src="app/layout.jsx"></script>
+<script type="text/babel" src="app/shared.jsx"></script>
+<script type="text/babel" src="app/versions.jsx"></script>
+<script type="text/babel" src="app/Entities.jsx"></script>
+<script type="text/babel" src="app/SuggestionRail.jsx"></script>
+<script type="text/babel" src="app/FrontPage.jsx"></script>
+<script type="text/babel" src="app/ArticleRead.jsx"></script>
+<script type="text/babel" src="app/Newsroom.jsx"></script>
+<script type="text/babel" src="app/Standards.jsx"></script>
+<script type="text/babel" src="app/Submit.jsx"></script>
+<script type="text/babel" src="app/Composer.jsx"></script>
+<script type="text/babel" src="app/Data.jsx"></script>
+<script type="text/babel" src="app/Clippy.jsx"></script>
+<script type="text/babel" src="app/AdminEditor.jsx"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<template id="__bundler_thumbnail">
+  <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+    <rect width="100" height="100" fill="#16140d"/>
+    <rect x="18" y="30" width="64" height="40" rx="6" fill="#ffec01"/>
+    <rect x="26" y="40" width="48" height="5" fill="#16140d"/>
+    <rect x="26" y="50" width="48" height="5" fill="#16140d"/>
+    <rect x="26" y="60" width="30" height="5" fill="#16140d"/>
+  </svg>
+</template>
+
+<script type="text/babel">
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "accent": "#ffec01",
+  "palette": [
+    "#f6f1e4",
+    "#efe9d8",
+    "#16140d"
+  ],
+  "headline": "Anton",
+  "body": "Newsreader",
+  "auditDefault": false,
+  "trustDefault": "all"
+}/*EDITMODE-END*/;
+
+function App() {
+  const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  // ---- layout config + Matrix-backed permissions ----
+  const [layout, setLayoutState] = useState(() => window.loadLayout());
+  const setLayout = useCallback((next) => {
+    setLayoutState(prev => {
+      const n = window.normalizeLayout(typeof next === "function" ? next(prev) : next);
+      window.saveLayoutLocal(n); return n;
+    });
+  }, []);
+  const [session, setSession] = useState(() => window.MatrixAuth.restore());
+  const me = (session && session.user_id) || "@you:guest";
+  const role = window.roleOf(layout, session && session.user_id);
+  const isAdmin = role === "admin";
+  const isEditorRole = role === "admin" || role === "editor";
+
+  // overlay the committed layout (GitHub) so visitors see the published chrome
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try { const committed = await window.NpjLayout.loadCommittedLayout(); if (alive && committed) setLayout(committed); } catch (e) {}
+    })();
+    return () => { alive = false; };
+  }, [setLayout]);
+
+  // when signed in, reconcile roles from the Matrix control room (authoritative)
+  useEffect(() => {
+    if (!session) return; let alive = true;
+    (async () => {
+      try {
+        const roles = await window.MatrixAuth.readPermissions();
+        if (alive && roles) setLayout(prev => ({ ...prev, roles: { ...prev.roles, ...window.normalizeRoles(roles) } }));
+      } catch (e) {}
+    })();
+    return () => { alive = false; };
+  }, [session, setLayout]);
+
+  const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
+  const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
+  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore"].find(r => hp.includes(r)) || "home");
+  const [readMode, setReadMode] = useState(hp.includes("audit") ? "audit" : "clean");
+  const [direction, setDirection] = useState(initDir);
+  const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
+  const [filter, setFilter] = useState("all");
+  const [isEditor, setIsEditor] = useState(hp.includes("editor"));
+
+  // figures rail is disabled until the extraction engine is ready
+  const [entityData] = useState(null);
+  const [entityOpen, setEntityOpen] = useState(false);
+  const [activeEntity, setActiveEntity] = useState(null);
+
+  // suggestion store (empty until readers act)
+  const [suggestions, setSuggestions] = useState(() => window.NPJ.SUGGESTIONS.map(s => ({ ...s })));
+  const onVote = (id) => setSuggestions(list => list.map(s => s.id === id ? { ...s, voted: !s.voted, votes: s.votes + (s.voted ? -1 : 1) } : s));
+  const onResolve = (id, status) => setSuggestions(list => list.map(s => s.id === id ? { ...s, status } : s));
+  const onAddSuggestion = (claimId, d) => setSuggestions(list => [{
+    id: "n" + Date.now(), claimId, base_sha: (window.NPJ.ARTICLE && window.NPJ.ARTICLE.base_sha) || "draft", range: [0, 0],
+    status: "proposed", votes: 1, voted: true, author: me, trust: "open",
+    proposed: d.proposed, rationale: d.rationale, ts: new Date().toISOString().slice(0, 10)
+  }, ...list]);
+
+  // apply system tweaks to :root
+  useEffect(() => {
+    const r = document.documentElement.style;
+    r.setProperty("--yellow", t.accent);
+    r.setProperty("--yellow-deep", `color-mix(in srgb, ${t.accent} 78%, #000)`);
+    r.setProperty("--paper", t.palette[0]);
+    r.setProperty("--paper-2", t.palette[1]);
+    r.setProperty("--ink", t.palette[2]);
+    r.setProperty("--card", `color-mix(in srgb, ${t.palette[0]} 45%, #fff)`);
+    r.setProperty("--display", `'${t.headline}', 'Arial Narrow', sans-serif`);
+    r.setProperty("--serif", `'${t.body}', Georgia, serif`);
+  }, [t.accent, t.palette, t.headline, t.body]);
+
+  // admin brand overrides (from the published layout) win over tweak defaults
+  useEffect(() => {
+    const r = document.documentElement.style; const b = layout.brand || {};
+    if (b.accent) { r.setProperty("--yellow", b.accent); r.setProperty("--yellow-deep", `color-mix(in srgb, ${b.accent} 78%, #000)`); }
+    if (b.headline) r.setProperty("--display", `'${b.headline}', 'Arial Narrow', sans-serif`);
+    if (b.body) r.setProperty("--serif", `'${b.body}', Georgia, serif`);
+  }, [layout.brand, t.accent, t.headline, t.body]);
+
+  useEffect(() => { setReadMode(t.auditDefault ? "audit" : "clean"); }, [t.auditDefault]);
+  useEffect(() => { setFilter(t.trustDefault); }, [t.trustDefault]);
+
+  // no article? never sit on the article route
+  useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE) setRoute("home"); }, [route]);
+
+  // keep the URL hash in sync so a refresh restores the view
+  useEffect(() => {
+    if (route === "home") { history.replaceState(null, "", location.pathname + location.search); return; }
+    const f = [route];
+    if (route === "article") {
+      if (readMode === "audit") f.push("audit");
+      f.push(direction);
+      if (showSugg) f.push("sugg");
+      if (entityOpen) f.push("figures");
+    }
+    history.replaceState(null, "", "#" + f.join(";"));
+  }, [route, readMode, direction, showSugg, entityOpen]);
+
+  const goArticle = () => { if (!window.NPJ.ARTICLE) { setRoute("home"); return; } setRoute("article"); window.scrollTo(0, 0); };
+  const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };
+  const goNewsroom = () => { setRoute("newsroom"); window.scrollTo(0, 0); };
+  const goStandards = () => { setRoute("standards"); window.scrollTo(0, 0); };
+  const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
+  const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
+
+  const signIn = (sess) => {
+    setSession(sess);
+    if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
+      window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: "#b23a26" };
+    }
+  };
+  const signOut = async () => { try { await window.MatrixAuth.logout(); } catch (e) {} setSession(null); };
+
+  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore,
+    account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
+
+  return (
+    <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
+      {route === "home" && <FrontPage onOpen={goArticle} onNewsroom={goNewsroom} onHome={goHome} />}
+      {route === "article" && window.NPJ.ARTICLE && (
+        <ArticleRead
+          readMode={readMode} setReadMode={setReadMode}
+          direction={direction} setDirection={setDirection}
+          showSugg={showSugg} setShowSugg={setShowSugg}
+          suggestions={suggestions} onVote={onVote} onResolve={onResolve} onAddSuggestion={onAddSuggestion}
+          filter={filter} setFilter={setFilter} isEditor={isEditor} setIsEditor={setIsEditor}
+          entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
+          activeEntity={activeEntity} setActiveEntity={setActiveEntity}
+          me={me} onHome={goHome} onNewsroom={goNewsroom} />
+      )}
+      {route === "newsroom" && (isEditorRole
+        ? <Newsroom session={session} draftId="working" onExit={goHome} onPublished={goArticle} />
+        : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
+      {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
+      {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
+      {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
+
+      <TweaksPanel title="Tweaks">
+        <TweakSection label="Brand" />
+        <TweakColor label="Accent" value={t.accent}
+          options={["#ffec01", "#ff5a3c", "#23c186", "#3aa0ff"]}
+          onChange={(v) => setTweak("accent", v)} />
+        <TweakColor label="Paper / ink" value={t.palette}
+          options={[["#f6f1e4", "#efe9d8", "#16140d"], ["#f1efe9", "#e7e4da", "#14140f"], ["#faf8f1", "#efece2", "#111111"], ["#16140d", "#211e15", "#f3eedd"]]}
+          onChange={(v) => setTweak("palette", v)} />
+        <TweakSection label="Type" />
+        <TweakSelect label="Headline" value={t.headline}
+          options={["Anton", "Oswald", "Barlow Condensed"]}
+          onChange={(v) => setTweak("headline", v)} />
+        <TweakSelect label="Body" value={t.body}
+          options={["Newsreader", "Lora", "Spectral"]}
+          onChange={(v) => setTweak("body", v)} />
+        <TweakSection label="Reading defaults" />
+        <TweakToggle label="Open in Audit Mode" value={t.auditDefault}
+          onChange={(v) => setTweak("auditDefault", v)} />
+        <TweakRadio label="Default trust view" value={t.trustDefault}
+          options={["all", "preferred", "editor"]}
+          onChange={(v) => setTweak("trustDefault", v)} />
+      </TweaksPanel>
+
+      <AdminEditor />
+      <ClippyAgent route={route} />
+    </window.LayoutCtx.Provider>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>

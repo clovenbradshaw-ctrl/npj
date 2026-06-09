@@ -1,0 +1,1001 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "npj-api",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "https://YOUR-APP-ORIGIN"
+        }
+      },
+      "id": "e7f13641-4bc6-4a1b-8b5b-04449b7a1ceb",
+      "name": "NPJ API",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -336,
+        1392
+      ],
+      "webhookId": "npj-api",
+      "notes": "POST /webhook/npj-api\nHeaders: Authorization: Bearer <matrix_access_token>   (browser users)\nBody (service callers): { token: <NPJ_INGEST_TOKEN>, op, ... }\nBody (all): { op: read|propose|resolve|delete, ... }\nSet allowedOrigins to the Pages site origin for CORS."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-svc",
+              "leftValue": "={{ $json.body.token }}",
+              "rightValue": "={{ $env.NPJ_INGEST_TOKEN }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8ce16788-3bc7-4f11-bb66-cf0592816c9c",
+      "name": "Service token?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -112,
+        1392
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s-mxid",
+              "name": "mxid",
+              "value": "@service:app.peoplesjournalism.org",
+              "type": "string"
+            },
+            {
+              "id": "s-role",
+              "name": "role",
+              "value": "service",
+              "type": "string"
+            },
+            {
+              "id": "s-op",
+              "name": "op",
+              "value": "={{ $json.body.op }}",
+              "type": "string"
+            },
+            {
+              "id": "s-body",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c137d6a5-d82b-457e-a38d-f7864510f673",
+      "name": "Service identity",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        1264
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.MATRIX_BASE_URL }}/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.headers.authorization }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a681b427-a5c6-46b0-84fd-295efbed73e2",
+      "name": "Verify Matrix token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        128,
+        1520
+      ],
+      "onError": "continueRegularOutput",
+      "notes": "GET {MATRIX_BASE_URL}/_matrix/client/v3/account/whoami\nValid token -> { user_id, device_id }. Invalid -> error item, no user_id.\nonError=continue so a 401 from Matrix becomes a normal item we can branch on."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-valid",
+              "leftValue": "={{ $json.user_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "ab5e2ec7-779e-42c1-8449-56a0d8570776",
+      "name": "Token valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        352,
+        1520
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "u-mxid",
+              "name": "mxid",
+              "value": "={{ $json.user_id }}",
+              "type": "string"
+            },
+            {
+              "id": "u-role",
+              "name": "role",
+              "value": "={{ ($env.NPJ_EDITORS || '').split(',').map(s => s.trim()).includes($json.user_id) ? 'editor' : 'user' }}",
+              "type": "string"
+            },
+            {
+              "id": "u-op",
+              "name": "op",
+              "value": "={{ $('NPJ API').item.json.body.op }}",
+              "type": "string"
+            },
+            {
+              "id": "u-body",
+              "name": "body",
+              "value": "={{ $('NPJ API').item.json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "07140e67-2a94-4c8f-bb19-7bd0148ad78d",
+      "name": "User identity",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        576,
+        1440
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"unauthorized\" } }}",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "id": "fb926235-34e8-487a-b549-a43761a8ed7a",
+      "name": "401 Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        576,
+        1632
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "ac6ccd64-bb07-4833-8913-70d069b8af94",
+      "name": "Authenticated",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        832,
+        1360
+      ],
+      "notes": "Auth is done. Every row operation attaches here.\nDownstream items carry: mxid, role (service|editor|user), op, body.\nAuthorize per op, then run the matching Data Table action."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-read",
+              "leftValue": "={{ $json.op }}",
+              "rightValue": "read",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "rt-read",
+      "name": "op = read?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        1120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-propose",
+              "leftValue": "={{ $json.op }}",
+              "rightValue": "propose",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "rt-propose",
+      "name": "op = propose?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        1360
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-resolve",
+              "leftValue": "={{ $json.op }}",
+              "rightValue": "resolve",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "rt-resolve",
+      "name": "op = resolve?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        1600
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-delete",
+              "leftValue": "={{ $json.op }}",
+              "rightValue": "delete",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "rt-delete",
+      "name": "op = delete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1056,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "suggestions"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "article",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.article }}"
+            }
+          ]
+        }
+      },
+      "id": "dt-get",
+      "name": "DT · get suggestions",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        1040
+      ],
+      "notes": "Bind dataTableId to your suggestions table. Columns: id, article, base_sha, range, proposed, rationale, author_mxid, status, votes, ts. Verify operation/filter keys match your n8n Data Table version."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"suggestions\": $input.all().map(i => i.json) } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "r-read",
+      "name": "Read OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p-id",
+              "name": "id",
+              "value": "={{ 'sg_' + $now.toMillis() }}",
+              "type": "string"
+            },
+            {
+              "id": "p-art",
+              "name": "article",
+              "value": "={{ $json.body.article }}",
+              "type": "string"
+            },
+            {
+              "id": "p-sha",
+              "name": "base_sha",
+              "value": "={{ $json.body.base_sha }}",
+              "type": "string"
+            },
+            {
+              "id": "p-rng",
+              "name": "range",
+              "value": "={{ JSON.stringify($json.body.range || []) }}",
+              "type": "string"
+            },
+            {
+              "id": "p-prop",
+              "name": "proposed",
+              "value": "={{ $json.body.proposed }}",
+              "type": "string"
+            },
+            {
+              "id": "p-rat",
+              "name": "rationale",
+              "value": "={{ $json.body.rationale }}",
+              "type": "string"
+            },
+            {
+              "id": "p-auth",
+              "name": "author_mxid",
+              "value": "={{ $json.mxid }}",
+              "type": "string"
+            },
+            {
+              "id": "p-stat",
+              "name": "status",
+              "value": "proposed",
+              "type": "string"
+            },
+            {
+              "id": "p-vote",
+              "name": "votes",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "p-ts",
+              "name": "ts",
+              "value": "={{ $now.toISO() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-suggestion",
+      "name": "New suggestion",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1296,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "suggestions"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": []
+        }
+      },
+      "id": "dt-insert",
+      "name": "DT · insert suggestion",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        1320
+      ],
+      "notes": "Bind dataTableId to your suggestions table. Columns: id, article, base_sha, range, proposed, rationale, author_mxid, status, votes, ts. Verify operation/filter keys match your n8n Data Table version."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"id\": $('New suggestion').item.json.id } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "r-propose",
+      "name": "Propose OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        1320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1",
+              "leftValue": "={{ $json.role }}",
+              "rightValue": "editor",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "e2",
+              "leftValue": "={{ $json.role }}",
+              "rightValue": "service",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "authz-resolve",
+      "name": "Editor? (resolve)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        1560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "suggestions"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.id }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.body.status }}"
+          }
+        }
+      },
+      "id": "dt-update",
+      "name": "DT · update status",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        1500
+      ],
+      "notes": "Bind dataTableId to your suggestions table. Columns: id, article, base_sha, range, proposed, rationale, author_mxid, status, votes, ts. Verify operation/filter keys match your n8n Data Table version."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"id\": $json.body.id, \"status\": $json.body.status } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "r-resolve",
+      "name": "Resolve OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        1500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d1",
+              "leftValue": "={{ $json.role }}",
+              "rightValue": "editor",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "d2",
+              "leftValue": "={{ $json.role }}",
+              "rightValue": "service",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "authz-delete",
+      "name": "Editor? (delete)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1296,
+        1840
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "value": "",
+          "mode": "list",
+          "cachedResultName": "suggestions"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.id }}"
+            }
+          ]
+        }
+      },
+      "id": "dt-delete",
+      "name": "DT · delete row",
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        1780
+      ],
+      "notes": "Bind dataTableId to your suggestions table. Columns: id, article, base_sha, range, proposed, rationale, author_mxid, status, votes, ts. Verify operation/filter keys match your n8n Data Table version."
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": true, \"id\": $json.body.id } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "r-delete",
+      "name": "Delete OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1776,
+        1780
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"forbidden: editors only\" } }}",
+        "options": {
+          "responseCode": 403
+        }
+      },
+      "id": "r-403",
+      "name": "403 Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        2000
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { \"ok\": false, \"error\": \"unknown op\" } }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "id": "r-400",
+      "name": "400 Bad op",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1296,
+        2080
+      ]
+    }
+  ],
+  "connections": {
+    "NPJ API": {
+      "main": [
+        [
+          {
+            "node": "Service token?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service token?": {
+      "main": [
+        [
+          {
+            "node": "Service identity",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Verify Matrix token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Service identity": {
+      "main": [
+        [
+          {
+            "node": "Authenticated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Matrix token": {
+      "main": [
+        [
+          {
+            "node": "Token valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Token valid?": {
+      "main": [
+        [
+          {
+            "node": "User identity",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "401 Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "User identity": {
+      "main": [
+        [
+          {
+            "node": "Authenticated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authenticated": {
+      "main": [
+        [
+          {
+            "node": "op = read?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "op = read?": {
+      "main": [
+        [
+          {
+            "node": "DT · get suggestions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "op = propose?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DT · get suggestions": {
+      "main": [
+        [
+          {
+            "node": "Read OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "op = propose?": {
+      "main": [
+        [
+          {
+            "node": "New suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "op = resolve?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New suggestion": {
+      "main": [
+        [
+          {
+            "node": "DT · insert suggestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DT · insert suggestion": {
+      "main": [
+        [
+          {
+            "node": "Propose OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "op = resolve?": {
+      "main": [
+        [
+          {
+            "node": "Editor? (resolve)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "op = delete?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editor? (resolve)": {
+      "main": [
+        [
+          {
+            "node": "DT · update status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "403 Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DT · update status": {
+      "main": [
+        [
+          {
+            "node": "Resolve OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "op = delete?": {
+      "main": [
+        [
+          {
+            "node": "Editor? (delete)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "400 Bad op",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Editor? (delete)": {
+      "main": [
+        [
+          {
+            "node": "DT · delete row",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "403 Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DT · delete row": {
+      "main": [
+        [
+          {
+            "node": "Delete OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "5c737be3fd9beebae6ccb42a087a71b95589b90d613100d5ba10c73188a40d22"
+  }
+}

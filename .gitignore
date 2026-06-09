@@ -1,0 +1,18 @@
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# secrets / local config — never commit tokens
+.env
+.env.*
+*.local
+
+# scratch + generated
+screenshots/
+uploads/
+scraps/
+*.log

@@ -1,0 +1,743 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/publish-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "da2473cd-e88a-4a78-aff4-ca1bd07ccdd5",
+      "name": "Publish Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -560,
+        128
+      ],
+      "webhookId": "site-publish",
+      "notes": "POST /webhook/site/publish\nBody: {token, filename, mode: 'append'|'overwrite', contentRaw, message, compress?}\nCreates or updates the file in clovenbradshaw-ctrl/plain-text (main).\nRequires matching token (see Auth Check)."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body ? $json.body.token : $json.token }}",
+              "rightValue": "CHANGE_ME_SECRET",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "id": "9e055471-3516-4483-b9d9-89b57e7bbd85"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f1fb5be2-4bab-4e95-a659-81259c4963e2",
+      "name": "Auth Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        -320,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized' }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1101a1a9-ac04-4255-9781-050efc1b2e93",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        368
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "={{ $json.body ? $json.body.filename : $json.filename }}",
+        "additionalParameters": {
+          "reference": "main"
+        }
+      },
+      "id": "5a63460a-1be1-49f2-9585-c87e21117de4",
+      "name": "GH Get File",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        128
+      ],
+      "webhookId": "1c9a6e7d-1c48-43e8-b978-a8385ddf439a",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build Content — ORIGINAL (unchanged n8n node). Builds file content + captures\n// SHA, then routes to GH Update/Create. Encryption + EO formatting happen\n// CLIENT-SIDE before the POST (see seal-operand.client.js); n8n just commits\n// whatever `contentRaw` it receives.\nconst hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\n\nconst filename   = parsed.filename;\nconst mode       = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message    = parsed.message || `update ${filename}`;\nconst compress   = !!parsed.compress;\n\nif (!filename) {\n  throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\n}\n\n// GH Get File returns { content (base64), sha } on success, or an error\n// object on 404. continueOnFail is on, so we get both shapes here.\n// IMPORTANT: sha must be '' (not null) when absent — n8n's notEmpty check\n// coerces null to the string \"null\", which misroutes new files to Update\n// and GitHub 404s the edit.\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\nconst existingB64 = ghResp.content || '';\n\nlet existingText = '';\nif (existingB64) {\n  try {\n    existingText = Buffer.from(existingB64, 'base64').toString('utf8');\n  } catch (e) {\n    existingText = '';\n  }\n}\n\n// Build final text\nlet finalText;\nif (mode === 'append') {\n  const prev = existingText ? (existingText.endsWith('\\n') ? existingText : existingText + '\\n') : '';\n  const next = contentRaw.endsWith('\\n') ? contentRaw : contentRaw + '\\n';\n  finalText = prev + next;\n} else {\n  finalText = contentRaw;\n}\n\n// Optional gzip\nlet b64;\nif (compress) {\n  const zlib = require('zlib');\n  b64 = zlib.gzipSync(Buffer.from(finalText, 'utf8')).toString('base64');\n} else {\n  b64 = Buffer.from(finalText, 'utf8').toString('base64');\n}\n\nreturn [{ json: {\n  filename,\n  message,\n  contentBase64: b64,\n  sha: existingSha,\n  bytes: finalText.length,\n}}];"
+      },
+      "id": "258c0552-ac2a-4720-b3f5-568f445a2855",
+      "name": "Build Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        160,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "45618db5-6958-426a-b2c1-0bdf34d30eee",
+      "name": "Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        400,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "={{ $json.filename }}",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "id": "d63e836e-0887-4515-8c11-6864f9d9da38",
+      "name": "GH Update",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        640,
+        0
+      ],
+      "webhookId": "159b2129-b74d-4f5d-b274-ccd1a6c54e1d",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "={{ $json.filename }}",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "id": "89a67e0e-f7f4-4910-a12a-ff6a992075c0",
+      "name": "GH Create",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        640,
+        240
+      ],
+      "webhookId": "e37a3b28-9124-4f6f-b27f-05d65b604ee1",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, filename: $('Build Content').first().json.filename, bytes: $('Build Content').first().json.bytes }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ca8b479d-94b4-447f-95c9-98f14ddd87e8",
+      "name": "OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        912,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chain-head-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "487a98b2-fce3-4daf-a06a-62d609e1d6cc",
+      "name": "Chain Head Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        848
+      ],
+      "webhookId": "chain-head-publish",
+      "notes": "POST /webhook/chain-head\nBody: {token} + the scraper's chain_head.json contents:\n  {head_id, head_hash, next_index, last_block_date, last_aggregate}\n\nRequires matching token (see Auth Check1).\nWrites chain_head.json to clovenbradshaw-ctrl/plain-text (main).\nClients read it at:\n  https://raw.githubusercontent.com/clovenbradshaw-ctrl/plain-text/main/chain_head.json"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.body ? $json.body.token : $json.token }}",
+              "rightValue": "CHANGE_ME_SECRET",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7ed036ea-2a02-49d6-80dc-3bfe057c3382",
+      "name": "Auth Check1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        144,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized' }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c7e039ff-5a81-44ad-971f-5c95be6711f2",
+      "name": "Respond Unauthorized1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        384,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "additionalParameters": {
+          "reference": "main"
+        }
+      },
+      "id": "dbac585e-f1bd-4582-a97b-e1d147e53a08",
+      "name": "GH Get File1",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        384,
+        848
+      ],
+      "webhookId": "868d11b2-eb12-42f6-8a1a-d26e4d3fac48",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ── Build chain_head.json + capture SHA ──────────────────────\nconst hook = $('Chain Head Webhook').first().json;\nconst body = hook.body || hook;\n\nif (!body || !body.head_id) {\n  return [{ json: { __invalid: true, error: 'missing head_id in body' } }];\n}\n\nconst text = JSON.stringify({\n  head_id:         body.head_id,\n  head_hash:       body.head_hash || null,\n  next_index:      body.next_index || 0,\n  last_block_date: body.last_block_date || null,\n  last_aggregate:  body.last_aggregate || null,\n  published_at:    new Date().toISOString(),\n}, null, 2) + '\\n';\n\n// sha must be '' (not null) when absent — see Build Content note.\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\n\nreturn [{ json: {\n  filename: 'chain_head.json',\n  message: `chain head -> ${body.head_id} (block ${(body.next_index || 1) - 1})`,\n  contentBase64: Buffer.from(text, 'utf8').toString('base64'),\n  sha: existingSha,\n  bytes: text.length,\n}}];"
+      },
+      "id": "0d689937-9328-4950-961c-10b745326f4f",
+      "name": "Build Content1",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.__invalid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "33fb1a6b-6900-41cf-a671-11a2d2ee14e1",
+      "name": "Invalid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        848,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "b6e3b40f-8fd1-435b-aff1-a0707c65fd64",
+      "name": "Respond Invalid",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.sha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "197f2083-326d-49e5-809c-fe3ffd8fb6d6",
+      "name": "Exists?1",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "id": "95f18feb-c700-489d-ba4d-3aaf03754fbb",
+      "name": "GH Update1",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        864
+      ],
+      "webhookId": "316c39da-5ee3-43da-bc11-4a721132f514",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "id": "05fa8382-794c-4949-a5d5-fbe29c6fc344",
+      "name": "GH Create1",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        1072
+      ],
+      "webhookId": "07adb92b-0882-4bc7-bccb-af71dd1221be",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, filename: 'chain_head.json', head_id: ($('Chain Head Webhook').first().json.body || $('Chain Head Webhook').first().json).head_id, raw_url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/plain-text/main/chain_head.json' }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "26dbdb52-ac98-4882-b589-d056efc51b94",
+      "name": "OK1",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1536,
+        960
+      ]
+    }
+  ],
+  "connections": {
+    "Publish Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Check": {
+      "main": [
+        [
+          {
+            "node": "GH Get File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Get File": {
+      "main": [
+        [
+          {
+            "node": "Build Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Content": {
+      "main": [
+        [
+          {
+            "node": "Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exists?": {
+      "main": [
+        [
+          {
+            "node": "GH Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GH Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Update": {
+      "main": [
+        [
+          {
+            "node": "OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Create": {
+      "main": [
+        [
+          {
+            "node": "OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chain Head Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth Check1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Check1": {
+      "main": [
+        [
+          {
+            "node": "GH Get File1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Get File1": {
+      "main": [
+        [
+          {
+            "node": "Build Content1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Content1": {
+      "main": [
+        [
+          {
+            "node": "Invalid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invalid?": {
+      "main": [
+        [
+          {
+            "node": "Respond Invalid",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Exists?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exists?1": {
+      "main": [
+        [
+          {
+            "node": "GH Update1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GH Create1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Update1": {
+      "main": [
+        [
+          {
+            "node": "OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Create1": {
+      "main": [
+        [
+          {
+            "node": "OK1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "5c737be3fd9beebae6ccb42a087a71b95589b90d613100d5ba10c73188a40d22"
+  }
+}
