@@ -12,10 +12,15 @@ const START_DOC =
 
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60); }
 
-function Newsroom({ session, onExit, onPublished }) {
+function Newsroom({ session, draftId = "working", onExit, onPublished }) {
   const { layout, me } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
   const canPub = window.canPublish(layout, session && session.user_id);
+  const isMobile = window.useIsMobile();
+  const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
+  const [saveState, setSaveState] = useState("idle"); // idle|localonly|saving|syncing|synced|error
+  const restored = useRef(false);                      // gate autosave until the first restore lands
+  const saveTimer = useRef(null);
 
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
@@ -45,6 +50,47 @@ function Newsroom({ session, onExit, onPublished }) {
     window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags };
     return () => { if (window.__draftTags) delete window.__draftTags; };
   });
+
+  // ---- durable drafts: restore on open, autosave on every change ----
+  // localStorage = instant recovery on refresh; Matrix account data = the
+  // authoritative copy that survives a browser wipe / new device (app/drafts.js).
+  const persist = useCallback(() => {
+    if (!restored.current) return;
+    const html = ed.current ? ed.current.innerHTML : "";
+    const sourceRecords = {};
+    sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
+    window.NpjDrafts.save(draftId, { html, title, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
+  }, [draftId, title, tags, column, sources, room]);
+  const scheduleSave = useCallback(() => {
+    if (!restored.current) return;
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(persist, 500);
+  }, [persist]);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      let d = null;
+      try { d = await window.NpjDrafts.restore(draftId); } catch (e) {}
+      if (alive && d) {
+        if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
+        if (ed.current && d.html) ed.current.innerHTML = d.html;
+        if (d.title) setTitle(d.title);
+        if (Array.isArray(d.tags)) setTags(d.tags);
+        if (d.column) setColumn(d.column);
+        if (Array.isArray(d.sources)) setSources(d.sources);
+        if (Array.isArray(d.citeOrder)) { citeOrderRef.current = d.citeOrder; setCiteOrder(d.citeOrder); }
+        if (d.room) setRoom(d.room);
+        setTimeout(scanHeadings, 30); setRev(v => v + 1);
+      }
+      restored.current = true;
+    })();
+    return () => { alive = false; };
+  }, [draftId]);
+
+  useEffect(() => window.NpjDrafts.onStatus(s => { if (!s.id || s.id === draftId) setSaveState(s.state); }), [draftId]);
+  useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
+  useEffect(() => { scheduleSave(); }, [title, tags, column, sources, room, scheduleSave]);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -85,8 +131,8 @@ function Newsroom({ session, onExit, onPublished }) {
     return () => document.removeEventListener("selectionchange", f);
   }, []);
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
-  const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); };
-  const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); };
+  const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
+  const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   const insertImage = () => insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" shape="rect" placeholder="Drop a photo" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image, then caption &amp; credit</figcaption></figure><p><br/></p>`);
 
   // ---- floating selection toolbar: format + link/jumplink + source ----
@@ -120,7 +166,7 @@ function Newsroom({ session, onExit, onPublished }) {
     const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false"); sup.setAttribute("data-cite", key); sup.title = key; sup.textContent = num;
     span.after(sup);
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
-    window.getSelection().removeAllRanges(); setSel(null); setMenu(null); setSrcUrl(""); setRev(v => v + 1);
+    window.getSelection().removeAllRanges(); setSel(null); setMenu(null); setSrcUrl(""); setRev(v => v + 1); scheduleSave();
   };
   const bindNewUrl = () => {
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
@@ -184,6 +230,10 @@ function Newsroom({ session, onExit, onPublished }) {
 
   const versions = [{ sha: "draft", ts: new Date().toISOString().slice(0, 10), author: (session && session.user_id) || me, message: "Current working draft", text: ed.current ? (ed.current.innerText || "") : "" }];
 
+  const synced = !!session;
+  const saveText = ({ saving: "saving…", syncing: "syncing…", synced: "✓ synced to Matrix", error: "saved locally · sync failed", localonly: "saved on this device" })[saveState] || (synced ? "draft · autosaving" : "draft · autosaves on this device");
+  const saveColor = saveState === "error" ? "#e6b07f" : saveState === "synced" ? "#9fe0b8" : NR.muted;
+
   const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{children}</button>;
   const FB = ({ onClick, children, hot, title }) => <button title={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
 
@@ -198,6 +248,7 @@ function Newsroom({ session, onExit, onPublished }) {
           <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
           <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           <span className="np-mono" style={{ fontSize: 11.5, color: NR.muted }}>{slugify(title) || "untitled"}.md</span>
+          <span className="np-mono" title={synced ? "Your draft is saved here and mirrored to your Matrix account — refresh or switch devices and it comes back." : "Saved on this device. Sign in with Matrix to back it up server-side."} style={{ fontSize: 10.5, color: saveColor, border: "1px solid " + NR.line, padding: "1px 6px", whiteSpace: "nowrap" }}>{saveText}</span>
         </div>
         <span style={{ flex: 1 }} />
         <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark />
@@ -208,7 +259,7 @@ function Newsroom({ session, onExit, onPublished }) {
         <div style={{ position: "relative" }}>
           <button onClick={() => setInvite(v => !v)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> Invite</button>
           {invite && (
-            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 280, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Invite to the draft room</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <input value={inviteVal} onChange={e => setInviteVal(e.target.value)} onKeyDown={e => e.key === "Enter" && doInvite()} placeholder="@name:server" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
@@ -244,13 +295,22 @@ function Newsroom({ session, onExit, onPublished }) {
         <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />
         <TB onClick={insertImage} title="Inline image"><I.archive style={{ fontSize: 14, verticalAlign: "-2px" }} /> Image</TB>
         <span style={{ flex: 1 }} />
-        <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source span</span>
+        <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source span</span>
       </div>
 
-      {/* body: contents · editor · sources */}
-      <div style={{ flex: 1, display: "grid", gridTemplateColumns: "200px 1fr 340px", minHeight: 0 }}>
+      {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
+      {isMobile && (
+        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: "#15130e" }}>
+          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "Sources · " + sources.length]].map(([k, label]) => (
+            <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
+          ))}
+        </div>
+      )}
+
+      {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
+      <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px" }}>
         {/* contents / jumplinks */}
-        <div className="np-scroll" style={{ overflowY: "auto", padding: "16px 12px 30px", background: "#15130e", borderRight: "1.5px solid " + NR.line }}>
+        <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: "#15130e", borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
           <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
           {toc.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>}
           {toc.map(h => (
@@ -271,12 +331,12 @@ function Newsroom({ session, onExit, onPublished }) {
         </div>
 
         {/* editor */}
-        <div className="np-scroll md-preview" ref={ed} contentEditable suppressContentEditableWarning onInput={scanHeadings} onClick={onBodyClick}
-          style={{ overflowY: "auto", padding: "28px 44px", background: "#16140f", color: NR.text, outline: "none", borderRight: "1.5px solid " + NR.line, minHeight: 0 }}
+        <div className="np-scroll md-preview" ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "18px 16px" : "28px 44px", background: "#16140f", color: NR.text, outline: "none", borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}
           dangerouslySetInnerHTML={{ __html: START_DOC }} />
 
         {/* sources */}
-        <div className="np-scroll" style={{ overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
+        <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.archive style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
             <div className="np-eyebrow" style={{ color: NR.soft, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.plus style={{ fontSize: 13 }} /> Ingest a source</div>
@@ -365,7 +425,8 @@ function Newsroom({ session, onExit, onPublished }) {
 
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
       {archiveTarget && <ArchiveModal items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
-      {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} />}
+      {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
+        getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
     </div>
   );
 }
@@ -373,7 +434,7 @@ function Newsroom({ session, onExit, onPublished }) {
 /* server-recovered rooms — solves "switched browser, can't find my drafts" */
 function RoomsMenu({ rooms, onClose, signedIn }) {
   return (
-    <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30, maxHeight: 360, overflowY: "auto" }} className="np-scroll">
+    <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30, maxHeight: 360, overflowY: "auto" }} className="np-scroll">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
         <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Your rooms · from Matrix</span>
         <button onClick={onClose} style={{ background: "none", border: 0, fontSize: 14 }}><I.x /></button>
@@ -397,9 +458,10 @@ function RoomsMenu({ rooms, onClose, signedIn }) {
 
 function Spinner() { return <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-1px" }} />; }
 
-function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session }) {
+function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent }) {
   const slug = slugify(title) || "untitled";
   const unarchived = (sources || []).filter(s => !s.archived).length;
+  const [result, setResult] = useState({ state: "busy", msg: "Committing " + slug + ".md…" });
   const STEPS = [
     { code: "EVA", label: "Pull the finished piece", detail: "draft → plaintext markdown", ms: 1000 },
     { code: "DEF", label: "Commit markdown to GitHub", detail: "→ clovenbradshaw-ctrl/npj · " + slug + ".md", ms: 1300 },
@@ -413,6 +475,32 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const t = setTimeout(() => setPublish(p => ({ ...p, step: p.step + 1 })), STEPS[publish.step].ms);
     return () => clearTimeout(t);
   }, [publish && publish.step]);
+
+  // The real commit: POST the markdown to the publish webhook with the signed-in
+  // admin's Matrix token. The webhook re-verifies whoami before writing to GitHub,
+  // so authority is enforced server-side — the same path AdminEditor uses for layout.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const token = window.MatrixAuth.token();
+        if (!token) { if (alive) setResult({ state: "err", msg: "Sign in with your admin Matrix account to publish." }); return; }
+        let endpoint = "https://n8n.intelechia.com/webhook/site/publish-npj";
+        try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.endpoint) endpoint = c.endpoint; } catch (e) {}
+        const contentRaw = window.NpjArticleMarkdown(getContent ? getContent() : { html: "", title });
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+          body: JSON.stringify({ filename: slug + ".md", mode: "overwrite", contentRaw, message: "publish: " + slug })
+        });
+        if (!alive) return;
+        if (res.status === 401) setResult({ state: "err", msg: "That Matrix account isn't authorized to publish." });
+        else if (!res.ok) setResult({ state: "err", msg: "Publish failed (" + res.status + ")." });
+        else setResult({ state: "ok", msg: "Committed " + slug + ".md to clovenbradshaw-ctrl/npj." });
+      } catch (e) { if (alive) setResult({ state: "err", msg: "Couldn't reach the publish webhook: " + (e.message || "network error") + "." }); }
+    })();
+    return () => { alive = false; };
+  }, []);
   const srcKeys = (sources || []).map(s => s.key);
 
   return (
@@ -444,11 +532,20 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
           })}
           {publish.done && (
             <div className="fade-in" style={{ marginTop: 16, textAlign: "center" }}>
-              <div style={{ fontFamily: "var(--display)", fontSize: 26, color: "var(--yellow)", marginBottom: 4 }}>LIVE ON GITHUB PAGES</div>
-              <div className="np-mono" style={{ fontSize: 11, color: NR.muted, marginBottom: 16 }}>{slug} · committed to GitHub · archived to archive.org</div>
-              <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
-                <ShareBar dark url={"https://npj.press/" + slug} archiveUrl={"https://web.archive.org/web/2026/https://npj.press/" + slug} title={title} />
-              </div>
+              {result.state === "busy"
+                ? <div style={{ display: "inline-flex", alignItems: "center", gap: 8, color: NR.soft, fontFamily: "var(--cond)", fontSize: 16, marginBottom: 14 }}><Spinner /> finishing the commit…</div>
+                : result.state === "ok"
+                ? <React.Fragment>
+                    <div style={{ fontFamily: "var(--display)", fontSize: 26, color: "var(--yellow)", marginBottom: 4 }}>LIVE ON GITHUB PAGES</div>
+                    <div className="np-mono" style={{ fontSize: 11, color: NR.muted, marginBottom: 16 }}>{result.msg} · archived to archive.org</div>
+                    <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
+                      <ShareBar dark url={"https://npj.press/" + slug} archiveUrl={"https://web.archive.org/web/2026/https://npj.press/" + slug} title={title} />
+                    </div>
+                  </React.Fragment>
+                : <React.Fragment>
+                    <div style={{ fontFamily: "var(--display)", fontSize: 24, color: "#e6b07f", marginBottom: 6 }}>PUBLISH DIDN'T COMPLETE</div>
+                    <div className="np-mono" style={{ fontSize: 11.5, color: NR.soft, lineHeight: 1.5, maxWidth: 440, margin: "0 auto 16px" }}>{result.msg} Your draft is safe — it stays saved on this device and synced to your Matrix account.</div>
+                  </React.Fragment>}
               <div style={{ display: "flex", gap: 9, justifyContent: "center" }}>
                 <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em" }}>Back to editor</button>
               </div>
@@ -460,4 +557,79 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   );
 }
 
-Object.assign(window, { Newsroom });
+/* Serialize the contentEditable draft to plaintext markdown for the commit.
+   Bound source spans become numbered footnotes whose definitions point at the
+   archived (or original) URL — so the published .md keeps every claim auditable. */
+function htmlToMarkdown(html) {
+  const root = document.createElement("div"); root.innerHTML = html || "";
+  const inline = (node) => {
+    let out = "";
+    node.childNodes.forEach(n => {
+      if (n.nodeType === 3) { out += n.nodeValue; return; }
+      if (n.nodeType !== 1) return;
+      const tag = n.tagName.toLowerCase();
+      if (tag === "br") { out += "  \n"; return; }
+      if (tag === "sup" && n.classList.contains("md-cite")) { out += "[^" + (n.getAttribute("data-cite") || n.textContent) + "]"; return; }
+      const inner = inline(n);
+      if (tag === "strong" || tag === "b") out += "**" + inner + "**";
+      else if (tag === "em" || tag === "i") out += "*" + inner + "*";
+      else if (tag === "s" || tag === "strike" || tag === "del") out += "~~" + inner + "~~";
+      else if (tag === "code") out += "`" + inner + "`";
+      else if (tag === "a") out += "[" + inner + "](" + (n.getAttribute("href") || "") + ")";
+      else out += inner;
+    });
+    return out;
+  };
+  const lines = [];
+  const footnotes = {};
+  root.querySelectorAll("sup.md-cite").forEach(sup => {
+    const key = sup.getAttribute("data-cite"); if (!key) return;
+    const rec = window.NPJ.SOURCES[key] || {};
+    footnotes[key] = rec.archive_url || rec.original_url || rec.title || key;
+  });
+  Array.from(root.childNodes).forEach(node => {
+    if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) lines.push(t, ""); return; }
+    if (node.nodeType !== 1) return;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "h1") lines.push("# " + inline(node).trim(), "");
+    else if (tag === "h2") lines.push("## " + inline(node).trim(), "");
+    else if (tag === "h3") lines.push("### " + inline(node).trim(), "");
+    else if (tag === "blockquote") lines.push("> " + inline(node).trim().replace(/\n/g, "\n> "), "");
+    else if (tag === "ul") { node.querySelectorAll(":scope > li").forEach(li => lines.push("- " + inline(li).trim())); lines.push(""); }
+    else if (tag === "ol") { Array.from(node.querySelectorAll(":scope > li")).forEach((li, i) => lines.push((i + 1) + ". " + inline(li).trim())); lines.push(""); }
+    else if (tag === "hr") lines.push("---", "");
+    else if (tag === "figure") { const cap = node.querySelector("figcaption"); if (cap && cap.textContent.trim()) lines.push("*" + cap.textContent.trim() + "*", ""); }
+    else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
+  });
+  let md = lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  const keys = Object.keys(footnotes);
+  if (keys.length) { md += "\n"; keys.forEach(k => { md += "[^" + k + "]: " + footnotes[k] + "\n"; }); }
+  return md;
+}
+window.NpjArticleMarkdown = function (content) {
+  const c = content || {};
+  const meta = "<!-- column: " + (c.column || "") + " · tags: " + ((c.tags || []).join(", ")) + " -->\n\n";
+  return meta + htmlToMarkdown(c.html);
+};
+
+/* Closed-network gate: until the admin adds you, the newsroom is read-only-off. */
+function NewsroomLocked({ signedIn, me, onSignIn, onHome }) {
+  return (
+    <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 22px", textAlign: "center" }}>
+      <div style={{ maxWidth: 520 }}>
+        <I.lock style={{ fontSize: 40, color: "var(--yellow)" }} />
+        <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: .95, margin: "16px 0 12px", color: "#e3ddcc" }}>The newsroom is invite-only</h1>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 16, lineHeight: 1.5, color: "#b3ad9c", margin: 0 }}>
+          People's Journalism is being built by its founding admin. For now, only the admin and the contributors they've added can draft and edit here — that opens up as the network grows.
+        </p>
+        {signedIn && <p className="np-mono" style={{ fontSize: 12, color: "#e6b07f", margin: "12px 0 0", lineHeight: 1.5 }}>You're verified as {me}, but you're not on the contributor allowlist yet. Ask the admin to add you.</p>}
+        <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 24, flexWrap: "wrap" }}>
+          {!signedIn && <button onClick={onSignIn} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Sign in with Matrix</button>}
+          <button onClick={onHome} className="btn" style={{ background: "transparent", color: "#e3ddcc", borderColor: NR.line }}>Back to the public site</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+Object.assign(window, { Newsroom, NewsroomLocked });

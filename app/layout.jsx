@@ -120,7 +120,25 @@ const LayoutCtx = React.createContext({
   role: null, me: null, admin: SEED_ADMIN
 });
 
+// Reactive viewport hook — drives the mobile layouts (the newsroom especially).
+// Inline-styled components can't lean on CSS media queries alone, so they read
+// this. matchMedia, so it flips live on rotate / resize. Exposed on window so
+// every babel file can call it bare.
+function useIsMobile(maxWidth = 760) {
+  const q = "(max-width: " + maxWidth + "px)";
+  const [m, setM] = useState(() => (typeof window !== "undefined" && window.matchMedia) ? window.matchMedia(q).matches : false);
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const mq = window.matchMedia(q);
+    const on = () => setM(mq.matches);
+    on();
+    mq.addEventListener ? mq.addEventListener("change", on) : mq.addListener(on);
+    return () => { mq.removeEventListener ? mq.removeEventListener("change", on) : mq.removeListener(on); };
+  }, [q]);
+  return m;
+}
+
 Object.assign(window, {
   LAYOUT_DEFAULTS, SEED_ADMIN, normalizeLayout, normalizeRoles, normalizeSections, loadLayout, saveLayoutLocal,
-  roleOf, canPublish, canPublishColumn, canEdit, isMember, LayoutCtx
+  roleOf, canPublish, canPublishColumn, canEdit, isMember, LayoutCtx, useIsMobile
 });

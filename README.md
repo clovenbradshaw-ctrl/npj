@@ -11,12 +11,13 @@ founding admin curates the site and grows the network from there.
 
 | Path | What it is |
 |---|---|
-| `NPJ Prototype.html` | the app shell — loads everything below |
+| `index.html` | the app shell — loads everything below (served at the repo root) |
 | `app/` | the React (in-browser Babel) front end |
 | `app/data.js` | content layer — **framework only**, seeded empty |
 | `app/layout.jsx` | the editable site chrome + the permission model |
 | `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
-| `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites |
+| `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
+| `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Clippy.jsx` | drafting assistant — suggests **tags** (never citations) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
@@ -56,9 +57,17 @@ a claim that points nowhere fails the publish build.
 
 ## Running
 
-Open `NPJ Prototype.html` in a browser (or serve the folder statically). It uses
-in-browser Babel — no build step. Matrix calls go straight to the homeserver
-(`hyphae.social`), which is CORS-open per the Matrix spec.
+Open `index.html` in a browser (or serve the folder statically — it's the entry
+the repo serves at its root). It uses in-browser Babel — no build step. Matrix
+calls go straight to the homeserver (`hyphae.social`), which is CORS-open per the
+Matrix spec. The UI (including the Newsroom editor) is responsive down to phones.
+
+**Closed network, for now.** Only the founding admin — and the contributors the
+admin adds — can open the Newsroom and draft/edit; everyone else gets the email-a-tip
+path. That allowlist is the same role model above, so opening the network up later
+is just adding editors. **Drafts are durable:** they autosave to this browser
+*and*, once you sign in, to your Matrix account — so a refresh, a closed tab, or a
+switched/wiped device no longer loses work (see `app/drafts.js`).
 
 ## Backend
 

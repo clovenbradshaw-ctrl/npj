@@ -13,7 +13,10 @@
  * Matrix's client-server API is CORS-open (the spec mandates
  * Access-Control-Allow-Origin: *), so the browser can call hyphae.social directly.
  *
- * Exposed as window.MatrixAuth. Session persists in sessionStorage.
+ * Exposed as window.MatrixAuth. The session persists in localStorage so it
+ * survives a refresh AND a tab close; the authoritative copies of everything
+ * else (roles, draft index, draft documents) live server-side in Matrix
+ * (account data + rooms), so even a full browser wipe recovers after one login.
  */
 (function () {
   const ADMIN_MXID = "@collective_boundary730383:hyphae.social";
@@ -244,6 +247,9 @@
 
   window.MatrixAuth = {
     ADMIN_MXID, CONTROL_ALIAS, parseMxid, discover, login, logout, restore, current, token,
-    isSignedIn, isAdmin, resolveRoom, invite, ensureControlRoom, readPermissions, writePermissions, onChange
+    isSignedIn, isAdmin, resolveRoom, invite, ensureControlRoom, readPermissions, writePermissions,
+    // room + workspace recovery (used by the Newsroom; previously omitted from the
+    // export, which made "Rooms", invites and draft recovery throw at runtime)
+    joinedRooms, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
   };
 })();

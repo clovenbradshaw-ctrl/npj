@@ -29,7 +29,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
   return (
     <header>
       {/* utility bar */}
-      <div style={{ background: "var(--ink)", color: "var(--paper)", display: "flex",
+      <div className="npj-utility" style={{ background: "var(--ink)", color: "var(--paper)", display: "flex",
         justifyContent: "space-between", alignItems: "center", padding: "4px 22px", fontFamily: "var(--cond)", fontSize: 12.5, gap: 14 }}>
         <span className="np-mono" style={{ fontSize: 11, opacity: .82, whiteSpace: "nowrap" }}>People's Journalism · community newsroom</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 18, textTransform: "uppercase", letterSpacing: ".08em", whiteSpace: "nowrap", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -43,13 +43,13 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
 
       {/* wordmark band */}
       <div style={{ background: "var(--yellow)", borderBottom: "3px solid var(--ink)" }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 26px", display: "flex",
+        <div className="npj-wordmark" style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 26px", display: "flex",
           alignItems: "center", justifyContent: "space-between", gap: 28 }}>
           <button onClick={onHome} style={{ display: "flex", alignItems: "center", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-            <img src="https://storage.googleapis.com/intelechia-content/NPJ%20LOGO%20trans.png" alt="People's Journalism" style={{ height: 150, display: "block" }} />
+            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/NPJ%20LOGO%20trans.png" alt="People's Journalism" style={{ height: 150, display: "block" }} />
           </button>
           {taglines.length > 0 && (
-            <div style={{ textAlign: "right", borderRight: "4px solid var(--ink)", paddingRight: 18 }}>
+            <div className="npj-taglines" style={{ textAlign: "right", borderRight: "4px solid var(--ink)", paddingRight: 18 }}>
               {taglines.map((w, i) => (
                 <div key={i} style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 30, lineHeight: 1.02, letterSpacing: "-.01em", textTransform: "lowercase" }}>
                   <span style={{ fontWeight: 500, color: "var(--ink-soft)" }}>community-</span>{w}.
@@ -63,7 +63,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
       {/* column nav — hidden while reading an article to cut toolbar stacking */}
       {route !== "article" && sections.length > 0 && (
       <nav style={{ background: "var(--paper)", borderBottom: "1.5px solid var(--ink)" }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "0 22px", display: "flex",
+        <div className="npj-colnav" style={{ maxWidth: 1180, margin: "0 auto", padding: "0 22px", display: "flex",
           alignItems: "stretch", justifyContent: "space-between" }}>
           <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
             {sections.map((s, i) => {
@@ -75,7 +75,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
               );
             })}
           </div>
-          <button className="np-cond" style={{ background: "none", border: 0, padding: "9px 14px", display: "inline-flex",
+          <button className="np-cond npj-search" style={{ background: "none", border: 0, padding: "9px 14px", display: "inline-flex",
             alignItems: "center", gap: 6, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--ink-soft)" }}>
             <I.search style={{ fontSize: 16 }} /> Search records
           </button>
@@ -129,7 +129,7 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
   return (
     <div style={{ maxWidth: 720, margin: "40px auto", textAlign: "center", padding: "10px 0 30px" }}>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 14 }}>{col ? col + " · column" : "The record starts here"}</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .92, margin: "0 0 16px" }}>
+      <h1 className="npj-empty-h" style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .92, margin: "0 0 16px" }}>
         {col ? "Nothing filed under " + col + " yet." : "No stories published yet."}
       </h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "52ch", margin: "0 auto 26px" }}>
@@ -156,11 +156,11 @@ function FrontLineup({ items, onOpen }) {
   const lead = items.find(a => a._lead) || items[0];
   const rest = items.filter(a => a !== lead);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 0 }}>
+    <div className="npj-lineup" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 0 }}>
       <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
         <button onClick={onOpen} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
           <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8 }}>{lead.kicker}</div>
-          <h1 style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .92, margin: "0 0 14px" }}>{lead.headline}</h1>
+          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .92, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
         {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}

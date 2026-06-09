@@ -54,12 +54,12 @@ function AccountGate({ onSignIn }) {
   return (
     <div>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>Get involved</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .9, margin: "0 0 14px" }}>Two ways in.</h1>
+      <h1 className="npj-submit-h" style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .9, margin: "0 0 14px" }}>Two ways in.</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "58ch", margin: "0 0 28px" }}>
         Send us a tip from anywhere — no account needed. Or, if you're a contributor, sign in with <strong style={{ color: "var(--ink)" }}>Matrix</strong> to draft and edit alongside the newsroom.
       </p>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, alignItems: "start" }}>
+      <div className="npj-two" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18, alignItems: "start" }}>
         {/* email path — open to everyone */}
         <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "6px 6px 0 rgba(22,20,13,.12)", padding: "18px 18px 20px" }}>
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Anyone · no account</div>
@@ -98,7 +98,7 @@ function AccountGate({ onSignIn }) {
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: 22, marginTop: 34, paddingTop: 20, borderTop: "1.5px solid var(--rule)" }}>
+      <div className="npj-feature-row" style={{ display: "flex", gap: 22, marginTop: 34, paddingTop: 20, borderTop: "1.5px solid var(--rule)" }}>
         {[
           [I.lock, "Your account, your server", "Your password goes straight to your homeserver. We never see it; federated identity means no one platform owns who you are."],
           [I.shield, "One identity, in the open", "The same account drafts, edits and is invited into the Matrix room — every contribution stays attributable."],

@@ -32,8 +32,9 @@
   window.useMemo = React.useMemo;
 </script>
 
-<!-- plain scripts: matrix auth, clippy frame data -->
+<!-- plain scripts: matrix auth, durable drafts, clippy frame data -->
 <script src="app/matrix-auth.js"></script>
+<script src="app/drafts.js"></script>
 <script src="app/clippy-data.js"></script>
 <script src="app/image-slot.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
@@ -217,7 +218,9 @@ function App() {
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
           me={me} onHome={goHome} onNewsroom={goNewsroom} />
       )}
-      {route === "newsroom" && <Newsroom session={session} onExit={goHome} onPublished={goArticle} />}
+      {route === "newsroom" && (isEditorRole
+        ? <Newsroom session={session} draftId="working" onExit={goHome} onPublished={goArticle} />
+        : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
