@@ -17,7 +17,7 @@ founding admin curates the site and grows the network from there.
 | `app/layout.jsx` | the editable site chrome + the permission model |
 | `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
-| `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
+| `app/Newsroom.jsx` | the newsroom: a **document file explorer** lands first (your drafts, recovered from device + Matrix), then the editor — manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Clippy.jsx` | drafting assistant — suggests **tags** (never citations) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
