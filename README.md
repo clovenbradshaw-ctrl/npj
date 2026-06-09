@@ -36,9 +36,11 @@ can't lose it (GitHub + Matrix):
   `@collective_boundary730383:hyphae.social` is the immutable root.
 - Roles + site layout are committed to GitHub (`site/layout.json`, world-readable)
   and mirrored to a Matrix control-room state event only admins can write.
-- **Drafts** live in Matrix rooms; collaborators are invited by `user_id`. Rooms
-  are recovered from the homeserver on login (`/joined_rooms` + a per-account
-  index), so switching or wiping a browser never loses your work.
+- **Drafts** live in Matrix rooms; collaborators are invited by `user_id`. Every
+  room the app creates is tagged with a `press.npj.room` state event, and the app
+  only pays attention to tagged rooms — the rest of your Matrix account is
+  ignored. Rooms are recovered from the homeserver on login (one filtered `/sync`
+  + a per-account index), so switching or wiping a browser never loses your work.
 
 ## Submitting
 
