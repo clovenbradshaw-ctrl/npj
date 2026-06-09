@@ -4,7 +4,16 @@
    contents rail, Clippy-assisted tags, real Matrix room invites + server-side
    room recovery (survives a browser wipe), permission-gated publish, versioning. */
 
-const NR = { panel: "#1d1b15", line: "rgba(255,255,255,.13)", muted: "#8c8676", text: "#e3ddcc", soft: "#b3ad9c", field: "#14130f" };
+/* themeable palette — resolved by the --nr-* vars on .newsroom / .newsroom.nr-light
+   (app/styles.css), so every piece of chrome follows the light/dark toggle */
+const NR = {
+  bg: "var(--nr-bg)", rail: "var(--nr-rail)", panel: "var(--nr-panel)", field: "var(--nr-field)",
+  line: "var(--nr-line)", muted: "var(--nr-muted)", text: "var(--nr-text)", soft: "var(--nr-soft)",
+  ok: "var(--nr-ok)", warn: "var(--nr-warn)"
+};
+
+const THEME_KEY = "npj_nr_theme";
+function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
 const START_DOC =
   '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo" style="width:100%;height:300px;display:block"></image-slot></figure>' +
@@ -18,6 +27,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
+  const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
+  const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
   const [saveState, setSaveState] = useState("idle"); // idle|localonly|saving|syncing|synced|error
   const restored = useRef(false);                      // gate autosave until the first restore lands
   const saveTimer = useRef(null);
@@ -38,11 +49,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [showRooms, setShowRooms] = useState(false);
   const [rooms, setRooms] = useState(null);
   const [collabs, setCollabs] = useState(() => (session ? [session.user_id] : []));
-  const [room, setRoom] = useState(null);
+  const [room, setRoom] = useState(null);            // the project this document belongs to
   const [invite, setInvite] = useState(false);
   const [inviteVal, setInviteVal] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
+  const [projects, setProjects] = useState(null);    // existing projects, for the picker
+  const [projPick, setProjPick] = useState("");      // "" = start a new project for this doc
   const ed = useRef(null);
+  const scroller = useRef(null);                     // the editor scroll container (the page scrolls inside it)
   const selRange = useRef(null);
 
   // let Clippy drop suggested tags in
@@ -113,8 +127,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   useEffect(() => { const t = setTimeout(scanHeadings, 60); return () => clearTimeout(t); }, [scanHeadings]);
 
   const scrollToId = (id) => {
-    const cont = ed.current; if (!cont) return;
-    const el = cont.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(id) : id));
+    const cont = scroller.current, body = ed.current; if (!cont || !body) return;
+    const el = body.querySelector("#" + (window.CSS && CSS.escape ? CSS.escape(id) : id));
     if (!el) return;
     const cr = cont.getBoundingClientRect(), er = el.getBoundingClientRect();
     cont.scrollTop += (er.top - cr.top) - 18;
@@ -252,7 +266,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setTimeout(() => setSources(s => s.map(x => made.find(m => m.key === x.key) ? { ...x, snapshotting: false } : x)), 1100);
   };
 
-  // ---- Matrix: invite + room recovery ----
+  // ---- Matrix: projects (shared rooms) + invites ----
+  // A project is one Matrix room that can hold many documents; everyone invited
+  // to the project can work on every document attached to it. A document joins
+  // a project on first invite — either a brand-new project or an existing one.
+  useEffect(() => {
+    if (!invite || !session || projects) return;
+    let alive = true;
+    (async () => {
+      try { const list = await window.MatrixAuth.listDrafts(); if (alive) setProjects(list || []); }
+      catch (e) { if (alive) setProjects([]); }
+    })();
+    return () => { alive = false; };
+  }, [invite, session, projects]);
+
   const doInvite = async () => {
     const raw = inviteVal.trim(); if (!raw) return;
     if (!session) { setInviteMsg("Sign in with Matrix to invite collaborators."); return; }
@@ -261,10 +288,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setInviteMsg("Inviting …");
     try {
       let rm = room;
-      if (!rm) { rm = await window.MatrixAuth.createDraftRoom(title || "Untitled draft"); setRoom(rm); }
+      if (!rm) {
+        const existing = projPick && (projects || []).find(p => p.roomId === projPick);
+        if (existing) rm = { roomId: existing.roomId, title: existing.title || "Untitled project" };
+        else { const made = await window.MatrixAuth.createDraftRoom(title || "Untitled draft"); rm = { ...made, title: title || "Untitled draft" }; }
+        setRoom(rm);
+      }
       await window.MatrixAuth.invite(rm.roomId, id.mxid);
       setCollabs(c => c.includes(id.mxid) ? c : [...c, id.mxid]);
-      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " into the draft room.");
+      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " into the project — they can work on every document in it.");
     } catch (e) { setInviteMsg("Invite failed: " + (e.message || "try again")); }
   };
   const openRooms = async () => {
@@ -281,7 +313,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   const synced = !!session;
   const saveText = ({ saving: "saving…", syncing: "syncing…", synced: "✓ synced to Matrix", error: "saved locally · sync failed", localonly: "saved on this device" })[saveState] || (synced ? "draft · autosaving" : "draft · autosaves on this device");
-  const saveColor = saveState === "error" ? "#e6b07f" : saveState === "synced" ? "#9fe0b8" : NR.muted;
+  const saveColor = saveState === "error" ? NR.warn : saveState === "synced" ? NR.ok : NR.muted;
 
   const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{children}</button>;
   const Sep = () => <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />;
@@ -290,30 +322,44 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const FB = ({ onClick, children, hot, title }) => <button title={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
 
   return (
-    <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
+    <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* top bar */}
       <div style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6 }}>
           <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
-          <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
+          <button onClick={onDocs || onExit} title="Newsroom home — your document explorer" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
+            <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
+          </button>
           <span className="np-mono" style={{ fontSize: 11.5, color: NR.muted }}>{slugify(title) || "untitled"}.md</span>
           <span className="np-mono" title={synced ? "Your draft is saved here and mirrored to your Matrix account — refresh or switch devices and it comes back." : "Saved on this device. Sign in with Matrix to back it up server-side."} style={{ fontSize: 10.5, color: saveColor, border: "1px solid " + NR.line, padding: "1px 6px", whiteSpace: "nowrap" }}>{saveText}</span>
         </div>
         <span style={{ flex: 1 }} />
-        <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark />
+        <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} {theme === "dark" ? "Light" : "Dark"}
+        </button>
+        <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark={theme === "dark"} />
         {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> Docs</button>}
         <div style={{ position: "relative" }}>
-          <button onClick={openRooms} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.archive style={{ fontSize: 13 }} /> Rooms</button>
-          {showRooms && <RoomsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
+          <button onClick={openRooms} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> Projects</button>
+          {showRooms && <ProjectsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
         </div>
         <div style={{ position: "relative" }}>
           <button onClick={() => setInvite(v => !v)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> Invite</button>
           {invite && (
-            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 280, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
-              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Invite to the draft room</div>
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 300, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Invite to the project</div>
+              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.45 }}>A project can hold many documents — everyone invited works on all of them.</div>
+              {room
+                ? <div className="np-mono" style={{ fontSize: 10.5, marginBottom: 8, display: "flex", alignItems: "center", gap: 5 }}><I.folder style={{ fontSize: 12, flex: "0 0 auto" }} /> <span style={{ fontWeight: 600 }}>{room.title || title || "Untitled project"}</span></div>
+                : (projects && projects.length > 0 && (
+                    <select value={projPick} onChange={e => setProjPick(e.target.value)} className="np-cond" style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", padding: "6px", fontSize: 13, marginBottom: 8 }}>
+                      <option value="">New project · “{title || "Untitled"}”</option>
+                      {projects.map(p => <option key={p.roomId} value={p.roomId}>Add to: {p.title || p.roomId}</option>)}
+                    </select>
+                  ))}
               <div style={{ display: "flex", gap: 6 }}>
                 <input value={inviteVal} onChange={e => setInviteVal(e.target.value)} onKeyDown={e => e.key === "Enter" && doInvite()} placeholder="@name:server" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
                 <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
@@ -324,7 +370,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <div style={{ display: "flex" }}>
-          {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid #14130f", marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
+          {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
         <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? "Publish" : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> Publish
@@ -416,8 +462,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
-        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: "#15130e" }}>
-          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "Sources · " + sources.length]].map(([k, label]) => (
+        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail }}>
+          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -426,7 +472,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
       <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px" }}>
         {/* contents / jumplinks */}
-        <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: "#15130e", borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
+        <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
           <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
           {toc.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>}
           {toc.map(h => (
@@ -446,14 +492,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
         </div>
 
-        {/* editor */}
-        <div className="np-scroll md-preview" ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
-          style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "18px 16px" : "28px 44px", background: "#16140f", color: NR.text, outline: "none", borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}
-          dangerouslySetInnerHTML={{ __html: START_DOC }} />
+        {/* editor — the draft renders as a bordered page on the canvas; the page
+            (not the canvas) is the contentEditable, so the document border wraps
+            banner, headline and body as one sheet */}
+        <div className="np-scroll" ref={scroller} style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+          <div className="md-preview nr-page" ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+            style={{ color: NR.text, outline: "none" }}
+            dangerouslySetInnerHTML={{ __html: START_DOC }} />
+        </div>
 
         {/* sources */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
-          <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.archive style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
+          <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.source style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
             <div className="np-eyebrow" style={{ color: NR.soft, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.plus style={{ fontSize: 13 }} /> Ingest a source</div>
             <textarea value={urlInput} onChange={e => setUrlInput(e.target.value)} rows={2} placeholder="Paste one or more URLs…" className="np-mono" style={{ width: "100%", border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 12, padding: "8px", resize: "vertical", outline: "none" }} />
@@ -478,9 +528,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  {s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: "#e6b07f", display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
-                    : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: "#9fe0b8" }}>● archived</span>
-                    : <span className="np-mono" style={{ fontSize: 9.5, color: "#e6b07f" }}>● snapshot only</span>}
+                  {s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
+                    : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
+                    : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
                   <span style={{ flex: 1 }} />
                   {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}</span>}
                 </div>
@@ -488,7 +538,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button onClick={() => insertCite(s.key)} disabled={s.snapshotting} title="Bind the selected span to this source" className="np-cond" style={{ flex: 1, background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Cite span</button>
-                  {!s.archived && !s.snapshotting && <button onClick={() => setArchiveTarget(s)} className="np-cond" style={{ background: "transparent", border: "1px solid #e6b07f", color: "#e6b07f", padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Archive</button>}
+                  {!s.archived && !s.snapshotting && <button onClick={() => setArchiveTarget(s)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Archive</button>}
                 </div>
               </div>
             );
@@ -505,7 +555,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <FB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote">“”</FB>
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
           <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.ext style={{ fontSize: 13 }} /> Link</FB>
-          <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span"><span style={{ fontFamily: "var(--mono)" }}>⊨</span> Source</FB>
+          <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
 
           {menu === "link" && (
             <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9 }}>
@@ -522,7 +572,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
           {menu === "src" && (
             <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 268, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8, maxHeight: 260, overflowY: "auto" }} className="np-scroll">
-              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Bind this span to a source</div>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.source style={{ fontSize: 13 }} /> Bind this span to a source</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "0 8px", marginBottom: 8 }}>
                 <I.search style={{ fontSize: 14, color: "var(--ink-soft)" }} />
                 <input autoFocus value={srcQuery} onChange={e => setSrcQuery(e.target.value)} onMouseDown={e => e.stopPropagation()} placeholder="Search sources…" style={{ flex: 1, border: 0, background: "transparent", padding: "7px 0", fontFamily: "var(--serif)", fontSize: 13, outline: "none" }} />
@@ -547,24 +597,36 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   );
 }
 
-/* server-recovered rooms — solves "switched browser, can't find my drafts" */
-function RoomsMenu({ rooms, onClose, signedIn }) {
+/* server-recovered projects — solves "switched browser, can't find my work".
+   A project = one shared Matrix room that can hold many documents; its invitees
+   are shared by every document attached to it. */
+function ProjectsMenu({ rooms, onClose, signedIn }) {
+  const projects = (() => {
+    if (!rooms || rooms.loading) return [];
+    const seen = {}; const out = [];
+    (rooms.drafts || []).forEach(d => { if (!seen[d.roomId]) { seen[d.roomId] = 1; out.push({ roomId: d.roomId, title: d.title, topic: "" }); } });
+    (rooms.joined || []).forEach(r => { if (r.kind !== "control" && !seen[r.roomId]) { seen[r.roomId] = 1; out.push({ roomId: r.roomId, title: r.name, topic: r.topic || "" }); } });
+    return out;
+  })();
   return (
     <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 320, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30, maxHeight: 360, overflowY: "auto" }} className="np-scroll">
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Your rooms · from Matrix</span>
+        <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 5 }}><I.folder style={{ fontSize: 13 }} /> Your projects · from Matrix</span>
         <button onClick={onClose} style={{ background: "none", border: 0, fontSize: 14 }}><I.x /></button>
       </div>
-      <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>Recovered straight from the homeserver — not this browser. Wipe or switch devices and they're still here after you sign in.</div>
-      {!signedIn && <div style={{ fontFamily: "var(--serif)", fontSize: 13, color: "var(--ink-soft)" }}>Sign in with Matrix to see your draft rooms.</div>}
+      <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.5 }}>A project holds any number of documents and shares one set of invitees. Recovered straight from the homeserver — not this browser — so wipe or switch devices and they're still here after you sign in.</div>
+      {!signedIn && <div style={{ fontFamily: "var(--serif)", fontSize: 13, color: "var(--ink-soft)" }}>Sign in with Matrix to see your projects.</div>}
       {signedIn && (!rooms || rooms.loading) && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", display: "inline-flex", gap: 6, alignItems: "center" }}><Spinner /> loading from server…</div>}
       {signedIn && rooms && !rooms.loading && (
         <React.Fragment>
-          {(rooms.drafts || []).length > 0 && <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "4px 0 6px" }}>Indexed drafts</div>}
-          {(rooms.drafts || []).map(d => <div key={d.roomId} style={{ borderBottom: "1px solid var(--rule)", padding: "6px 2px" }}><div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14 }}>{d.title}</div><div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{d.roomId}</div></div>)}
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "10px 0 6px" }}>Joined rooms ({(rooms.joined || []).length})</div>
-          {(rooms.joined || []).map(r => <div key={r.roomId} style={{ borderBottom: "1px solid var(--rule)", padding: "6px 2px" }}><div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14 }}>{r.name}</div>{r.topic && <div style={{ fontFamily: "var(--serif)", fontSize: 11.5, color: "var(--ink-soft)" }}>{r.topic}</div>}</div>)}
-          {(rooms.joined || []).length === 0 && (rooms.drafts || []).length === 0 && <div style={{ fontFamily: "var(--serif)", fontSize: 13, color: "var(--ink-soft)" }}>No rooms yet. Invite a collaborator and a draft room is created for you.</div>}
+          {projects.map(p => (
+            <div key={p.roomId} style={{ borderBottom: "1px solid var(--rule)", padding: "6px 2px" }}>
+              <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 12, flex: "0 0 auto", color: "var(--ink-soft)" }} /> {p.title}</div>
+              {p.topic && <div style={{ fontFamily: "var(--serif)", fontSize: 11.5, color: "var(--ink-soft)" }}>{p.topic}</div>}
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{p.roomId}</div>
+            </div>
+          ))}
+          {projects.length === 0 && <div style={{ fontFamily: "var(--serif)", fontSize: 13, color: "var(--ink-soft)" }}>No projects yet. Invite a collaborator and a project is created for this document.</div>}
           {rooms.error && <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", marginTop: 6 }}>{rooms.error}</div>}
         </React.Fragment>
       )}
@@ -621,7 +683,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.86)", zIndex: 5000, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }} className="fade-in">
-      <div style={{ width: 560, maxWidth: "100%", background: "#14130f", border: "1.5px solid var(--yellow)", boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>
+      {/* the publish boundary is always the dark room — the extra .newsroom class
+          re-declares the dark --nr-* vars even when the editor is in light mode */}
+      <div className="newsroom" style={{ width: 560, maxWidth: "100%", background: "var(--nr-field)", border: "1.5px solid var(--yellow)", boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>
         <div style={{ background: "var(--yellow)", color: "var(--ink)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 18 }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21 }}>PUBLISH BOUNDARY</span>
@@ -633,13 +697,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             const state = publish.done || publish.step > i ? "done" : publish.step === i ? "active" : "wait";
             return (
               <div key={i} style={{ display: "flex", gap: 13, padding: "10px 0", borderBottom: i < STEPS.length - 1 ? "1px solid " + NR.line : 0, opacity: state === "wait" ? .4 : 1, transition: "opacity .3s" }}>
-                <span style={{ flex: "0 0 28px", textAlign: "center" }}>{state === "done" ? <I.check style={{ fontSize: 18, color: "#9fe0b8" }} /> : state === "active" ? <Spinner /> : <span style={{ fontFamily: "var(--mono)", color: NR.muted }}>{window.NPJ.EO.glyph(s.code)}</span>}</span>
+                <span style={{ flex: "0 0 28px", textAlign: "center" }}>{state === "done" ? <I.check style={{ fontSize: 18, color: NR.ok }} /> : state === "active" ? <Spinner /> : <span style={{ fontFamily: "var(--mono)", color: NR.muted }}>{window.NPJ.EO.glyph(s.code)}</span>}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: "var(--cond)", fontSize: 16, color: NR.text, fontWeight: 600 }}>{s.label}</div>
                   <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, marginTop: 2 }}>{s.detail}</div>
                   {s.sources && state !== "wait" && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
-                      {srcKeys.map((k) => <span key={k} className="np-mono fade-in" style={{ fontSize: 9, padding: "1px 5px", border: "1px solid " + NR.line, color: state === "done" ? "#9fe0b8" : NR.soft }}>{state === "done" ? "✓ " : "↻ "}{k.slice(0, 12)}</span>)}
+                      {srcKeys.map((k) => <span key={k} className="np-mono fade-in" style={{ fontSize: 9, padding: "1px 5px", border: "1px solid " + NR.line, color: state === "done" ? NR.ok : NR.soft }}>{state === "done" ? "✓ " : "↻ "}{k.slice(0, 12)}</span>)}
                     </div>
                   )}
                 </div>
@@ -659,7 +723,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                     </div>
                   </React.Fragment>
                 : <React.Fragment>
-                    <div style={{ fontFamily: "var(--display)", fontSize: 24, color: "#e6b07f", marginBottom: 6 }}>PUBLISH DIDN'T COMPLETE</div>
+                    <div style={{ fontFamily: "var(--display)", fontSize: 24, color: NR.warn, marginBottom: 6 }}>PUBLISH DIDN'T COMPLETE</div>
                     <div className="np-mono" style={{ fontSize: 11.5, color: NR.soft, lineHeight: 1.5, maxWidth: 440, margin: "0 auto 16px" }}>{result.msg} Your draft is safe — it stays saved on this device and synced to your Matrix account.</div>
                   </React.Fragment>}
               <div style={{ display: "flex", gap: 9, justifyContent: "center" }}>
@@ -748,14 +812,14 @@ function NewsroomLocked({ signedIn, me, onSignIn, onHome }) {
     <div className="newsroom fade-in" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 22px", textAlign: "center" }}>
       <div style={{ maxWidth: 520 }}>
         <I.lock style={{ fontSize: 40, color: "var(--yellow)" }} />
-        <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: .95, margin: "16px 0 12px", color: "#e3ddcc" }}>The newsroom is invite-only</h1>
-        <p style={{ fontFamily: "var(--serif)", fontSize: 16, lineHeight: 1.5, color: "#b3ad9c", margin: 0 }}>
+        <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: .95, margin: "16px 0 12px", color: NR.text }}>The newsroom is invite-only</h1>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 16, lineHeight: 1.5, color: NR.soft, margin: 0 }}>
           People's Journalism is being built by its founding admin. For now, only the admin and the contributors they've added can draft and edit here — that opens up as the network grows.
         </p>
-        {signedIn && <p className="np-mono" style={{ fontSize: 12, color: "#e6b07f", margin: "12px 0 0", lineHeight: 1.5 }}>You're verified as {me}, but you're not on the contributor allowlist yet. Ask the admin to add you.</p>}
+        {signedIn && <p className="np-mono" style={{ fontSize: 12, color: NR.warn, margin: "12px 0 0", lineHeight: 1.5 }}>You're verified as {me}, but you're not on the contributor allowlist yet. Ask the admin to add you.</p>}
         <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 24, flexWrap: "wrap" }}>
           {!signedIn && <button onClick={onSignIn} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Sign in with Matrix</button>}
-          <button onClick={onHome} className="btn" style={{ background: "transparent", color: "#e3ddcc", borderColor: NR.line }}>Back to the public site</button>
+          <button onClick={onHome} className="btn" style={{ background: "transparent", color: NR.text, borderColor: NR.line }}>Back to the public site</button>
         </div>
       </div>
     </div>

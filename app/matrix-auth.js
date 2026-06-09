@@ -141,7 +141,7 @@
     const id = parseMxid(userInput);
     if (!id) { const e = new Error("Invite needs a full Matrix ID (@name:server)"); e.code = "badmxid"; throw e; }
     const roomId = await resolveRoom(roomIdOrAlias);
-    if (!roomId) { const e = new Error("No draft room is set"); e.code = "noroom"; throw e; }
+    if (!roomId) { const e = new Error("No project is set for this document"); e.code = "noroom"; throw e; }
     await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/invite", {
       method: "POST", token: session.access_token, body: { user_id: id.mxid }
     });
@@ -297,23 +297,25 @@
     if (!drafts.find(d => d.roomId === entry.roomId)) drafts.unshift({ roomId: entry.roomId, title: entry.title || "Untitled", ts: new Date().toISOString() });
     await setAccountData(DRAFTS_TYPE, { drafts: drafts.slice(0, 100) });
   }
-  // Create a collaborative draft room WITH a global alias so it's recoverable by
-  // name from any browser, and index it on the account.
+  // Create a collaborative project room WITH a global alias so it's recoverable
+  // by name from any browser, and index it on the account. A project can hold
+  // any number of documents; its members (invitees) are shared by all of them.
   async function createDraftRoom(title) {
     if (!session) { const e = new Error("Sign in with Matrix first"); e.code = "noauth"; throw e; }
     const slug = String(title || "draft").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "draft";
     const aliasLocalpart = "npj-draft-" + slug + "-" + Math.random().toString(36).slice(2, 6);
+    const topic = "People's Journalism project — every document in this project shares these members";
     let out;
     try {
       out = await api(session.base_url, "/_matrix/client/v3/createRoom", {
         method: "POST", token: session.access_token,
-        body: { name: title || "Untitled draft", topic: "People's Journalism draft", visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart, initial_state: [appRoomState("draft")] }
+        body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart, initial_state: [appRoomState("draft")] }
       });
     } catch (e) {
       // alias clash or restriction → make the room without an alias
-      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled draft", visibility: "private", preset: "private_chat", initial_state: [appRoomState("draft")] } });
+      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", initial_state: [appRoomState("draft")] } });
     }
-    await registerDraft({ roomId: out.room_id, title: title || "Untitled draft" });
+    await registerDraft({ roomId: out.room_id, title: title || "Untitled project" });
     return { roomId: out.room_id, alias: out.room_alias || null };
   }
 

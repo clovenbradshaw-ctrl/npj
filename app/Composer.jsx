@@ -199,7 +199,7 @@ function Composer({ user, session, onSignOut }) {
           <TBtn onClick={() => exec("formatBlock", "<blockquote>")}>“”</TBtn>
           <TBtn onClick={() => exec("insertUnorderedList")}>• List</TBtn>
           <Sep />
-          <TBtn onClick={bindSource} title="Bind selected text to a source"><span style={{ fontFamily: "var(--mono)" }}>⊨</span> Source</TBtn>
+          <TBtn onClick={bindSource} title="Bind selected text to a source — the claim stands on it"><I.source style={{ fontSize: 14 }} /> Source</TBtn>
           <Sep />
           <div style={{ position: "relative" }}>
             <TBtn onClick={() => setInsertOpen(o => !o)} style={{ background: insertOpen ? "var(--ink)" : "transparent", color: insertOpen ? "var(--yellow)" : "var(--ink)" }}><I.plus style={{ fontSize: 14 }} /> Insert</TBtn>
@@ -227,7 +227,7 @@ function Composer({ user, session, onSignOut }) {
         <div style={{ marginTop: 22, borderTop: "1.5px solid var(--rule)", paddingTop: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <I.shield style={{ fontSize: 18, color: "var(--ink-soft)", flex: "0 0 auto", marginTop: 1 }} />
           <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>
-            Highlight a fact and hit <strong>⊨ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
+            Highlight a fact and hit <strong>⊥ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
           </p>
         </div>
       </div>
