@@ -55,6 +55,10 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
   const [published, setPublished] = useState(null); // { articles: EO log metas, legacy: root .md files }
   const [confirmId, setConfirmId] = useState(null);
   const [q, setQ] = useState("");
+  const { isAdmin } = React.useContext(window.LayoutCtx);
+  // unpublished pieces stay listed for admins (badged, still openable) but
+  // drop off the list for everyone else
+  const pubArticles = published ? published.articles.filter(m => isAdmin || m.status !== "unpublished") : [];
 
   // drafts: both layers, newest first (app/drafts.js heals local vs Matrix).
   // Re-list whenever a background sync lands so "backing up…" flips to
@@ -266,12 +270,13 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
               <I.check style={{ fontSize: 14 }} /> Published · EO event logs committed to GitHub
             </div>
             {!published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> reading the public record…</div>}
-            {published && published.articles.length === 0 && published.legacy.length === 0 && (
+            {published && pubArticles.length === 0 && published.legacy.length === 0 && (
               <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its event log lands in articles/ and is listed here.</div>
             )}
-            {published && published.articles.map(m => (
-              <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+            {published && pubArticles.map(m => (
+              <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1 }}>
                 <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, lineHeight: 1.1 }}>{m.headline}</span>
+                {m.status === "unpublished" && <span className="np-mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".06em", color: "var(--reject)", border: "1px solid var(--reject)", padding: "1px 5px", textTransform: "uppercase" }}>⊘ Unpublished</span>}
                 <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{m.kicker}{m.published ? " · " + m.published : ""} · {m.versions} version{m.versions !== 1 ? "s" : ""}</span>
                 <span style={{ flex: 1 }} />
                 {onOpenArticle && (

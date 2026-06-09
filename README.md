@@ -40,6 +40,15 @@ badge opens a word-level diff between any two events. **Edit after publish** is
 gated to the admin and the article's `assignees` (the publisher by default) —
 enforced in the n8n webhook against the log's own genesis line, not just in the UI.
 
+**Unpublish never deletes.** An admin can hide a published piece from the
+control bar (or reopen it from Documents). "Unpublish" appends one more
+`REC` event carrying `{"status":"unpublished"}` — so the act of hiding is
+itself part of the permanent record, and the whole log stays in GitHub and git
+history. An unpublished piece drops off the front page, the Documents list and
+the reader for everyone **except admins**, who keep seeing it badged and can
+**Republish** it (another `REC` with `status:"published"`) at any time. Nothing
+is ever truly removed; the site just stops serving it.
+
 ## Identity & permissions (rooted in Matrix)
 
 Authorization flows from one founding admin and is stored where a browser wipe
