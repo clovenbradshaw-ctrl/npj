@@ -1,1 +1,48 @@
-
+{
+  "schema": "npj-layout/1",
+  "updated": "2026-06-09T18:10:27.446Z",
+  "author": "@collective_boundary730383:hyphae.social",
+  "layout": {
+    "sections": [
+      {
+        "name": "Latest",
+        "publishers": []
+      },
+      {
+        "name": "Investigations",
+        "publishers": []
+      },
+      {
+        "name": "Data",
+        "publishers": []
+      },
+      {
+        "name": "Archive",
+        "publishers": []
+      }
+    ],
+    "taglines": [
+      "created",
+      "backed",
+      "edited"
+    ],
+    "utility": [
+      {
+        "label": "Data",
+        "nav": "explore"
+      },
+      {
+        "label": "Our standards",
+        "nav": "standards"
+      },
+      {
+        "label": "Submit",
+        "nav": "submit"
+      }
+    ],
+    "brand": {
+      "accent": "#23c186"
+    },
+    "roles": {}
+  }
+}
