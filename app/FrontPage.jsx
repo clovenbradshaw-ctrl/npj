@@ -51,7 +51,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
         <div className="npj-wordmark" style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 26px", display: "flex",
           alignItems: "center", justifyContent: "space-between", gap: 28 }}>
           <button onClick={onHome} style={{ display: "flex", alignItems: "center", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/NPJ%20LOGO%20trans.png" alt="People's Journalism" style={{ height: 150, display: "block" }} />
+            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/im/NPD%20wide.png" alt="People's Journalism" style={{ height: 150, display: "block" }} />
           </button>
           {taglines.length > 0 && (
             <div className="npj-taglines" style={{ textAlign: "right", borderRight: "4px solid var(--ink)", paddingRight: 18 }}>
