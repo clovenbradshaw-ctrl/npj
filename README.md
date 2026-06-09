@@ -55,6 +55,30 @@ claim and bind a source to **that span**. One source can back **several spans** 
 the same piece (shared citation number). Sources are snapshotted to archive.org;
 a claim that points nowhere fails the publish build.
 
+## The Data explorer (`#explore`) is fed by archive.org tags
+
+The Data page queries the Internet Archive's search API on load
+(`app/archive-sources.js`) and lists every item carrying the NPJ subject tag —
+each one becomes a searchable, previewable card on `#explore` and a citeable
+source in the composer's **Cite a dataset** picker.
+
+**Tag an upload so it shows up:**
+
+| archive.org metadata | Value | |
+|---|---|---|
+| Subject tag | `npj-source` | **required** — the tag the query matches |
+| Subject tag | `npj-project:<Name>` | optional — groups the item under a project filter |
+| Title / description | human-readable | recommended — shown on the card |
+| License | CC-BY-4.0 | per our standards |
+
+Add tags at upload time (<https://archive.org/upload> → *Subject tags*) or
+afterwards from the item's **Edit metadata** page. New or re-tagged items appear
+once the archive.org search index refreshes — minutes up to about an hour.
+
+The query lives in `window.NPJ.ARCHIVE` (`app/archive-sources.js`): change `tag`
+to rename the convention, or set `extraQuery: 'uploader:"you@example.com"'` to
+pin the page to a single IA account so nobody else can tag their way in.
+
 ## Running
 
 Open `index.html` in a browser (or serve the folder statically — it's the entry
