@@ -35,6 +35,35 @@ const SRC_TYPE = {
   reporting: { label: "Reporting", icon: I.mic,  color: "var(--review)" }
 };
 
+/* ---------- plain-text paste ----------
+   Text copied in loses its original formatting: every editor rebuilds the
+   clipboard's text/plain — blank line = new paragraph, single newline = <br> —
+   so fonts, colors and backgrounds never ride in from the source page. */
+const escHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+window.NpjPlainText = {
+  toHtml(text) {
+    return String(text).replace(/\r\n?/g, "\n").split(/\n{2,}/)
+      .map(b => "<p>" + (escHtml(b).replace(/\n/g, "<br/>") || "<br/>") + "</p>").join("");
+  },
+  // insert at the caret; inside a <pre> (code block, verse) the raw text goes
+  // in as-is so its newlines survive instead of becoming paragraphs
+  insert(text) {
+    const sel = window.getSelection();
+    const n = sel && sel.anchorNode;
+    const el = n && (n.nodeType === 1 ? n : n.parentElement);
+    const inPre = !!(el && el.closest && el.closest("pre"));
+    if (inPre || String(text).indexOf("\n") < 0) document.execCommand("insertText", false, text);
+    else document.execCommand("insertHTML", false, this.toHtml(text));
+  }
+};
+
+/* ---------- real site URLs ----------
+   Where this site actually lives — GitHub Pages, a custom domain, localhost —
+   derived from the page URL, never a hardcoded domain. A published article is
+   the committed markdown file at the site root. */
+function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
+function npjArticleUrl(slug) { return npjSiteBase() + slug + ".md"; }
+
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
@@ -163,9 +192,10 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: dark ? "rgba(216,211,196,.7)" : "var(--ink-soft)" }}>Permanent link</span>
-        <button onClick={() => copy(archiveUrl, "arc")} title="Copy archive.org permalink" style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)" }}>
-          <I.archive style={{ fontSize: 14 }} /> {copied === "arc" ? "Copied!" : "archive.org snapshot"}
-        </button>
+        {/* a real wayback action (view or trigger a capture), not a copied string */}
+        <a href={archiveUrl} target="_blank" rel="noopener" title="Open this page on archive.org" style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)" }}>
+          <I.archive style={{ fontSize: 14 }} /> archive.org snapshot
+        </a>
         <button onClick={() => copy(url, "url")} style={pill}>{copied === "url" ? "Copied!" : <React.Fragment><I.ext style={{ fontSize: 13 }} /> Copy link</React.Fragment>}</button>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
@@ -180,4 +210,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl });

@@ -36,6 +36,14 @@
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
  *
+ * archive.org links (when window.NpjArchiveCDN is present — app/archive-cdn.js):
+ *   Dropping or pasting an archive.org link (details page, download link, or
+ *   wayback capture) resolves it to a direct image URL and writes it into the
+ *   element's `src` attribute — so the image rides the host document's HTML
+ *   (drafts, publish) instead of the sidecar, served by the IA's CDN. The
+ *   element marks such srcs with `data-cdn` (Remove clears them) and fires a
+ *   bubbling 'image-slot-change' event so hosts that persist HTML can save.
+ *
  * Size and layout come from ordinary CSS on the element — width/height
  * inline or from a parent grid — so it composes with any layout.
  *
@@ -240,7 +248,7 @@
         '  <img part="image" alt="" draggable="false" style="display:none">' +
         '  <div class="empty" part="empty">' + icon +
         '    <div class="cap"></div>' +
-        '    <div class="sub">or <u>browse files</u></div></div>' +
+        '    <div class="sub">or <u>browse files</u><span class="cdn"> · <u data-act="cdn">use an archive.org link</u></span></div></div>' +
         '  <div class="ring" part="ring"></div>' +
         '</div>' +
         '<div class="spill">' +
@@ -267,7 +275,15 @@
       this._subFn = () => this._render();
       // Shadow-DOM listeners live with the shadow DOM — bound once here so
       // disconnect/reconnect (e.g. React remount) doesn't stack handlers.
-      this._empty.addEventListener('click', () => this._input.click());
+      this._empty.addEventListener('click', (e) => {
+        const act = e.target && e.target.getAttribute && e.target.getAttribute('data-act');
+        if (act === 'cdn') {
+          const u = window.prompt('archive.org link — details page, download link, or wayback capture:');
+          if (u) this._ingestUrl(u);
+          return;
+        }
+        this._input.click();
+      });
       root.addEventListener('click', (e) => {
         const act = e.target && e.target.getAttribute && e.target.getAttribute('data-act');
         if (act === 'replace') { this._exitReframe(true); this._input.click(); }
@@ -275,6 +291,7 @@
           this._exitReframe(false);
           this._gen++;
           this._local = null;
+          this._dropCdnSrc();
           if (this.id) setSlot(this.id, null); else this._render();
         }
       });
@@ -461,9 +478,58 @@
         e.stopPropagation();
         this._depth = 0;
         this.removeAttribute('data-over');
-        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f) this._ingest(f);
+        const dt = e.dataTransfer;
+        const f = dt && dt.files && dt.files[0];
+        if (f) { this._ingest(f); return; }
+        // no file → maybe a link dragged from another tab (uri-list first;
+        // its comment lines start with '#')
+        const t = dt && (dt.getData('text/uri-list') || dt.getData('text/plain'));
+        const url = String(t || '').split(/[\r\n]+/).find((s) => s && s[0] !== '#');
+        if (url) this._ingestUrl(url);
       }
+    }
+
+    // A remote (archive.org) image rides the `src` ATTRIBUTE — light DOM, so
+    // hosts that persist innerHTML (drafts, publish) carry it — never the
+    // sidecar. data-cdn marks it as slot-set so Remove can tell it apart from
+    // an author-written src; 'image-slot-change' lets the host save the HTML.
+    async _ingestUrl(raw) {
+      const cdn = window.NpjArchiveCDN;
+      if (!cdn) return;
+      this._setError(null);
+      if (!cdn.isMediaUrl(raw)) {
+        this._setError('Link images from archive.org — a details page, download link, or wayback capture.');
+        return;
+      }
+      const gen = ++this._gen;
+      this._cap.textContent = 'Loading from archive.org…';
+      try {
+        const url = await cdn.resolve(raw);
+        if (gen !== this._gen) return;
+        this._exitReframe(false);
+        this._local = null;
+        if (this.id) setSlot(this.id, null); // the sidecar copy (if any) yields to the CDN src
+        this.setAttribute('data-cdn', '');
+        this.setAttribute('src', url); // attributeChangedCallback re-renders
+        this._announce(url);
+      } catch (err) {
+        if (gen !== this._gen) return;
+        this._render(); // restore the placeholder caption
+        this._setError((err && err.message) || 'Could not load that archive.org link.');
+      }
+    }
+
+    _dropCdnSrc() {
+      if (!this.hasAttribute('data-cdn')) return;
+      this.removeAttribute('data-cdn');
+      this.removeAttribute('src');
+      this._announce(null);
+    }
+
+    _announce(src) {
+      this.dispatchEvent(new CustomEvent('image-slot-change', {
+        bubbles: true, composed: true, detail: { id: this.id || null, src: src || null }
+      }));
     }
 
     async _ingest(file) {
@@ -483,6 +549,9 @@
         // Only exit reframe once the new image is in hand — a rejected type
         // or decode failure leaves the in-progress crop untouched.
         this._exitReframe(false);
+        // a slot-set archive.org src would otherwise keep publishing the OLD
+        // image underneath this local replacement — retire it
+        this._dropCdnSrc();
         const val = { u: url, s: 1, x: 0, y: 0 };
         setSlot(this.id || '', val);
         // Keep a session-local copy for id-less slots so the drop still
@@ -593,16 +662,23 @@
       this._ring.style.display = mask ? 'none' : '';
 
       // Controls and reframe entry gate on this so share links stay read-only.
-      const editable = !!(window.omelette && window.omelette.writeFile);
+      // The archive-CDN runtime (NPJ newsroom) counts as editable too: there a
+      // slot persists through the host document's HTML, not the sidecar.
+      const cdn = window.NpjArchiveCDN;
+      const editable = !!(window.omelette && window.omelette.writeFile) || !!cdn;
       this.toggleAttribute('data-editable', editable);
       this._sub.style.display = editable ? '' : 'none';
+      const cdnLink = this._sub.querySelector('.cdn');
+      if (cdnLink) cdnLink.style.display = cdn ? '' : 'none';
 
       // Content. The sidecar is also writable by the agent's write_file
       // tool, so its value isn't guaranteed canvas-originated — only accept
-      // data:image/ URLs from it. The `src` attribute is author-controlled
-      // (Claude wrote it into the HTML) so it passes through unchanged.
+      // data:image/ URLs (or allowlisted archive.org URLs) from it. The `src`
+      // attribute is author-controlled (it was written into the HTML) so it
+      // passes through unchanged.
       let stored = this.id ? getSlot(this.id) : this._local;
-      if (stored && stored.u && !/^data:image\//i.test(stored.u)) stored = null;
+      if (stored && stored.u && !/^data:image\//i.test(stored.u) &&
+          !(cdn && cdn.isMediaUrl(stored.u))) stored = null;
       const srcAttr = this.getAttribute('src') || '';
       this._userUrl = (stored && stored.u) || null;
       const url = this._userUrl || srcAttr;

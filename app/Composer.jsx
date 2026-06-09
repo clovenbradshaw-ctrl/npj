@@ -137,6 +137,15 @@ function Composer({ user, session, onSignOut }) {
     document.execCommand("insertHTML", false, html + "<p><br></p>");
     updateWc();
   };
+  // pasted text loses its original formatting — rebuilt from text/plain
+  const onPaste = (e) => {
+    if (!e.clipboardData) return;
+    e.preventDefault();
+    const text = e.clipboardData.getData("text/plain");
+    if (!text) return;
+    window.NpjPlainText.insert(text);
+    updateWc();
+  };
   const insertImage = () => { insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" style="width:100%;height:300px" shape="rect" placeholder="Drop a photo"></image-slot><figcaption class="np-mono">photo · drag an image, then add a caption &amp; credit</figcaption></figure>`); setInsertOpen(false); };
   const insertDivider = () => { insertHTML(`<hr class="cmp-hr"/>`); setInsertOpen(false); };
   const insertEmbed = (e) => {
@@ -282,7 +291,7 @@ function Composer({ user, session, onSignOut }) {
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "0 6px" }}>{wc} words · ~{Math.max(1, Math.round(wc / 200))} min</span>
         </div>
 
-        <div ref={ed} contentEditable suppressContentEditableWarning onInput={updateWc}
+        <div ref={ed} contentEditable suppressContentEditableWarning onInput={updateWc} onPaste={onPaste}
           className="cmp-body" data-ph="Start writing. Select text to format it, or hit Insert to drop in a photo or a data widget…"
           style={{ minHeight: 320, outline: "none", fontFamily: "var(--serif)", fontSize: 18.5, lineHeight: 1.62 }}>
           <p><br/></p>

@@ -57,6 +57,26 @@ claim and bind a source to **that span**. One source can back **several spans** 
 the same piece (shared citation number). Sources are snapshotted to archive.org;
 a claim that points nowhere fails the publish build.
 
+**Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
+PDFs — loses its original formatting at the door: the editors rebuild the
+clipboard's plain text into clean paragraphs (blank line = new ¶), so stray
+fonts, colors and backgrounds never enter a draft.
+
+## Images ride archive.org — it's the media CDN
+
+Article images aren't committed to this repo or stuffed into drafts as data
+URLs. Upload the image at <https://archive.org/upload> (tag it `npj-media` if
+you want your media library greppable, same idea as `npj-source`), then drop
+the item's link onto any image slot in the Newsroom — a details page, a direct
+`/download/` link, or a wayback capture all work; `app/archive-cdn.js` resolves
+them to the item's primary image file via the IA metadata API. The slot renders
+straight from archive.org, the URL travels inside the draft HTML (so it syncs
+to your Matrix account and other devices with the draft), and the published
+`.md` hotlinks the same copy: `![caption](https://archive.org/download/…)`.
+
+Local file drops still preview instantly, but they have no durable URL — they
+stay out of the published markdown until they're on archive.org.
+
 ## The Data explorer (`#explore`) is fed by archive.org tags
 
 The Data page queries the Internet Archive's search API on load

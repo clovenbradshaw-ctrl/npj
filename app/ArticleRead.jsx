@@ -162,7 +162,7 @@ function ArticleRead(props) {
             </span>
           </div>
           <div style={{ paddingTop: 14 }}>
-            <ShareBar url={`https://npj.press/${A.slug}`} archiveUrl={`https://web.archive.org/web/2025/https://npj.press/${A.slug}`} title={A.headline} />
+            <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleUrl(A.slug)}`} title={A.headline} />
           </div>
           {headings.length >= 2 && (
             <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
