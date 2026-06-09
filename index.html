@@ -54,6 +54,7 @@
 <script type="text/babel" src="app/Submit.jsx"></script>
 <script type="text/babel" src="app/Composer.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
+<script type="text/babel" src="app/Documents.jsx"></script>
 <script type="text/babel" src="app/Clippy.jsx"></script>
 <script type="text/babel" src="app/AdminEditor.jsx"></script>
 </head>
@@ -124,7 +125,8 @@ function App() {
 
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
   const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
-  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore"].find(r => hp.includes(r)) || "home");
+  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "documents"].find(r => hp.includes(r)) || "home");
+  const [activeDraftId, setActiveDraftId] = useState("working");
   const [readMode, setReadMode] = useState(hp.includes("audit") ? "audit" : "clean");
   const [direction, setDirection] = useState(initDir);
   const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
@@ -172,6 +174,8 @@ function App() {
 
   // no article? never sit on the article route
   useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE) setRoute("home"); }, [route]);
+  // the document explorer is contributors-only — bounce signed-out visitors to sign in
+  useEffect(() => { if (route === "documents" && !session) setRoute("submit"); }, [route, session]);
 
   // keep the URL hash in sync so a refresh restores the view
   useEffect(() => {
@@ -192,17 +196,21 @@ function App() {
   const goStandards = () => { setRoute("standards"); window.scrollTo(0, 0); };
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
+  const goDocuments = () => { setRoute("documents"); window.scrollTo(0, 0); };
+  const openDoc = (id) => { setActiveDraftId(id || "working"); setRoute("newsroom"); window.scrollTo(0, 0); };
+  const newDoc = () => { setActiveDraftId("doc-" + Date.now().toString(36)); setRoute("newsroom"); window.scrollTo(0, 0); };
 
   const signIn = (sess) => {
     setSession(sess);
     if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
       window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: "#b23a26" };
     }
+    goDocuments(); // first page after sign-in is the document explorer
   };
   const signOut = async () => { try { await window.MatrixAuth.logout(); } catch (e) {} setSession(null); };
 
-  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore,
-    account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
+  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, documents: goDocuments,
+    account: () => (session ? goDocuments() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
@@ -219,11 +227,12 @@ function App() {
           me={me} onHome={goHome} onNewsroom={goNewsroom} />
       )}
       {route === "newsroom" && (isEditorRole
-        ? <Newsroom session={session} draftId="working" onExit={goHome} onPublished={goArticle} />
+        ? <Newsroom key={activeDraftId} session={session} draftId={activeDraftId} onExit={session ? goDocuments : goHome} onPublished={goArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
+      {route === "documents" && session && <DocumentExplorer me={me} session={session} onOpen={openDoc} onNew={newDoc} onHome={goHome} onNewsroom={goNewsroom} onSignOut={signOut} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />
