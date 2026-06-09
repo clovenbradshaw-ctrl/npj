@@ -22,6 +22,7 @@
   const ADMIN_MXID = "@collective_boundary730383:hyphae.social";
   const CONTROL_ALIAS = "#npj-control:hyphae.social"; // Matrix room that stores permissioning
   const PERM_EVENT = "press.npj.permissions";          // state event type holding { roles }
+  const APP_ROOM_TYPE = "press.npj.room";              // state event tagging a room as one of OURS
   const LS_KEY = "npj_matrix_session_v1";               // localStorage → survives tab close & refresh
 
   let session = null; // { user_id, access_token, base_url, device_id, verified, admin }
@@ -147,6 +148,23 @@
     return { invited: id.mxid, roomId };
   }
 
+  /* ---- app-room tagging ----
+     A Matrix account has a whole life outside this app, so every room NPJ
+     creates carries a press.npj.room state event (set atomically at creation
+     via initial_state). That tag — shared room state, visible to every member,
+     not per-browser — is how the app tells its own rooms apart from the rest
+     of the account, and joinedRooms() ignores anything without it. */
+  function appRoomState(kind) {
+    return { type: APP_ROOM_TYPE, state_key: "", content: { app: "press.npj", kind: kind || "draft", created: new Date().toISOString() } };
+  }
+  // Stamp the tag onto an existing room (used to migrate rooms made before tagging).
+  async function tagRoom(roomId, kind) {
+    if (!session) return;
+    await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(APP_ROOM_TYPE) + "/", {
+      method: "PUT", token: session.access_token, body: appRoomState(kind).content
+    });
+  }
+
   /* ---- permissioning stored IN Matrix (survives any browser wipe) ----
      Roles live as a state event in the control room; only the founding admin
      (and admins they appoint) can write it. The GitHub layout.json is the public
@@ -160,7 +178,7 @@
     const out = await api(session.base_url, "/_matrix/client/v3/createRoom", {
       method: "POST", token: session.access_token,
       body: { name: "People's Journalism — control", topic: "Permissioning + publishing authority", visibility: "private",
-        room_alias_name: aliasLocalpart, preset: "private_chat" }
+        room_alias_name: aliasLocalpart, preset: "private_chat", initial_state: [appRoomState("control")] }
     });
     return out.room_id;
   }
@@ -187,18 +205,74 @@
      The durability bug: drafts were saved into Matrix rooms, but the only pointer
      to those rooms lived in localStorage — wipe/switch the browser and the rooms
      became unreachable. These read membership + a per-account index straight from
-     the homeserver, so a fresh browser recovers everything after one login. */
+     the homeserver, so a fresh browser recovers everything after one login.
+
+     Scope: ONLY rooms tagged press.npj.room. The old version probed every joined
+     room on the account (two state GETs each → a console 404 for every room with
+     no name/topic, and it dragged the user's unrelated rooms into the app). Now
+     one filtered /sync returns just the app tag + name + topic for all joined
+     rooms in a single 200, and untagged rooms are ignored. Rooms that predate
+     tagging are still recognised via the account's draft index / control alias
+     and retro-tagged best-effort so they're self-describing from then on. */
+  const ROOM_STATE_TYPES = [APP_ROOM_TYPE, "m.room.name", "m.room.topic"];
   async function joinedRooms() {
     if (!session) return [];
+    // Rooms this account already knows are ours (created before tagging existed).
+    const legacyIds = new Set();
+    try { (await listDrafts()).forEach(d => { if (d && d.roomId) legacyIds.add(d.roomId); }); } catch (e) {}
+    let controlId = null;
+    try { controlId = await resolveRoom(CONTROL_ALIAS); } catch (e) { /* not created yet */ }
+    if (controlId) legacyIds.add(controlId);
+    const kindOf = (roomId, marker) => (marker && marker.kind) || (roomId === controlId ? "control" : "draft");
+    const collect = (events) => { const c = {}; for (const ev of events) { if (ev && ev.state_key === "") c[ev.type] = ev.content; } return c; };
+    const toRoom = (roomId, c) => ({
+      roomId,
+      name: (c["m.room.name"] && c["m.room.name"].name) || roomId,
+      topic: (c["m.room.topic"] && c["m.room.topic"].topic) || "",
+      kind: kindOf(roomId, c[APP_ROOM_TYPE])
+    });
+
+    // One filtered sync: per joined room, only the three state types we care about.
+    const filter = {
+      presence: { types: [] }, account_data: { types: [] },
+      room: { ephemeral: { types: [] }, account_data: { types: [] },
+        state: { types: ROOM_STATE_TYPES }, timeline: { limit: 1, types: ROOM_STATE_TYPES } }
+    };
+    let joined = null;
+    try {
+      const out = await api(session.base_url, "/_matrix/client/v3/sync?timeout=0&set_presence=offline&filter=" + encodeURIComponent(JSON.stringify(filter)), { token: session.access_token });
+      joined = (out.rooms && out.rooms.join) || {};
+    } catch (e) { /* sync unavailable → index-only fallback below */ }
+
+    const rooms = [];
+    if (joined) {
+      for (const roomId of Object.keys(joined)) {
+        const r = joined[roomId] || {};
+        // recent state changes ride in the timeline section; merge them over state
+        const c = collect(((r.state && r.state.events) || []).concat((r.timeline && r.timeline.events) || []));
+        const marker = c[APP_ROOM_TYPE];
+        if (!marker && !legacyIds.has(roomId)) continue; // the rest of their Matrix life — not ours to touch
+        if (!marker) {
+          const kind = kindOf(roomId, null);
+          // retro-tag what we have authority over: own drafts always, control only as admin
+          if (kind !== "control" || session.admin) tagRoom(roomId, kind).catch(() => {});
+        }
+        rooms.push(toRoom(roomId, c));
+      }
+      return rooms;
+    }
+
+    // Fallback: read full state for the known app rooms only — still never probes
+    // unrelated rooms, and full-state GETs return 200 even with no name/topic.
     let ids = [];
     try { const out = await api(session.base_url, "/_matrix/client/v3/joined_rooms", { token: session.access_token }); ids = out.joined_rooms || []; }
     catch (e) { return []; }
-    const rooms = [];
-    for (const roomId of ids.slice(0, 60)) {
-      let name = null, topic = null;
-      try { const n = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/m.room.name/", { token: session.access_token }); name = n && n.name; } catch (e) {}
-      try { const t = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/m.room.topic/", { token: session.access_token }); topic = t && t.topic; } catch (e) {}
-      rooms.push({ roomId, name: name || roomId, topic: topic || "" });
+    for (const roomId of ids) {
+      if (!legacyIds.has(roomId)) continue;
+      try {
+        const st = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state", { token: session.access_token });
+        rooms.push(toRoom(roomId, collect(st || [])));
+      } catch (e) { /* unreadable → skip */ }
     }
     return rooms;
   }
@@ -233,11 +307,11 @@
     try {
       out = await api(session.base_url, "/_matrix/client/v3/createRoom", {
         method: "POST", token: session.access_token,
-        body: { name: title || "Untitled draft", topic: "People's Journalism draft", visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart }
+        body: { name: title || "Untitled draft", topic: "People's Journalism draft", visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart, initial_state: [appRoomState("draft")] }
       });
     } catch (e) {
       // alias clash or restriction → make the room without an alias
-      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled draft", visibility: "private", preset: "private_chat" } });
+      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled draft", visibility: "private", preset: "private_chat", initial_state: [appRoomState("draft")] } });
     }
     await registerDraft({ roomId: out.room_id, title: title || "Untitled draft" });
     return { roomId: out.room_id, alias: out.room_alias || null };
@@ -246,8 +320,8 @@
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
   window.MatrixAuth = {
-    ADMIN_MXID, CONTROL_ALIAS, parseMxid, discover, login, logout, restore, current, token,
-    isSignedIn, isAdmin, resolveRoom, invite, ensureControlRoom, readPermissions, writePermissions,
+    ADMIN_MXID, CONTROL_ALIAS, APP_ROOM_TYPE, parseMxid, discover, login, logout, restore, current, token,
+    isSignedIn, isAdmin, resolveRoom, invite, tagRoom, ensureControlRoom, readPermissions, writePermissions,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
