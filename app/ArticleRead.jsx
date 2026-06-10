@@ -102,12 +102,41 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
 // Two-source image: try the live Matrix media-store copy first, fall back to
 // the durable archive.org one (then any further candidates). Both URLs ride in
 // the img block — see freezeArticleMedia (app/media-store.js).
+//
+// A media-store URL can't be loaded by a bare <img>: authenticated-media
+// homeservers (Matrix 1.11+) reject an unauthenticated GET, so we resolve it
+// through NpjMedia.resolveDisplay first — that fetches the bytes with the
+// session token and hands back a blob: URL when signed in, or the original URL
+// otherwise. Either way, if the candidate fails to paint, onError advances to
+// the next one (the archive.org copy), so the image always loads from the
+// media store when it can and from archive.org when it can't.
 function MediaImg({ srcs, alt, style }) {
   const list = (srcs || []).filter(Boolean);
   const [i, setI] = useState(0);
+  const [resolved, setResolved] = useState(null);
+  const idx = Math.min(i, Math.max(0, list.length - 1));
+  const cur = list[idx];
+  React.useEffect(() => {
+    let alive = true, made = null;
+    setResolved(null);
+    if (!cur) return;
+    const isStore = window.NpjMedia && window.NpjMedia.isStoreUrl(cur);
+    if (isStore && window.NpjMedia.resolveDisplay) {
+      window.NpjMedia.resolveDisplay(cur).then(u => {
+        if (!alive) { if (u && u !== cur && u.indexOf("blob:") === 0) URL.revokeObjectURL(u); return; }
+        if (u && u !== cur && u.indexOf("blob:") === 0) made = u;
+        setResolved(u || cur);
+      }).catch(() => { if (alive) setResolved(cur); });
+    } else {
+      setResolved(cur);
+    }
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [cur]);
   if (!list.length) return null;
-  const idx = Math.min(i, list.length - 1);
-  return <img src={list[idx]} alt={alt || ""} loading="lazy" style={style}
+  // while an authenticated store fetch is in flight, hold a neutral placeholder
+  // rather than flashing a doomed unauthenticated <img> request
+  if (resolved == null) return <div style={{ ...style, background: "var(--paper-2)" }} aria-hidden="true" />;
+  return <img src={resolved} alt={alt || ""} loading="lazy" style={style}
     onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
 }
 
