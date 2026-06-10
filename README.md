@@ -22,7 +22,7 @@ founding admin curates the site and grows the network from there.
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
-| `app/Clippy.jsx` | drafting assistant — suggests **tags** (never citations) |
+| `app/Clippy.jsx` | drafting assistant — suggests **tags**, and helps **locate** the supporting span inside a source (never invents a citation) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
@@ -76,12 +76,24 @@ Two ways in, surfaced on the **Submit** page:
 2. **Sign in with Matrix** — contributors on the allowlist. No account yet? Pick a
    homeserver at <https://matrix.org/ecosystem/hosting/>.
 
-## Sourcing is manual and span-bound
+## Sourcing is manual and span-bound — on both ends
 
-No AI touches citations. In the Newsroom you select the exact words that make a
-claim and bind a source to **that span**. One source can back **several spans** in
-the same piece (shared citation number). Sources are snapshotted to archive.org;
-a claim that points nowhere fails the publish build.
+In the Newsroom you select the exact words that make a claim and bind a source to
+**that span**. But binding a source is only half of it: **you can't cite a whole
+page.** Every bound span must then **pin the exact words *inside the source*** that
+back the claim. Until it does, the span is flagged (⚑ `needs-quote`) and the
+publish build refuses it — right next to the "no source record" check. The pinned
+passage rides the article (`data-quote` → the claim token's `q` map) and shows in
+the reader's citation card as *"the cited passage — in the source."* One source can
+back **several spans**, each pinned to its own words. Sources are snapshotted to
+archive.org; a claim that points at a page but no span fails the build.
+
+**Clippy finds the span — he never invents the citation.** When you bind a source,
+hit **📎 Find it with Clippy**: he takes your claim and the source's text, ranks the
+source's sentences by overlap, and points at the one that backs the claim — you
+review and pin it. No source text yet? Paste the passage into Clippy and he ranks
+within it (and remembers it on the source for the next claim). He proposes the
+span; the author decides what's true.
 
 **Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
 PDFs — loses its original formatting at the door: the editors rebuild the

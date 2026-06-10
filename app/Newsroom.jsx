@@ -113,6 +113,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const h1 = ed.current.querySelector("h1");
             if (h1) { const p = document.createElement("p"); p.className = "nr-dek"; p.setAttribute("data-ph", DEK_PH); p.innerHTML = "<br/>"; h1.after(p); }
           }
+          // older drafts predate source-span pinning — backfill a stable cid on
+          // each bound span + its marker (so it can be pinned), and flag any span
+          // without a pinned quote so the author goes back and points at the
+          // exact words in the source (the publish build will hold them to it)
+          ed.current.querySelectorAll(".claim-src").forEach((el, i) => {
+            let cid = el.getAttribute("data-cid");
+            if (!cid) { cid = "cs-legacy-" + Date.now().toString(36) + "-" + i; el.setAttribute("data-cid", cid); }
+            const sup = el.nextElementSibling;
+            if (sup && sup.classList && sup.classList.contains("md-cite") && !sup.hasAttribute("data-cid")) {
+              sup.setAttribute("data-cid", cid);
+              if (!sup.hasAttribute("data-quote")) sup.setAttribute("data-quote", el.getAttribute("data-quote") || "");
+            }
+            if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
+          });
         }
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
@@ -174,7 +188,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
-    if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); }
+    if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); return; }
+    // click a cited span (or its marker) to pin / re-pin the words in the source
+    const cs = e.target.closest && e.target.closest(".claim-src, sup.md-cite[data-cid]");
+    if (cs && cs.getAttribute("data-cid")) {
+      const cid = cs.getAttribute("data-cid");
+      const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + cid + '"]');
+      openPin(cid, cs.getAttribute("data-src") || cs.getAttribute("data-cite"), span ? (span.textContent || "").trim() : "");
+    }
   };
 
   // ---- selection plumbing ----
@@ -370,19 +391,72 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // nothing selected it ARMS the source instead of failing silently: the next
   // selection you make in the page binds to it (see the effect below). So
   // "pick the source, then grab its exact words" works as well as the reverse.
+  //
+  // Binding no longer FINISHES the citation — it opens it. You can't just cite a
+  // page: every bound span must then PIN the exact words IN THE SOURCE that back
+  // the claim (data-quote). Until it's pinned the span is flagged `needs-quote`
+  // and the publish build refuses it, so a claim can never stand on a whole
+  // page — only on a specific span of a specific source.
   const bindSource = (key) => {
     const r = spanRange();
     if (!r) { setArmSrc(key); setMenu(null); return; }
     let order = citeOrderRef.current;
     if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
     const num = order.indexOf(key) + 1;
-    const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-src", key);
+    const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
+    const claimText = String(r.toString() || "").trim();
+    const span = document.createElement("span"); span.className = "claim-src needs-quote";
+    span.setAttribute("data-src", key); span.setAttribute("data-cid", cid); span.setAttribute("data-quote", "");
     try { r.surroundContents(span); } catch (e) { const frag = r.extractContents(); span.appendChild(frag); r.insertNode(span); }
-    const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false"); sup.setAttribute("data-cite", key); sup.title = key; sup.textContent = num;
+    const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
+    sup.setAttribute("data-cite", key); sup.setAttribute("data-cid", cid); sup.setAttribute("data-quote", ""); sup.title = key; sup.textContent = num;
     span.after(sup);
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
     window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave();
+    // now make the author point at the words in the source — the citation isn't
+    // done until that span is pinned
+    openPin(cid, key, claimText);
   };
+
+  // ---- pin the source-span: the words IN THE SOURCE that back this claim ----
+  const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
+  const [pinQuote, setPinQuote] = useState("");
+  const openPin = (cid, key, claimText) => {
+    // re-opening an existing binding? read back whatever quote is on it
+    let existing = "";
+    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
+    setPinQuote(existing);
+    setPinTarget({ cid, key, claimText });
+  };
+  const closePin = () => { setPinTarget(null); setPinQuote(""); };
+  const savePin = () => {
+    const t = pinTarget; if (!t) return;
+    const q = String(pinQuote || "").trim();
+    if (!q) return;
+    if (ed.current) {
+      ed.current.querySelectorAll('[data-cid="' + t.cid + '"]').forEach(el => {
+        el.setAttribute("data-quote", q);
+        if (el.classList.contains("claim-src")) { el.classList.remove("needs-quote"); el.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”"); }
+      });
+    }
+    // remember the passage on the source record too, so the next claim off the
+    // same source can be matched against text we've already pulled
+    const rec = window.NPJ.SOURCES[t.key];
+    if (rec && (!rec.text || rec.text.indexOf(q) < 0)) rec.text = (rec.text ? rec.text + "\n" : "") + q;
+    closePin(); setRev(v => v + 1); scheduleSave();
+  };
+  // hand the claim + source over to Clippy and let him locate the supporting span
+  const findWithClippy = () => {
+    const t = pinTarget; if (!t || !window.__clippy || !window.__clippy.findSpan) return;
+    const rec = window.NPJ.SOURCES[t.key] || {};
+    window.__clippy.findSpan({
+      claimText: t.claimText,
+      source: { key: t.key, title: rec.title, outlet: rec.outlet, text: rec.text || "" },
+      onPick: (quote) => setPinQuote(quote)
+    });
+  };
+  // every bound span still missing its source-span
+  const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0; };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
@@ -623,7 +697,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <span style={{ flex: 1 }} />
-        <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source span</span>
+        <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source — then pin the words in the source</span>
       </div>
 
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
@@ -684,6 +758,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* sources */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.source style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
+          {(() => { const nq = needsQuoteCount(); return nq ? (
+            <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
+              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — 📎 Clippy can find them.
+            </div>
+          ) : null; })()}
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
             <div className="np-eyebrow" style={{ color: NR.soft, marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.plus style={{ fontSize: 13 }} /> Ingest a source</div>
             <textarea value={urlInput} onChange={e => setUrlInput(e.target.value)} rows={2} placeholder="Paste one or more URLs…" className="np-mono" style={{ width: "100%", border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 12, padding: "8px", resize: "vertical", outline: "none" }} />
@@ -697,13 +776,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
               <I.doc style={{ fontSize: 15 }} /> Upload documents
             </label>
-            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual: select the exact words, then bind a source — or hit <b>Cite span</b> on a source and grab the words next. One source can back several spans.</div>
+            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual and two-sided: select the exact words in your draft, bind a source, then <b>pin the exact words IN the source</b> that back the claim. You can't cite a whole page. One source can back several spans.</div>
           </div>
 
           {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6, padding: "0 2px" }}>No sources yet. Ingest a URL or upload a document, then highlight a claim and bind it.</div>}
           {sources.map(s => {
             const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key, outlet: "" };
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
+            const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -712,7 +792,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
                   <span style={{ flex: 1 }} />
-                  {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}</span>}
+                  {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: unpinned ? NR.warn : NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}{unpinned ? " · " + unpinned + " ⚑" : ""}</span>}
                 </div>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</div>
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
@@ -780,6 +860,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <button onClick={() => setArmSrc(null)} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "4px 10px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Cancel</button>
         </div>
       )}
+
+      {/* pin the source-span: the exact words IN the source that back the claim.
+          A page is not a citation — this is what makes it one. */}
+      {pinTarget && (() => { const rec = window.NPJ.SOURCES[pinTarget.key] || {}; const ready = !!String(pinQuote || "").trim(); return (
+        <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
+            <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
+            <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
+          </div>
+          {pinTarget.claimText && (
+            <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
+              <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
+              “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
+            </div>
+          )}
+          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Paste the EXACT words in the source that back this claim — or let Clippy find them.</div>
+          <textarea autoFocus value={pinQuote} onChange={e => setPinQuote(e.target.value)} placeholder="The supporting words, quoted verbatim from the source…"
+            style={{ width: "100%", minHeight: 64, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            <button onClick={findWithClippy} className="np-cond" style={{ flex: "0 0 auto", background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)", padding: "6px 11px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>📎 Find it with Clippy</button>
+            <span style={{ flex: 1 }} />
+            <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
+            <button onClick={savePin} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
+          </div>
+        </div>
+      ); })()}
 
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
@@ -869,10 +976,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const words = text ? text.split(/\s+/).length : 0;
     const cites = Array.from(root.querySelectorAll("sup.md-cite[data-cite]")).filter(n => !n.hasAttribute("data-fn"));
     const missing = [];
+    let unpinned = 0;
     cites.forEach(n => {
       const k = n.getAttribute("data-cite");
       const rec = window.NPJ.SOURCES[k];
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
+      // every bound span must point at the exact words in the source, not just
+      // the page — a span with no pinned quote fails the build
+      if (!(n.getAttribute("data-quote") || "").trim()) unpinned++;
     });
     const archived = (sources || []).filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
     // images still on the media store get moved onto archive.org at publish
@@ -880,14 +991,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       const s = slot.getAttribute("src");
       return s && window.NpjMedia && window.NpjMedia.isStoreUrl(s);
     }).length;
-    return { content: c, dek, words, spans: cites.length, missing, srcTotal: (sources || []).length, archived, mediaToFreeze: onStore };
+    return { content: c, dek, words, spans: cites.length, missing, unpinned, srcTotal: (sources || []).length, archived, mediaToFreeze: onStore };
   }, []);
 
   const [phase, setPhase] = useState("confirm");          // confirm | run
   const [outcome, setOutcome] = useState(null);           // null | {ok:true} | {ok:false,msg}
   const [steps, setSteps] = useState(() => ([
     { code: "EVA", label: "Pull the finished piece", detail: "draft → EO event (INS — the genesis line)", state: "wait" },
-    { code: "SEG", label: "Build: resolve every bound span", detail: flight.spans + " bound span" + (flight.spans === 1 ? "" : "s") + " to check", state: "wait" },
+    { code: "SEG", label: "Build: resolve & pin every bound span", detail: flight.spans + " bound span" + (flight.spans === 1 ? "" : "s") + " to check", state: "wait" },
     { code: "INS", label: "Sources archived on archive.org", detail: flight.srcTotal ? flight.archived + " of " + flight.srcTotal + " archived" : "no sources bound", state: "wait", sources: true },
     { code: "DEF", label: "Commit the EO event log to GitHub", detail: "→ clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl", state: "wait" },
     { code: "REC", label: "Live & open to suggestion", detail: articleUrl, state: "wait" }
@@ -985,11 +1096,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     upd(0, { state: "active" }); await tick(400);
     if (!flight.words) return halt(0, "the draft is empty", "Write the piece first — there's no text to publish.");
     upd(0, { state: "done", detail: flight.words + " words → articles/" + slug + ".jsonl" });
-    // 2 — build: every bound span must resolve to a source record
+    // 2 — build: every bound span must resolve to a source record AND pin the
+    // exact words in that source (you can't cite a whole page)
     upd(1, { state: "active" }); await tick(400);
     if (flight.missing.length) return halt(1, flight.missing.length + " unresolved · build failed",
       flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record (" + flight.missing.slice(0, 3).join(", ") + (flight.missing.length > 3 ? "…" : "") + "). Re-bind or remove them, then publish again.");
-    upd(1, { state: "done", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · 0 unresolved · build passed ✓" });
+    if (flight.unpinned) return halt(1, flight.unpinned + " span" + (flight.unpinned === 1 ? "" : "s") + " not pinned · build failed",
+      flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source but " + (flight.unpinned === 1 ? "doesn't" : "don't") + " pin the exact words in it. Click the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span — Clippy can find it — then publish again.");
+    upd(1, { state: "done", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · 0 unresolved · 0 unpinned · build passed ✓" });
     // 3 — archive check, against the wayback machine itself: anything without
     // a recorded snapshot gets a live availability lookup, and upgrades stick
     // so the footnotes below cite the archived copy. Snapshot-only cites fall
@@ -1038,6 +1152,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const srcKeys = (sources || []).map(s => s.key);
   const blocked = !flight.words ? "The draft is empty — there's nothing to publish yet."
     : flight.missing.length ? flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record — re-bind or remove them before publishing."
+    : flight.unpinned ? flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source without pinning the exact words in it — open the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span before publishing."
     : null;
   const Row = ({ k, children }) => (
     <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
@@ -1076,7 +1191,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
             <Row k="Length">{flight.words} words</Row>
             <Row k="Sources">{flight.srcTotal ? flight.srcTotal + " bound · " + flight.archived + " archived" + (flight.srcTotal - flight.archived ? " · " + (flight.srcTotal - flight.archived) + " snapshot-only" : "") : "none"}</Row>
-            <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}</Row>
+            <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}{flight.unpinned ? " · " + flight.unpinned + " not pinned to source" : ""}</Row>
             {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish (Wayback Machine fallback if direct upload is unavailable)</Row>}
             {blocked && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px" }}>{blocked}</div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>

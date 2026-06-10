@@ -18,7 +18,7 @@ function useClaimModel(A) {
     const scan = (t) => {
       if (t && t.c && Array.isArray(t.src)) {
         t.src.forEach(k => { if (!sourceNums.has(k)) sourceNums.set(k, ++n); });
-        claimList.push({ id: t.id, text: t.c, src: t.src, num: t.src.map(k => sourceNums.get(k)).join(", ") });
+        claimList.push({ id: t.id, text: t.c, src: t.src, q: t.q || null, num: t.src.map(k => sourceNums.get(k)).join(", ") });
       }
     };
     (A.body || []).forEach(b => {
@@ -82,7 +82,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
           ))}
         </div>
       )}
-      <SourceCard srcKey={srcKeys[tab]} />
+      <SourceCard srcKey={srcKeys[tab]} quote={claim.q && claim.q[srcKeys[tab]]} />
       {spans.length > 1 && (
         <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: 124, overflowY: "auto" }} className="np-scroll">
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — click to jump</div>

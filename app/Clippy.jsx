@@ -1,8 +1,11 @@
-/* NPJ — Clippy, the drafting assistant (tags & structure only).
-   Sourcing is MANUAL and span-bound (select text → ⊨ Source), so Clippy never
-   touches citations. What he does help with: suggesting tags for the piece (from
-   mechanical eoreader3 entity extraction — no model) and recommending which front
-   column to file under. Hidden by default; summon with the 📎 launcher. */
+/* NPJ — Clippy, the drafting assistant.
+   Sourcing stays MANUAL and span-bound (select text → ⊨ Source → pin the words in
+   the source). Clippy never INVENTS a citation or decides what's true — but he does
+   help you LOCATE the supporting span: given your claim and the source's text, he
+   ranks the source's sentences and points at the one that backs the claim, so a
+   citation can never be just a page. He also suggests tags (mechanical eoreader3
+   entity extraction — no model) and the right front column. Hidden by default;
+   summon with the 📎 launcher (or the editor calls window.__clippy.findSpan). */
 
 const CL_SHEET = (window.CLIPPY_SHEETS || {}).clippyjs || "";
 const CL = () => window.CLIPPY_DATA || { anims: {}, mapping: {} };
@@ -50,6 +53,27 @@ function suggestTags(d, columns) {
   return { tags: out.slice(0, 8), column: colMatch[0] || null };
 }
 
+// Find the span IN THE SOURCE that backs a claim. Pure mechanics — no model:
+// split the source into sentences, score each by how many of the claim's
+// content words it carries, return the best few. Clippy proposes; the author
+// pins. This is how a citation gets bound to specific words, not a whole page.
+function keywords(s) {
+  return (String(s || "").toLowerCase().match(/\b[a-z0-9][a-z0-9'-]{2,}\b/g) || []).filter(w => !CL_STOP.has(w));
+}
+function rankSpans(claimText, sourceText) {
+  const want = new Set(keywords(claimText));
+  if (!want.size) return [];
+  const sentences = (String(sourceText || "").replace(/\s+/g, " ").match(/[^.!?]+[.!?]*/g) || [])
+    .map(s => s.trim()).filter(s => s.length > 12);
+  const scored = sentences.map(s => {
+    const seen = new Set(); let hit = 0;
+    keywords(s).forEach(w => { if (want.has(w) && !seen.has(w)) { seen.add(w); hit++; } });
+    return { s, hit, score: hit / want.size };
+  }).filter(x => x.hit > 0).sort((a, b) => b.score - a.score || a.s.length - b.s.length);
+  return scored.slice(0, 3);
+}
+function clip(t, n = 150) { t = String(t || "").trim(); return t.length > n ? t.slice(0, n - 1) + "…" : t; }
+
 function ClippyAgent({ route }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -58,6 +82,7 @@ function ClippyAgent({ route }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const pick = useRef(null); // { claimText, source, onPick } — an active "find the source-span" request
   const [now, setNow] = useState("RestPose");
   const spriteRef = useRef(null);
   const sheet = useRef({ w: 3348, h: 3162, z: 1.25 });
@@ -102,7 +127,7 @@ function ClippyAgent({ route }) {
 
   useEffect(() => {
     if (open && msgs.length === 0) {
-      setMsgs([{ from: "clippy", text: "Hi — I help tag and file your piece. Hit “Suggest tags” and I'll read the draft for likely tags and the right column. (Sourcing stays manual — select a span and hit ⊨ Source.)" }]);
+      setMsgs([{ from: "clippy", text: "Hi — I help tag your piece AND find the exact span in a source that backs a claim. Bind a source to a span, then hit “📎 Find it with Clippy” and I'll point at the supporting sentence. Or hit “Suggest tags” for tag and column ideas." }]);
       sequence(CL_SEQ.greet);
     }
   }, [open]); // eslint-disable-line
@@ -123,20 +148,54 @@ function ClippyAgent({ route }) {
     setBusy(false);
   };
 
+  // run the source-span search and post the result (chips to pin, or a paste box)
+  const runFindSpan = (claimText, sourceText) => {
+    const src = (pick.current && pick.current.source) || {};
+    const title = src.title || "the source";
+    sequence(CL_SEQ.look);
+    const ranked = rankSpans(claimText, sourceText);
+    sequence(CL_SEQ.write);
+    if (!String(sourceText || "").trim())
+      push({ from: "clippy", text: "Paste the passage from " + title + " below — I'll pick the exact sentence that backs:\n\n“" + clip(claimText) + "”", pasteForPick: true });
+    else if (!ranked.length)
+      push({ from: "clippy", text: "I read that text but couldn't find a sentence matching “" + clip(claimText) + "”. Paste a closer passage and I'll try again.", pasteForPick: true });
+    else
+      push({ from: "clippy", text: "The span" + (ranked.length > 1 ? "s" : "") + " in " + title + " that best back" + (ranked.length > 1 ? "" : "s") + " your claim — click to pin:", spanChips: ranked.map(r => r.s) });
+  };
+  // editor handed us a claim + a source; help locate the words in the source
+  const findSpan = (ctx) => {
+    pick.current = { claimText: ctx.claimText || "", source: ctx.source || {}, onPick: ctx.onPick };
+    setOpen(true);
+    setMsgs(list => [...list, { from: "you", text: "Find the source-span for: “" + clip(ctx.claimText, 90) + "”" }]);
+    setTimeout(() => runFindSpan(ctx.claimText || "", (ctx.source && ctx.source.text) || ""), 80);
+  };
+  const pinSpan = (text) => {
+    if (pick.current && pick.current.onPick) pick.current.onPick(text);
+    push({ from: "clippy", text: "Pinned that span as the source for your claim. ✓ Review it and hit “Pin span” in the editor to lock it in." });
+    sequence(CL_SEQ.happy);
+  };
+  const analyzePaste = (text) => {
+    if (!text.trim() || !pick.current) return;
+    const src = pick.current.source || {};
+    if (src.key && window.NPJ && window.NPJ.SOURCES[src.key]) { const rec = window.NPJ.SOURCES[src.key]; rec.text = (rec.text ? rec.text + "\n" : "") + text.trim(); }
+    push({ from: "you", text: "Pasted source text (" + text.trim().split(/\s+/).length + " words)" });
+    runFindSpan(pick.current.claimText, text);
+  };
+
   const send = async (qRaw) => {
     const q = String(qRaw != null ? qRaw : input).trim();
     if (!q || busy) return;
     push({ from: "you", text: q }); setInput(""); setBusy(true);
     const t = q.toLowerCase();
     if (/\b(tag|file|column|categor|topic)\b/.test(t)) { setBusy(false); return doSuggest(); }
-    if (/\b(sourc|cite|citation)\b/.test(t)) { sequence(CL_SEQ.point); push({ from: "clippy", text: "Sourcing is all manual here — highlight the exact words that make a claim, then hit ⊨ Source to bind a snapshot to that span. I stay out of citations on purpose." }); setBusy(false); return; }
+    if (/\b(sourc|cite|citation|span|quote)\b/.test(t)) { sequence(CL_SEQ.point); push({ from: "clippy", text: "Sourcing is manual and two-sided: highlight the exact words that make a claim, hit ⊨ Source to bind a snapshot, then pin the exact words IN the source that back it — a page alone isn't a citation. When you bind a span, hit “📎 Find it with Clippy” and I'll rank the source's sentences and point at the one that backs your claim. I never decide what's true — I just help you find the span." }); setBusy(false); return; }
     sequence(CL_SEQ.point);
     push({ from: "clippy", text: "I'm your tagging helper — try “suggest tags”, or ask which column this belongs in." });
     setBusy(false);
   };
 
   useEffect(() => {
-    window.__clippy = { show: () => setOpen(true), hide: () => setOpen(false), suggest: () => { setOpen(true); setTimeout(doSuggest, 60); }, sequence };
+    window.__clippy = { show: () => setOpen(true), hide: () => setOpen(false), suggest: () => { setOpen(true); setTimeout(doSuggest, 60); }, findSpan, sequence };
     return () => { if (window.__clippy) delete window.__clippy; };
   });
 
@@ -171,6 +230,27 @@ function ClippyAgent({ route }) {
                   {m.chips && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 8 }}>
                       {m.chips.map(c => <button key={c.tag} onClick={() => addTag(c.tag)} className="np-mono" style={{ fontSize: 11, border: "1px solid var(--ink)", background: "var(--paper-2)", padding: "3px 7px", cursor: "pointer" }}>+ #{c.tag}</button>)}
+                    </div>
+                  )}
+                  {m.spanChips && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+                      {m.spanChips.map((s, j) => (
+                        <button key={j} onClick={() => pinSpan(s)} title="Pin this span as the source for your claim"
+                          style={{ textAlign: "left", border: "1px solid var(--ink)", background: "var(--paper-2)", padding: "6px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
+                          <span style={{ borderLeft: "3px solid var(--yellow-deep)", paddingLeft: 7, display: "block" }}>“{clip(s, 220)}”</span>
+                          <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 3, display: "block" }}>📌 click to pin this span</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {m.pasteForPick && (
+                    <div style={{ marginTop: 8 }}>
+                      <textarea rows={3} placeholder="Paste the source passage here…" onMouseDown={e => e.stopPropagation()}
+                        onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { analyzePaste(e.target.value); e.target.value = ""; } }}
+                        ref={el => { if (el) m._pasteEl = el; }}
+                        style={{ width: "100%", resize: "vertical", border: "1px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" }} />
+                      <button onClick={() => { if (m._pasteEl) { analyzePaste(m._pasteEl.value); m._pasteEl.value = ""; } }} className="np-cond"
+                        style={{ marginTop: 5, border: "1px solid var(--ink)", background: "var(--yellow)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" }}>Find the span</button>
                     </div>
                   )}
                 </div>
