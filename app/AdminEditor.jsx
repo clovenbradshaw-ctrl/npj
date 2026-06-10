@@ -31,6 +31,26 @@ function AdminEditor() {
   const [expandCol, setExpandCol] = useState(null);
   const [ia, setIa] = useState(() => (window.NpjMedia && window.NpjMedia.getArchiveCreds()) || { access: "", secret: "" });
   const [iaMsg, setIaMsg] = useState(null);
+  // public byline registry (site/usernames.jsonl) — the admin's chosen, auditable name
+  const [idName, setIdName] = useState("");
+  const [idReg, setIdReg] = useState({});
+  const [idPub, setIdPub] = useState({ state: "idle", msg: "" }); // idle | busy | ok | err
+
+  // Fold the committed byline registry once, prefill the admin's own name.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!window.NpjIdentity) return;
+      try {
+        const identities = await window.NpjIdentity.loadRegistry();
+        if (!alive) return;
+        setIdReg(identities || {});
+        const mine = identities && identities[admin];
+        if (mine && mine.username) setIdName(mine.username);
+      } catch (e) {}
+    })();
+    return () => { alive = false; };
+  }, [admin]);
 
   // Every hook stays ABOVE this guard. isAdmin flips false→true the moment the
   // admin signs in, so an early return placed before some of the hooks changes
@@ -77,6 +97,27 @@ function AdminEditor() {
       setPub({ state: "ok", msg: "Published — committed to clovenbradshaw-ctrl/npj" + (r && r.bytes ? " (" + r.bytes + " bytes)." : ".") + permNote });
     } catch (e) {
       setPub({ state: "err", msg: "Publish failed: " + (e.message || "network error") + ". Changes are still saved locally." });
+    }
+  };
+
+  // Commit the admin's public byline to GitHub (append one EO line to
+  // site/usernames.jsonl). The webhook re-verifies the Matrix token; the act is
+  // itself recorded (actor + ts) so the byline registry stays auditable.
+  const saveIdentity = async () => {
+    const token = window.MatrixAuth.token();
+    if (!token) { setIdPub({ state: "err", msg: "Your Matrix session expired — sign in again." }); return; }
+    const name = window.NpjIdentity.cleanName(idName);
+    if (!name) { setIdPub({ state: "err", msg: "Enter a public name first." }); return; }
+    setIdPub({ state: "busy", msg: "Committing site/usernames.jsonl to GitHub…" });
+    try {
+      const r = await window.NpjIdentity.setUsername({ mxid: admin, username: name, actor: admin, token });
+      if (r && r.unchanged) { setIdPub({ state: "ok", msg: "Already published as “" + name + "” — nothing to commit." }); }
+      else {
+        setIdReg(r.identities || {});
+        setIdPub({ state: "ok", msg: (r.op === "INS" ? "Published byline “" : "Renamed byline to “") + name + "” — committed to clovenbradshaw-ctrl/npj." });
+      }
+    } catch (e) {
+      setIdPub({ state: "err", msg: "Couldn't publish byline: " + (e.message || "network error") + "." });
     }
   };
 
@@ -203,6 +244,38 @@ function AdminEditor() {
                 </select>
                 <MiniBtn onClick={addRole} title="Add contributor">+</MiniBtn>
               </div>
+            </Section>
+
+            {/* Public byline — site/usernames.jsonl */}
+            <Section label="Public byline">
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
+                Your Matrix ID is verified identity, but a poor byline. Set the public name readers see on your stories. It commits one append-only line to <b style={{ color: AE.text }}>site/usernames.jsonl</b> — auditable, never rewritten.
+              </div>
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 6, wordBreak: "break-all" }}>
+                <span style={{ color: "#9fe0b8" }}>● as</span> {admin}
+              </div>
+              <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                <AdminField value={idName} onChange={setIdName} placeholder="e.g. Michael Lacy" />
+                <button onClick={saveIdentity} disabled={idPub.state === "busy"}
+                  style={{ border: "1.5px solid var(--ink)", background: "var(--yellow)", color: "var(--ink)", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", padding: "0 12px", height: 34, cursor: "pointer", flex: "0 0 auto" }}>
+                  {idPub.state === "busy" ? "…" : "Publish"}
+                </button>
+              </div>
+              {idPub.msg && <div className="np-mono" style={{ fontSize: 10, marginTop: 7, lineHeight: 1.5, color: idPub.state === "ok" ? "#9fe0b8" : idPub.state === "err" ? "#e09a85" : AE.soft }}>{idPub.msg}</div>}
+              {Object.keys(idReg).length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="np-mono" style={{ fontSize: 9, color: AE.soft, marginBottom: 5 }}>committed bylines (audit trail)</div>
+                  {Object.keys(idReg).map(mx => {
+                    const e = idReg[mx];
+                    return (
+                      <div key={mx} className="np-mono" style={{ fontSize: 9.5, color: AE.soft, lineHeight: 1.45, marginBottom: 4, wordBreak: "break-all" }}>
+                        <b style={{ color: AE.text }}>{e.username}</b> · {mx}
+                        <br />set by {e.actor || "—"} · {String(e.ts || "").slice(0, 10)}{e.history && e.history.length > 1 ? " · " + e.history.length + " revisions" : ""}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </Section>
 
             {/* Brand */}

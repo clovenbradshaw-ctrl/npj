@@ -47,6 +47,8 @@
 <script src="app/image-slot.js"></script>
 <!-- the published record: EO event logs in articles/*.jsonl — list, fold, publish, append edits -->
 <script src="app/articles.js"></script>
+<!-- public bylines: EO event log in site/usernames.jsonl — binds verified mxids to chosen, auditable public names -->
+<script src="app/identity.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
@@ -232,6 +234,9 @@ function App() {
   useEffect(() => {
     let alive = true;
     (async () => {
+      // fold the committed byline registry, then paint the line-up — so the
+      // front page shows public names rather than mxids on first load
+      try { if (window.NpjIdentity) await window.NpjIdentity.loadRegistry(); } catch (e) {}
       try { await window.NpjArticles.loadFront(); if (alive) setFrontRev(r => r + 1); } catch (e) {}
     })();
     (async () => {
@@ -366,6 +371,13 @@ function App() {
         window.saveLayoutLocal(window.__bootLayout);
       }
     } catch (e) {}
+  }
+  // public bylines before the first frame — fold the committed username registry
+  // into NPJ.PEOPLE so the very first paint shows chosen names, not bare mxids.
+  // Paints from the local cache instantly; the GitHub read is capped so a slow
+  // network never holds up boot.
+  if (window.NpjIdentity) {
+    try { await Promise.race([window.NpjIdentity.loadRegistry(), new Promise(res => setTimeout(res, 3500))]); } catch (e) {}
   }
   // brand vars before the first frame — effects re-apply these identically
   const b = ((window.__bootLayout || window.normalizeLayout(cached)).brand) || {};
