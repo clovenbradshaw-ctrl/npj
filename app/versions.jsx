@@ -78,11 +78,12 @@ function VersionHistory({ versions, onClose }) {
   const [a, setA] = useState(list.length > 1 ? 1 : 0); // older (compare-from)
   const [b, setB] = useState(0);                        // newer (compare-to)
   if (!list.length) return null;
+  const single = list.length < 2;
   const vA = list[a], vB = list[b];
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.72)", zIndex: 5200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 22px" }} className="fade-in">
-      <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: "min(860px,97vw)", maxHeight: "86vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
+      <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: single ? "min(620px,97vw)" : "min(860px,97vw)", maxHeight: "86vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT HISTORY</span>
@@ -91,6 +92,21 @@ function VersionHistory({ versions, onClose }) {
           <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 18 }}><I.x /></button>
         </div>
 
+        {single ? (
+          /* one version — no diff to pick. Show the snapshot plainly with a
+             single tidy version stamp instead of dead from/to controls. */
+          <div style={{ padding: "18px 22px 28px" }}>
+            <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "11px 13px", marginBottom: 18 }}>
+              <div className="np-mono" style={{ fontSize: 12, fontWeight: 600 }}>⊛ v.{vB.sha} · current</div>
+              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 3 }}>{vB.author || "—"} · {vB.ts || ""}</div>
+              {vB.message && <div style={{ fontFamily: "var(--serif)", fontSize: 13, marginTop: 5, lineHeight: 1.4 }}>{vB.message}</div>}
+            </div>
+            <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 12 }}>
+              First and only version — no edits since publishing. A diff appears once this piece is revised.
+            </div>
+            <p style={{ fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.7, margin: 0, textWrap: "pretty" }}>{vB.text}</p>
+          </div>
+        ) : (
         <div style={{ display: "grid", gridTemplateColumns: "232px 1fr", minHeight: 0 }}>
           {/* timeline */}
           <div style={{ borderRight: "1.5px solid var(--ink)", padding: "12px 12px 24px" }}>
@@ -122,6 +138,7 @@ function VersionHistory({ versions, onClose }) {
               : <DiffView from={vA.text} to={vB.text} />}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
