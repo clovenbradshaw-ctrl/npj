@@ -99,6 +99,18 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
   );
 }
 
+// Two-source image: try the live Matrix media-store copy first, fall back to
+// the durable archive.org one (then any further candidates). Both URLs ride in
+// the img block — see freezeArticleMedia (app/media-store.js).
+function MediaImg({ srcs, alt, style }) {
+  const list = (srcs || []).filter(Boolean);
+  const [i, setI] = useState(0);
+  if (!list.length) return null;
+  const idx = Math.min(i, list.length - 1);
+  return <img src={list[idx]} alt={alt || ""} loading="lazy" style={style}
+    onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
+}
+
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
@@ -233,7 +245,7 @@ function ArticleRead(props) {
         );
         if (b.type === "img") return (
           <figure key={i} style={{ margin: "26px 0" }}>
-            <img src={b.src} alt={b.caption || ""} loading="lazy" style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+            <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
             {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
           </figure>
         );

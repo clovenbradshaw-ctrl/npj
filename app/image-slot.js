@@ -300,6 +300,8 @@
       this._depth = 0;
       this._gen = 0;
       this._triedAuth = null;
+      this._triedAlt = null;
+      this._fbDone = false;
       this._view = { s: 1, x: 0, y: 0 };
       this._subFn = () => this._render();
       // Shadow-DOM listeners live with the shadow DOM — bound once here so
@@ -332,14 +334,24 @@
       // naturalWidth/Height aren't known until load — re-apply so the cover
       // baseline is computed from real dimensions, not the 100%×100% fallback.
       this._img.addEventListener('load', () => this._applyView());
-      // Authenticated-media homeservers refuse an unauthenticated <img> GET; if a
-      // media-store URL fails to load, swap in a token-fetched blob: URL once.
+      // Load resilience: try the primary src; on error fall back to the
+      // `data-alt` URL (e.g. the archive.org copy behind a media-store src),
+      // then to a token-fetched blob: URL for an auth-gated homeserver.
       this._img.addEventListener('error', () => {
-        const src = this._img.getAttribute('src');
+        if (this._fbDone) return;
+        const cur = this._img.getAttribute('src') || '';
+        const alt = this.getAttribute('data-alt');
         const media = window.NpjMedia;
-        if (!src || this._triedAuth === src || !media || !media.isStoreUrl || !media.isStoreUrl(src)) return;
-        this._triedAuth = src;
-        media.resolveDisplay(src).then((u) => { if (u && u !== src) { this._img.src = u; this._ghost.src = u; } }).catch(() => {});
+        if (alt && alt !== cur && this._triedAlt !== alt) {
+          this._triedAlt = alt;
+          this._img.src = alt; this._ghost.src = alt; return;
+        }
+        if (media && media.isStoreUrl && media.isStoreUrl(cur) && this._triedAuth !== cur) {
+          this._triedAuth = cur;
+          media.resolveDisplay(cur).then((u) => { if (u && u !== cur) { this._img.src = u; this._ghost.src = u; } }).catch(() => {});
+          return;
+        }
+        this._fbDone = true;
       });
       // Gated on editable + fit=cover so share links and contain/fill slots
       // stay static.
@@ -546,6 +558,9 @@
       this._local = null;
       if (this.id) setSlot(this.id, null); // the sidecar copy (if any) yields to the remote src
       this.setAttribute('data-cdn', '');
+      // a freshly-set src has no archive fallback yet (publish/save mints it)
+      this.removeAttribute('data-alt');
+      this._triedAlt = this._triedAuth = null; this._fbDone = false;
       this.setAttribute('src', url); // attributeChangedCallback re-renders
       this._announce(url);
     }
@@ -577,6 +592,7 @@
       if (!this.hasAttribute('data-cdn')) return;
       this.removeAttribute('data-cdn');
       this.removeAttribute('src');
+      this.removeAttribute('data-alt');
       this._announce(null);
     }
 
@@ -781,6 +797,7 @@
       // the display:flex / display:block rules in the stylesheet above.
       if (url) {
         if (this._img.getAttribute('src') !== url) {
+          this._triedAlt = this._triedAuth = null; this._fbDone = false;
           this._img.src = url;
           this._ghost.src = url;
         }
