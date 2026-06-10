@@ -93,7 +93,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
 
 /* ---------------- Front page ---------------- */
 function FrontPage({ onOpen, onNewsroom, onHome }) {
-  const { layout } = React.useContext(window.LayoutCtx);
+  const { layout, isAdmin } = React.useContext(window.LayoutCtx);
   const F = window.NPJ.FRONT || {};
   const sections = (layout.sections || []).map(s => s.name);
   const [col, setCol] = useState(null);
@@ -102,7 +102,10 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   const all = [];
   if (F.lead) all.push({ ...F.lead, _lead: true, tags: F.lead.tags || [] });
   (F.secondary || []).forEach(s => all.push({ ...s, tags: s.tags || [] }));
-  const shown = col ? all.filter(a => (a.tags || []).includes(col)) : all;
+  // unpublished pieces drop off the line-up for everyone but admins, who keep
+  // seeing them (badged) so they can reopen and republish
+  const visible = all.filter(a => isAdmin || a.status !== "unpublished");
+  const shown = col ? visible.filter(a => (a.tags || []).includes(col)) : visible;
 
   return (
     <div className="fade-in">
@@ -158,15 +161,20 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
 
 /* line-up renderer (used once pieces exist) — every item carries the slug of
    its committed EO log, and opening it loads + folds that log into the reader */
+function UnpubBadge({ small }) {
+  return <span className="np-mono" style={{ fontSize: small ? 9 : 10, fontWeight: 600, letterSpacing: ".06em", color: "var(--reject)", border: "1px solid var(--reject)", padding: small ? "1px 5px" : "2px 7px", textTransform: "uppercase" }}>⊘ Unpublished</span>;
+}
+
 function FrontLineup({ items, onOpen }) {
-  const lead = items.find(a => a._lead) || items[0];
+  // lead with a live piece so an admin's hidden draft never takes the marquee
+  const lead = items.find(a => a.status !== "unpublished") || items[0];
   const rest = items.filter(a => a !== lead);
   const open = (a) => onOpen && onOpen(a.slug);
   return (
     <div className="npj-lineup" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 0 }}>
       <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
         <button onClick={() => open(lead)} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-          <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8 }}>{lead.kicker}</div>
+          <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{lead.kicker}{lead.status === "unpublished" && <UnpubBadge />}</div>
           <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .92, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
@@ -178,6 +186,7 @@ function FrontLineup({ items, onOpen }) {
         {rest.map((s, i) => (
           <article key={s.slug || i} style={{ padding: "12px 0", borderBottom: "1px solid var(--rule)" }}>
             <h3 onClick={() => open(s)} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
+            {s.status === "unpublished" && <div style={{ marginBottom: 6 }}><UnpubBadge small /></div>}
             {s.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.35, color: "var(--ink-soft)", margin: "0 0 6px" }}>{s.dek}</p>}
             {s.published && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 4 }}>{shortDate(s.published)}</div>}
             {(s.tags || []).length > 0 && <TagRow tags={s.tags} small />}

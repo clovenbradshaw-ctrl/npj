@@ -112,6 +112,11 @@ function App() {
   const role = window.roleOf(layout, session && session.user_id);
   const isAdmin = role === "admin";
   const isEditorRole = role === "admin" || role === "editor";
+  // openArticle is a stable useCallback; read admin status through a ref so the
+  // unpublished-article gate always sees the live role without re-creating the
+  // callback (which the boot/deep-link effect depends on).
+  const isAdminRef = useRef(isAdmin);
+  isAdminRef.current = isAdmin;
 
   // refresh from the committed layout (GitHub) — skipped when boot() already
   // seeded it this session, so the chrome never visibly swaps after first paint
@@ -216,6 +221,9 @@ function App() {
     if (!slugOrArticle) { if (window.NPJ.ARTICLE) { setRoute("article"); window.scrollTo(0, 0); } return; }
     try {
       const a = await window.NpjArticles.loadArticle(String(slugOrArticle));
+      // unpublished pieces don't load for anyone but an admin — hidden from the
+      // site even on a direct link, though the log is still public on GitHub
+      if (a && a.status === "unpublished" && !isAdminRef.current) return;
       if (a) { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); setRoute("article"); window.scrollTo(0, 0); }
     } catch (e) { /* unreadable log → stay where we are */ }
   }, []);

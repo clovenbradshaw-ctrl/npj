@@ -85,7 +85,7 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "assignees", "published", "body"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "assignees", "published", "body", "status"];
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -128,6 +128,10 @@
       updated: versions.length ? String(versions[0].ts).slice(0, 10) : null,
       base_sha: versions.length ? versions[0].sha : "0000000",
       readMins: readMins(state.body),
+      // "unpublished" hides the piece from the site (front page, reader, docs)
+      // for everyone but admins; the log itself is never removed — a later
+      // REC{status:"published"} brings it back. Absent field → published.
+      status: state.status === "unpublished" ? "unpublished" : "published",
       body: Array.isArray(state.body) ? state.body : [],
       sources, versions
     };
@@ -169,7 +173,8 @@
         const meta = {
           slug: article.slug || slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
           column: article.column, tags: article.tags, published: article.published, updated: article.updated,
-          authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins
+          authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
+          status: article.status
         };
         cache[f.name] = { sha: f.sha, meta };
         return meta;
@@ -186,7 +191,7 @@
   // Fill window.NPJ.FRONT from the committed record. Returns the metas.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, status: m.status });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     return metas;
   }
@@ -402,12 +407,25 @@
     const res = await post({ filename: filenameFor(slug), mode: "append", contentRaw: line + "\n", message: message || ("edit: " + slug) }, token);
     return { res, line, sha: lineSha(line) };
   }
+  // Unpublish / republish — append a REC carrying only the status. Nothing is
+  // deleted: the whole log (every prior version) stays in GitHub, and the act
+  // of hiding it is itself recorded as one more event in the record. Authorized
+  // exactly like any other append (the webhook re-verifies the Matrix token);
+  // the UI restricts the action to admins.
+  function setArticleStatus({ slug, status, actor, note, token }) {
+    const next = status === "unpublished" ? "unpublished" : "published";
+    const message = (next === "unpublished" ? "unpublish: " : "republish: ") + slug;
+    const finalNote = note || (next === "unpublished"
+      ? "Unpublished — hidden from the site (the event log stays in GitHub)"
+      : "Republished");
+    return appendEdit({ slug, operand: { status: next }, actor, note: finalNote, token, message });
+  }
 
   window.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     listArticles, loadFront, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
-    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit
+    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, setArticleStatus
   };
 })();

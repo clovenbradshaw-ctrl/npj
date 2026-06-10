@@ -112,6 +112,11 @@ function ArticleRead(props) {
   const [composeId, setComposeId] = useState(null);
   const [showVersions, setShowVersions] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [statusBusy, setStatusBusy] = useState(false);
+  const [statusErr, setStatusErr] = useState(null);
+  // below this width the source rail stacks under the article instead of
+  // squeezing the reading column
+  const isNarrow = window.useIsMobile(900);
   // edit-after-publish: the admin always; otherwise only the article's
   // assignees (the publisher is one by default — see genesisFromContent)
   const canEditArticle = isAdmin || (Array.isArray(A.assignees) && A.assignees.includes(me));
@@ -155,6 +160,34 @@ function ArticleRead(props) {
   }, []);
 
   const startCompose = (claimId) => { setComposeId(claimId); setShowSugg(true); setHover(null); };
+
+  // admin-only: unpublish (hide everywhere but admin) or republish. Appends one
+  // REC{status} to the log — nothing is deleted — then refolds via onEdited so
+  // the reader and front page reflect the change immediately.
+  const changeStatus = async (next) => {
+    setStatusErr(null);
+    const token = window.MatrixAuth && window.MatrixAuth.token();
+    if (!token) { setStatusErr("Sign in with Matrix to manage publication — the webhook re-verifies the token server-side."); return; }
+    if (next === "unpublished" && !window.confirm("Unpublish “" + A.headline + "”?\n\nIt will be hidden from the site for everyone but admins. The event log stays in GitHub — you can republish anytime.")) return;
+    setStatusBusy(true);
+    let out;
+    try {
+      out = await window.NpjArticles.setArticleStatus({ slug: A.slug, status: next, actor: me, token });
+    } catch (e) {
+      setStatusBusy(false);
+      setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
+      return;
+    }
+    if (out.res.status === 401 || out.res.status === 403) { setStatusBusy(false); setStatusErr("Rejected (" + out.res.status + ") — that Matrix account isn't authorized."); return; }
+    if (!out.res.ok) { setStatusBusy(false); setStatusErr("The webhook answered HTTP " + out.res.status + " — nothing changed."); return; }
+    const ts = new Date().toISOString();
+    const updated = {
+      ...A, status: next, updated: ts.slice(0, 10), base_sha: out.sha,
+      versions: [{ sha: out.sha, ts, author: me, message: next === "unpublished" ? "Unpublished" : "Republished", text: window.NPJ.articlePlainText() }, ...(A.versions || [])]
+    };
+    setStatusBusy(false);
+    if (onEdited) onEdited(updated);
+  };
 
   // render tokens for a paragraph: plain strings, style tokens ({t}) and
   // source-bound claims ({c, src, id}) — the EO log's full inline vocabulary
@@ -239,63 +272,88 @@ function ArticleRead(props) {
     </article>
   );
 
+  // One reading column shared by the headline, the body and the methods
+  // footer, so the article always starts directly under the headline. The
+  // evidence rail (Ledger / Evidence) sits to the right of it; on narrow
+  // screens it stacks underneath instead of crowding the prose.
+  const COL = 700;
+  const hasRail = direction === "ledger" || direction === "split";
+  const railW = direction === "split" ? 320 : 286;
+  const railGap = direction === "split" ? 36 : 40;
+  const stackRail = hasRail && isNarrow;
+
+  const Header = (
+    <header style={{ margin: "0 0 26px" }}>
+      <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>{A.kicker}</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 76, lineHeight: .9, margin: "0 0 18px" }}>{A.headline}</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1.4, color: "var(--ink)", margin: "0 0 20px", fontStyle: "italic" }}>{A.dek}</p>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
+        <div style={{ display: "flex", gap: 10 }}>{A.authors.map(a => <Handle key={a} mxid={a} showName />)}</div>
+        <span style={{ flex: 1 }} />
+        <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <window.VersionBadge sha={A.base_sha} count={artVersions.length} onClick={() => setShowVersions(true)} />
+          {fmtDate(A.published)} · {A.readMins} min
+        </span>
+      </div>
+      <div style={{ paddingTop: 14 }}>
+        {/* share link opens the reader; the wayback action targets the raw
+            EO log — the committed artifact is what gets archived */}
+        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleRawUrl(A.slug)}`} title={A.headline} />
+      </div>
+      {headings.length >= 2 && (
+        <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Contents</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {headings.map(h => <button key={h.id} onClick={() => jump(h.id)} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
+          </div>
+        </nav>
+      )}
+    </header>
+  );
+
+  const Main = (
+    <div style={{ minWidth: 0 }}>
+      {A.status === "unpublished" && (
+        <div style={{ border: "1.5px solid var(--reject)", background: "color-mix(in srgb, var(--reject) 10%, var(--card))", padding: "10px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--reject)" }}>⊘</span>
+          <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5 }}>Unpublished — hidden from the site.</span>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>The event log is still public on GitHub.{isAdmin ? " Only admins can open this page." : ""}</span>
+        </div>
+      )}
+      {statusErr && (
+        <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)", border: "1px solid var(--reject)", padding: "9px 10px", marginBottom: 16, lineHeight: 1.5 }}>{statusErr}</div>
+      )}
+      {Header}
+      {Body}
+      <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
+    </div>
+  );
+
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
       <ControlBar {...{ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
-        canEdit: canEditArticle, onEdit: () => setEditing(true) }} />
+        canEdit: canEditArticle, onEdit: () => setEditing(true),
+        isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
-      <div style={{ maxWidth: 1180, padding: "30px 22px 80px",
+      <div style={{ maxWidth: hasRail ? 1180 : COL, padding: "30px 22px 80px",
         marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
         className={readMode === "audit" ? "read-audit" : "read-clean"}>
 
-        {/* article header */}
-        <header style={{ maxWidth: 760, margin: "0 auto 26px" }}>
-          <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>{A.kicker}</div>
-          <h1 style={{ fontFamily: "var(--display)", fontSize: 76, lineHeight: .9, margin: "0 0 18px" }}>{A.headline}</h1>
-          <p style={{ fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1.4, color: "var(--ink)", margin: "0 0 20px", fontStyle: "italic" }}>{A.dek}</p>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
-            <div style={{ display: "flex", gap: 10 }}>{A.authors.map(a => <Handle key={a} mxid={a} showName />)}</div>
-            <span style={{ flex: 1 }} />
-            <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <window.VersionBadge sha={A.base_sha} count={artVersions.length} onClick={() => setShowVersions(true)} />
-              {fmtDate(A.published)} · {A.readMins} min
-            </span>
-          </div>
-          <div style={{ paddingTop: 14 }}>
-            {/* share link opens the reader; the wayback action targets the raw
-                EO log — the committed artifact is what gets archived */}
-            <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleRawUrl(A.slug)}`} title={A.headline} />
-          </div>
-          {headings.length >= 2 && (
-            <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
-              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Contents</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {headings.map(h => <button key={h.id} onClick={() => jump(h.id)} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
-              </div>
-            </nav>
-          )}
-        </header>
-
-        {/* layout by direction */}
-        {direction === "split" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 320px", gap: 36, alignItems: "start" }}>
-            <div style={{ maxWidth: 680 }}>{Body}</div>
-            <EvidencePanel sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
-          </div>
-        ) : direction === "ledger" ? (
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 286px", gap: 40, alignItems: "start" }}>
-            <div style={{ maxWidth: 680, marginLeft: "auto" }}>{Body}</div>
-            <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
+        {hasRail ? (
+          <div style={{ display: "grid",
+            gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + COL + "px) " + railW + "px",
+            gap: railGap, alignItems: "start", justifyContent: "center" }}>
+            {Main}
+            {direction === "ledger"
+              ? <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
+              : <EvidencePanel sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />}
           </div>
         ) : (
-          <div style={{ maxWidth: 680, margin: "0 auto" }}>{Body}</div>
+          <div style={{ maxWidth: COL, margin: "0 auto" }}>{Main}</div>
         )}
-
-        {/* methods footer */}
-        <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
       </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
@@ -321,7 +379,7 @@ function ArticleRead(props) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit }) {
+function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
   const divider = <span style={{ width: 1, height: 22, background: "var(--rule)" }} />;
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -346,6 +404,18 @@ function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, 
             <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊛</span> Edit
           </button>
         )}
+
+        {isAdmin && (status === "unpublished" ? (
+          <button className="btn btn-sm" onClick={() => onSetStatus("published")} disabled={statusBusy} title="Republish — make this visible on the site again"
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>↺</span> {statusBusy ? "Working…" : "Republish"}
+          </button>
+        ) : (
+          <button className="btn btn-sm" onClick={() => onSetStatus("unpublished")} disabled={statusBusy} title="Unpublish — hide from the site (the event log stays in GitHub)"
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, borderColor: "var(--reject)", color: "var(--reject)" }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
+          </button>
+        ))}
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
@@ -448,7 +518,7 @@ function EvidencePanel({ sourceList, activeSrc, setActiveSrc, spansForSource, on
 
 function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
   return (
-    <footer style={{ maxWidth: 760, margin: "44px auto 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
+    <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>METHODS &amp; RECEIPTS</h3>
         <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{claimCount} bound claims · {sourceList.length} archived sources · build passed ✓</span>
