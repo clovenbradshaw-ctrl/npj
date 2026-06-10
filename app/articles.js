@@ -224,6 +224,19 @@
     let idSeq = 0;
     const newId = () => "cl-" + Date.now().toString(36) + "-" + (++idSeq);
 
+    // Resolve a reusable citation record (window.NPJ.CITATIONS) to its quote.
+    // data-quote stays synced on every span/sup, so this is a fallback: if a
+    // marker lost its inline quote it can still be rebuilt from the registry.
+    // Output token shape is unchanged either way.
+    function quoteFromCiteIds(el, key) {
+      try {
+        const ids = String(el.getAttribute("data-cite-id") || "").split(/\s+/).filter(Boolean);
+        const REG = (window.NPJ && window.NPJ.CITATIONS) || {};
+        for (const id of ids) { const c = REG[id]; if (c && c.srcKey === key && c.quote) return c.quote; }
+      } catch (e) {}
+      return "";
+    }
+
     // the claim is the trailing sentence of what was typed before the marker
     function splitClaim(buf) {
       const re = /[.!?…]["')\]]?\s+(?=\S)/g;
@@ -248,6 +261,14 @@
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
             if (src.length) {
               let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+              // single-source spans carry the quote inline on data-quote; multi-source
+              // spans carry the data-quotes map. Either way, backfill anything still
+              // missing from the citation registry so reuse survives the round trip.
+              const inlineQ = (c.getAttribute("data-quote") || "").trim();
+              if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
+                q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
+                if (!Object.keys(q).length) q = undefined;
+              }
               toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
             } else buf += plain(c);
             return;
@@ -256,7 +277,7 @@
             if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
             const key = c.getAttribute("data-cite"); if (!key) return;
             // the pinned source-span: the exact words in the source backing this claim
-            const quote = (c.getAttribute("data-quote") || "").trim();
+            const quote = (c.getAttribute("data-quote") || "").trim() || quoteFromCiteIds(c, key);
             const prev = toks[toks.length - 1];
             if (!buf.trim() && prev && typeof prev === "object" && prev.c) {
               if (prev.src.indexOf(key) < 0) prev.src.push(key); // text[^a][^b] → one claim, two sources

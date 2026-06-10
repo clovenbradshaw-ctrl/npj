@@ -32,6 +32,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
+  const [view, setView] = useState("prose");          // prose editor | sentence table — same draft
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
   const restored = useRef(false);                      // gate autosave until the first restore lands
@@ -82,7 +83,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const html = ed.current ? ed.current.innerHTML : htmlRef.current;
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, room });
+    const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, room });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -106,6 +108,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       try { d = await window.NpjDrafts.restore(draftId); } catch (e) {}
       if (alive && d) {
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
+        if (d.citations && window.NpjCitations) window.NpjCitations.hydrate(d.citations); // rehydrate citation records
         if (ed.current && d.html) {
           ed.current.innerHTML = d.html;
           // older drafts predate the dek — every article gets the field
@@ -127,6 +130,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             }
             if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
           });
+          // back-fill citation RECORDS from any inline data-quote (idempotent —
+          // skips spans that already carry data-cite-id), so legacy drafts gain
+          // reusable citations the first time they're opened, with no data loss.
+          if (window.NpjCitations) window.NpjCitations.migrateRoot(ed.current);
         }
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
@@ -397,14 +404,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // the claim (data-quote). Until it's pinned the span is flagged `needs-quote`
   // and the publish build refuses it, so a claim can never stand on a whole
   // page — only on a specific span of a specific source.
-  const bindSource = (key) => {
-    const r = spanRange();
-    if (!r) { setArmSrc(key); setMenu(null); return; }
+  // Wrap a Range in a fresh claim-src span bound to `key`, drop the numbered
+  // marker after it, and register the source. Shared by the toolbar's
+  // bindSource and the table's "add citation to this sentence". Returns the cid.
+  const bindRangeToSource = (r, key) => {
     let order = citeOrderRef.current;
     if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
     const num = order.indexOf(key) + 1;
     const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
-    const claimText = String(r.toString() || "").trim();
     const span = document.createElement("span"); span.className = "claim-src needs-quote";
     span.setAttribute("data-src", key); span.setAttribute("data-cid", cid); span.setAttribute("data-quote", "");
     try { r.surroundContents(span); } catch (e) { const frag = r.extractContents(); span.appendChild(frag); r.insertNode(span); }
@@ -412,6 +419,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     sup.setAttribute("data-cite", key); sup.setAttribute("data-cid", cid); sup.setAttribute("data-quote", ""); sup.title = key; sup.textContent = num;
     span.after(sup);
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
+    return cid;
+  };
+  const bindSource = (key) => {
+    const r = spanRange();
+    if (!r) { setArmSrc(key); setMenu(null); return; }
+    const claimText = String(r.toString() || "").trim();
+    const cid = bindRangeToSource(r, key);
     window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave();
     // now make the author point at the words in the source — the citation isn't
     // done until that span is pinned
@@ -421,21 +435,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // ---- pin the source-span: the words IN THE SOURCE that back this claim ----
   const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
   const [pinQuote, setPinQuote] = useState("");
-  const [spanHits, setSpanHits] = useState([]);     // Citey's ranked candidate lines from the source
-  const [srcPaste, setSrcPaste] = useState(null);   // null = hidden; string = paste box shown
+  const pinLoc = useRef(null);                      // char offsets into the source, from the picker
   const openPin = (cid, key, claimText) => {
     // re-opening an existing binding? read back whatever quote is on it
     let existing = "";
     if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
-    setPinQuote(existing); setSpanHits([]); setSrcPaste(null);
+    setPinQuote(existing); pinLoc.current = null;
     setPinTarget({ cid, key, claimText });
   };
-  const closePin = () => { setPinTarget(null); setPinQuote(""); setSpanHits([]); setSrcPaste(null); };
-  const savePin = () => {
+  const closePin = () => { setPinTarget(null); setPinQuote(""); pinLoc.current = null; };
+  const savePin = (loc) => {
     const t = pinTarget; if (!t) return;
     const q = String(pinQuote || "").trim();
     if (!q) return;
-    if (ed.current) {
+    const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
+    if (window.NpjCitations && span) {
+      // mint a reusable citation RECORD and attach it — projectAttrs re-derives
+      // data-src / data-quote / data-quotes and syncs the sup marker, so every
+      // downstream reader (CiteyBrain, publishGate, htmlToBlocks) is unchanged.
+      const id = window.NpjCitations.mint({ srcKey: t.key, quote: q, loc: loc || null });
+      window.NpjCitations.attach(span, id);
+      span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
+    } else if (ed.current) {
+      // registry unavailable — fall back to the old inline behaviour
       ed.current.querySelectorAll('[data-cid="' + t.cid + '"]').forEach(el => {
         el.setAttribute("data-quote", q);
         if (el.classList.contains("claim-src")) { el.classList.remove("needs-quote"); el.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”"); }
@@ -445,29 +467,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // same source can be matched against text we've already pulled
     const rec = window.NPJ.SOURCES[t.key];
     if (rec && (!rec.text || rec.text.indexOf(q) < 0)) rec.text = (rec.text ? rec.text + "\n" : "") + q;
-    const flipped = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
     closePin(); setRev(v => v + 1); scheduleSave();
     // let Citey flip ⊥→⊤ and re-cost the publish gate
-    if (window.__citey) { if (flipped) window.__citey.evaluateSpan(flipped); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    if (window.__citey) { if (span) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
   };
-  // Citey ranks the source's sentences and points at the line that backs the claim
-  // — mechanical (citey-assist.js), no model. The author pins; Citey never invents a
-  // citation. No source text on record yet → reveal a paste box and rank that.
-  const findSourceSpan = () => {
-    const t = pinTarget; if (!t) return;
-    const rec = window.NPJ.SOURCES[t.key] || {};
-    const txt = String(rec.text || "").trim();
-    if (!txt) { setSrcPaste(""); setSpanHits([]); return; }
-    setSpanHits(window.CiteyAssist ? window.CiteyAssist.rankSpans(t.claimText, txt) : []);
-    setSrcPaste(null);
-  };
-  const rankPaste = (text) => {
-    const t = pinTarget; if (!t || !String(text || "").trim()) return;
-    const rec = window.NPJ.SOURCES[t.key];
-    if (rec) rec.text = (rec.text ? rec.text + "\n" : "") + text.trim();
-    setSpanHits(window.CiteyAssist ? window.CiteyAssist.rankSpans(t.claimText, text) : []);
-    setSrcPaste(null);
-  };
+  // The source-span ranking + paste flow now lives in the SourcePicker component
+  // (app/SourcePicker.jsx), rendered inside the pin popover and the table.
   // Citey's grounding bridge — the popover's pin / own / unown act here so React
   // state (rev) and the autosave stay consistent. Owning a claim removes the
   // incomplete citation and records the author's stance; it publishes as prose.
@@ -486,12 +491,83 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setRev(v => v + 1); scheduleSave();
       },
       unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      // attach an EXISTING reusable citation to a span (the many-to-many reuse path)
+      attachCitation: (el, citeId) => {
+        if (!el || !citeId || !window.NpjCitations) return;
+        window.NpjCitations.attach(el, citeId);
+        setRev(v => v + 1); scheduleSave();
+        if (window.__citey) { window.__citey.evaluateSpan(el); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+      },
+      // unlink a citation from a span — the RECORD survives (still reusable elsewhere)
+      detachCitation: (el, citeId) => {
+        if (!el || !citeId || !window.NpjCitations) return;
+        window.NpjCitations.detach(el, citeId);
+        setRev(v => v + 1); scheduleSave();
+        if (window.__citey) { window.__citey.evaluateSpan(el); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+      },
       gate: () => window.CiteyBrain ? window.CiteyBrain.publishGate(ed.current) : null
     };
     return () => { if (window.__npjGround) delete window.__npjGround; };
   });
   // every bound span still missing its source-span (owned claims are grounded, skip them)
   const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => !el.getAttribute("data-stance") && !(el.getAttribute("data-quote") || "").trim()).length : 0; };
+
+  // ---- table view: the same draft, one row per sentence ----
+  // Wrap a sentence (or sub-)range in a bare claim-src span — used when owning a
+  // sentence that has no claim yet (own needs an element to mark).
+  const wrapPlainClaim = (range) => {
+    const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
+    const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-cid", cid);
+    try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
+    return span;
+  };
+  // The claim span a table row acts on: reuse an existing one inside the sentence
+  // (sub-sentence safe — never nest), else wrap the whole sentence.
+  const rowSpanFor = (row, key, plain) => {
+    if (row.claimSpans && row.claimSpans.length) return row.claimSpans[0];
+    const range = window.NpjSentences && window.NpjSentences.rangeFor(row);
+    if (!range) return null;
+    return plain ? wrapPlainClaim(range) : (ed.current && ed.current.querySelector('.claim-src[data-cid="' + bindRangeToSource(range, key) + '"]'));
+  };
+  const tableApi = {
+    segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.segment(ed.current) : [],
+    rev,
+    toProse: () => setView("prose"),
+    // scroll the (hidden) editor to a row and select it, then flip to prose
+    jumpTo: (row) => {
+      setView("prose");
+      setTimeout(() => {
+        const range = window.NpjSentences && window.NpjSentences.rangeFor(row); if (!range) return;
+        const sel2 = window.getSelection(); sel2.removeAllRanges(); sel2.addRange(range);
+        const rect = range.getBoundingClientRect(), cont = scroller.current;
+        if (cont) { const cr = cont.getBoundingClientRect(); cont.scrollTop += (rect.top - cr.top) - 80; }
+      }, 30);
+    },
+    // attach an existing reusable citation to this sentence (mints a span if needed)
+    attachExisting: (row, citeId) => {
+      const c = window.NpjCitations && window.NpjCitations.get(citeId); if (!c) return;
+      const span = rowSpanFor(row, c.srcKey, false); if (!span) return;
+      window.__npjGround.attachCitation(span, citeId);
+    },
+    detach: (span, citeId) => window.__npjGround.detachCitation(span, citeId),
+    // open the source-span picker to mint a NEW citation off `key` for this sentence
+    pinNew: (row, key) => {
+      const span = rowSpanFor(row, key, false); if (!span) return;
+      openPin(span.getAttribute("data-cid"), key, (span.textContent || "").trim());
+    },
+    // re-open the picker for an already-bound span
+    repin: (span) => { if (span) openPin(span.getAttribute("data-cid"), (span.getAttribute("data-src") || "").split(/\s+/)[0], (span.textContent || "").trim()); },
+    own: (row, stance) => {
+      const span = rowSpanFor(row, null, true); if (!span) return;
+      window.__npjGround.own(span, stance);
+      if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    },
+    unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
+    sources: () => sources.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} })),
+    allCitations: () => window.NpjCitations ? window.NpjCitations.all() : [],
+    citationsFor: (span) => window.NpjCitations ? window.NpjCitations.citationsFor(span) : [],
+    usageCount: (citeId) => window.NpjCitations ? window.NpjCitations.usage(citeId, ed.current).length : 0
+  };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
@@ -610,6 +686,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <span className="np-mono" title={fileSlug ? "custom filename — set at the publish gate" : "filename follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted }}>{fileSlug || slugify(title) || "untitled"}.jsonl</span>
           <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
             what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
+        </div>
+        {/* prose / table — two views of the same draft */}
+        <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden" }}>
+          {[["prose", "Prose"], ["table", "Table"]].map(([k, label]) => (
+            <button key={k} onClick={() => setView(k)} className="np-cond" title={k === "table" ? "Every sentence as a row to ground" : "The prose editor"} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
+          ))}
         </div>
         <span style={{ flex: 1 }} />
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -782,13 +864,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* editor — the draft renders as a bordered page on the canvas; the page
             (not the canvas) is the contentEditable, so the document border wraps
             banner, headline and body as one sheet */}
-        <div className="np-scroll" ref={scroller} style={{ display: isMobile && mTab !== "write" ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        {/* the editor stays MOUNTED even in table view (display:none) so its DOM,
+            ranges and autosave stay valid — the table mutates the same nodes */}
+        <div className="np-scroll" ref={scroller} style={{ display: (view === "table") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           <div className={"md-preview nr-page" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
         </div>
+        {view === "table" && !(isMobile && mTab !== "write") && (
+          <div className="np-scroll" style={{ flex: isMobile ? 1 : undefined, overflowY: "auto", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+            <window.SentenceTable api={tableApi} NR={NR} />
+          </div>
+        )}
 
         {/* sources */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
@@ -911,34 +1000,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
             </div>
           )}
-          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Paste the EXACT words in the source that back this claim — or let Citey find them.</div>
-          <textarea autoFocus value={pinQuote} onChange={e => setPinQuote(e.target.value)} placeholder="The supporting words, quoted verbatim from the source…"
-            style={{ width: "100%", minHeight: 64, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
-          {/* Citey's ranked candidate lines — click to drop into the quote box */}
-          {spanHits.length > 0 && (
-            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
-              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)" }}>Citey's best matches — click to pin:</div>
-              {spanHits.map((h, j) => (
-                <button key={j} onClick={() => setPinQuote(h.s)} title="Use this line as the source-span"
-                  style={{ textAlign: "left", border: "1px solid rgba(255,255,255,.25)", background: "rgba(255,255,255,.06)", color: "var(--paper)", padding: "6px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
-                  <span style={{ borderLeft: "3px solid var(--yellow)", paddingLeft: 7, display: "block" }}>“{h.s.length > 200 ? h.s.slice(0, 200) + "…" : h.s}”</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {/* no source text on record — paste a passage and Citey ranks within it */}
-          {srcPaste !== null && (
-            <div style={{ marginTop: 8 }}>
-              <textarea rows={3} value={srcPaste} onChange={e => setSrcPaste(e.target.value)} placeholder="Paste the source passage here — Citey will pick the line that backs your claim…"
-                style={{ width: "100%", resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" }} />
-              <button onClick={() => rankPaste(srcPaste)} className="np-cond" style={{ marginTop: 5, border: "1px solid var(--yellow)", background: "var(--yellow)", color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" }}>Find the line</button>
-            </div>
+          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
+          <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
+            style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
+          {/* render the source and select-to-cite (+ Citey's smarter ranking) */}
+          {window.SourcePicker && (
+            <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
+              onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-            <button onClick={findSourceSpan} className="np-cond" style={{ flex: "0 0 auto", background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)", padding: "6px 11px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>📎 Find the line</button>
             <span style={{ flex: 1 }} />
             <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
-            <button onClick={savePin} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
+            <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
           </div>
         </div>
       ); })()}

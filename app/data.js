@@ -13,6 +13,14 @@
   // ---- Source records (every src: key resolves here) — populated at runtime
   const SOURCES = {};
 
+  // ---- Citation records — a citation is a SPAN of a source (srcKey + the exact
+  //      pinned words), a first-class reusable record keyed by id. One citation
+  //      can back many sentences; deleting a sentence never destroys it. The live
+  //      registry + helpers live in app/citations.js (window.NpjCitations); this
+  //      map is the runtime store, persisted per-draft and rehydrated on restore.
+  //      Shape: { id, srcKey, quote, loc:{start,end}|null, createdAt, label? }
+  const CITATIONS = {};
+
   // ---- The lead article — null until something is published.
   //      Shape, for reference: { slug, kicker, headline, dek, byline, authors[],
   //      published, base_sha, readMins, body[] } where each body block is
@@ -68,7 +76,7 @@
     };
   }
 
-  window.NPJ = { SOURCES, ARTICLE, SUGGESTIONS, FRONT, PEOPLE, EO, eoEvent };
+  window.NPJ = { SOURCES, CITATIONS, ARTICLE, SUGGESTIONS, FRONT, PEOPLE, EO, eoEvent };
 
   // ---- Feeds: NPJ is the flagship; communities run their own. The flagship
   //      entry is structural (the publication itself), so the composer always
