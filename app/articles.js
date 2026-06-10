@@ -310,11 +310,15 @@
         const slot = node.querySelector("image-slot");
         const slotSrc = slot && slot.getAttribute("src");
         const plainImg = node.querySelector("img");
-        // composer figures only ship durable (archive.org) media; the edit
+        // composer figures only ship durable media — an archive.org URL, or a
+        // media-store URL that publish will move onto archive.org; the edit
         // surface round-trips whatever src the published log already carried
+        const okSrc = (u) => !!u && (window.NpjMedia
+          ? window.NpjMedia.isPublishable(u)
+          : (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u)));
         const src = node.hasAttribute("data-eo-img")
           ? (plainImg && plainImg.getAttribute("src"))
-          : (slotSrc && (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(slotSrc)) ? slotSrc : null);
+          : (okSrc(slotSrc) ? slotSrc : null);
         if (src) blocks.push({ type: "img", src, caption: capText });
         const u = node.getAttribute("data-embed-url");
         if (u) blocks.push({ type: "embed", url: u, caption: capText });

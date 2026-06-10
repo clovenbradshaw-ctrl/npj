@@ -98,5 +98,5 @@
     return null; // honestly unconfirmed — SPN can take a while; a later check may find it
   }
 
-  window.NpjArchiveCDN = { isMediaUrl, resolve, waybackAvailable, requestSnapshot, ensureSnapshot };
+  window.NpjArchiveCDN = { isMediaUrl, resolve, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
 })();
