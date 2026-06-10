@@ -137,7 +137,7 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
   return (
     <div style={{ maxWidth: 720, margin: "40px auto", textAlign: "center", padding: "10px 0 30px" }}>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 14 }}>{col ? col + " · column" : "The record starts here"}</div>
-      <h1 className="npj-empty-h" style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .92, margin: "0 0 16px" }}>
+      <h1 className="npj-empty-h" style={{ fontFamily: "var(--display)", fontSize: 64, lineHeight: .95, margin: "0 0 16px" }}>
         {col ? "Nothing filed under " + col + " yet." : "No stories published yet."}
       </h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "52ch", margin: "0 auto 26px" }}>
@@ -175,7 +175,7 @@ function FrontLineup({ items, onOpen }) {
       <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
         <button onClick={() => open(lead)} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
           <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{lead.kicker}{lead.status === "unpublished" && <UnpubBadge />}</div>
-          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .92, margin: "0 0 14px" }}>{lead.headline}</h1>
+          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .95, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
         {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}</div>}
