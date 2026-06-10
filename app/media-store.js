@@ -201,8 +201,11 @@
     const ctx = { identifier: "npj-" + idSlug, title: o.title || o.slug || "NPJ media" };
     for (const b of body) {
       if (!b || b.type !== "img" || !isStoreUrl(b.src)) continue;
+      const matrixUrl = b.src;
       const arch = await toArchive(b.src, ctx);
-      if (arch) { b.src = arch; out.frozen++; } else { out.failed++; }
+      // keep the live media-store URL as `store` so viewers can try it first and
+      // fall back to the durable archive.org `src`.
+      if (arch) { b.store = matrixUrl; b.src = arch; out.frozen++; } else { out.failed++; }
     }
     return out;
   }

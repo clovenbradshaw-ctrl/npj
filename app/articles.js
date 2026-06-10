@@ -308,18 +308,31 @@
         const cap = node.querySelector("figcaption");
         const capText = cap ? cap.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
-        const slotSrc = slot && slot.getAttribute("src");
         const plainImg = node.querySelector("img");
-        // composer figures only ship durable media — an archive.org URL, or a
-        // media-store URL that publish will move onto archive.org; the edit
-        // surface round-trips whatever src the published log already carried
-        const okSrc = (u) => !!u && (window.NpjMedia
-          ? window.NpjMedia.isPublishable(u)
-          : (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u)));
-        const src = node.hasAttribute("data-eo-img")
-          ? (plainImg && plainImg.getAttribute("src"))
-          : (okSrc(slotSrc) ? slotSrc : null);
-        if (src) blocks.push({ type: "img", src, caption: capText });
+        const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
+        const isArchive = (u) => !!u && (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u));
+        const okSrc = (u) => !!u && (window.NpjMedia ? window.NpjMedia.isPublishable(u) : isArchive(u));
+        if (node.hasAttribute("data-eo-img")) {
+          const s = plainImg && plainImg.getAttribute("src");
+          if (s) blocks.push({ type: "img", src: s, caption: capText });
+        } else if (slot) {
+          // a slot can carry two URLs (src + data-alt): the archive.org one is
+          // the canonical `src`; the media-store one rides as `store` so the
+          // viewer can try the live copy first, then fall back to archive.org.
+          const cands = [slot.getAttribute("src"), slot.getAttribute("data-alt")].filter(Boolean);
+          let archiveU = null, storeU = null, otherU = null;
+          cands.forEach(u => {
+            if (isStore(u)) storeU = storeU || u;
+            else if (isArchive(u)) archiveU = archiveU || u;
+            else otherU = otherU || u;
+          });
+          const src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
+          if (src) {
+            const block = { type: "img", src, caption: capText };
+            if (storeU && storeU !== src) block.store = storeU;
+            blocks.push(block);
+          }
+        }
         const u = node.getAttribute("data-embed-url");
         if (u) blocks.push({ type: "embed", url: u, caption: capText });
         return;
@@ -357,8 +370,13 @@
       if (b.type === "verse") return '<pre class="verse">' + esc(b.text) + "</pre>";
       // editable image-slot (not a static <img>) so the edit surface can
       // replace it — a fresh drop uploads to the media store, then publish/save
-      // moves it to archive.org. The slot renders its src attribute for display.
-      if (b.type === "img") return '<figure contenteditable="false" class="cmp-embed"><image-slot id="eo-img-' + bi + '" src="' + esc(b.src) + '" shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+      // moves it to archive.org. Primary src is the live media-store copy when
+      // we have one (matrix-first), with the archive.org URL as data-alt.
+      if (b.type === "img") {
+        const primary = b.store || b.src || "";
+        const alt = (b.store && b.src && b.src !== b.store) ? b.src : "";
+        return '<figure contenteditable="false" class="cmp-embed"><image-slot id="eo-img-' + bi + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + ' shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+      }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
     }).join("\n");
