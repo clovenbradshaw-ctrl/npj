@@ -22,7 +22,9 @@ founding admin curates the site and grows the network from there.
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
-| `app/Clippy.jsx` | drafting assistant — suggests **tags**, and helps **locate** the supporting span inside a source (never invents a citation) |
+| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags** |
+| `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
+| `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
@@ -88,12 +90,36 @@ the reader's citation card as *"the cited passage — in the source."* One sourc
 back **several spans**, each pinned to its own words. Sources are snapshotted to
 archive.org; a claim that points at a page but no span fails the build.
 
-**Clippy finds the span — he never invents the citation.** When you bind a source,
-hit **📎 Find it with Clippy**: he takes your claim and the source's text, ranks the
+**Citey finds the span — he never invents the citation.** When you bind a source,
+hit **📎 Find the line**: Citey takes your claim and the source's text, ranks the
 source's sentences by overlap, and points at the one that backs the claim — you
-review and pin it. No source text yet? Paste the passage into Clippy and he ranks
-within it (and remembers it on the source for the next claim). He proposes the
-span; the author decides what's true.
+review and pin it. No source text yet? Paste the passage and Citey ranks within it
+(and remembers it on the source for the next claim). He proposes the span; the
+author decides what's true.
+
+## Citey — every claim grounded before it ships
+
+Citey is the drafting assistant: a margin mascot whose face **is** the editor's
+mechanical grounding state — a bent-wire logic operator that reads ⊥ when a claim
+is unsupported and flips to ⊤ the moment a source line is pinned (⊨ when that
+source is a primary, archived snapshot). His state is never a guess: it is read
+straight off the draft's own grounding (`CiteyBrain.js` over the `.claim-src`
+spans), and his voice is templated — there is **no model** deciding anything.
+
+Click him on a flagged claim and he offers the two honest ways to ground it:
+
+- **Pin a source line** — the manual, span-bound path above (Citey ranks the
+  source's sentences for you; you pin).
+- **Own it** — not everything wants a citation. Declare a claim as your **⊢
+  analysis**, your **⊨ account** (you witnessed it), or your **⊩ stated position**.
+  Owning records the stance and clears the flag; it publishes as your prose, not a
+  citation. The thing Citey won't rest beside is the *undeclared* claim.
+
+Citey also reflects the **publish gate**: a live count of how many claims would
+still ship unverified, and a wary face until they're all sourced or owned — the
+same `needs-quote` rejection the publish build already runs, given a face. He
+also suggests **tags** (mechanical entity surfacing from the people, places and
+orgs you name — `citey-assist.js`, no model).
 
 **Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
 PDFs — loses its original formatting at the door: the editors rebuild the

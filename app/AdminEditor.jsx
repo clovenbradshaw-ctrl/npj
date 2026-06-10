@@ -86,7 +86,7 @@ function AdminEditor() {
 
   return (
     <React.Fragment>
-      {/* launcher — bottom-left, distinct from Tweaks/Clippy */}
+      {/* launcher — bottom-left, distinct from Tweaks/Citey */}
       <button onClick={() => setOpen(o => !o)} title="Admin: edit site layout"
         style={{ position: "fixed", left: 18, bottom: 18, zIndex: 6000, display: "inline-flex", alignItems: "center", gap: 8,
           background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)",

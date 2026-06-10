@@ -40,9 +40,9 @@ function Composer({ user, session, onSignOut }) {
   const titleRef = useRef(null);
   const dekRef = useRef(null);
 
-  // let Clippy drop suggested tags straight in
+  // let Citey drop suggested tags straight in
   useEffect(() => {
-    window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags };
+    window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags, columns: () => [] };
     return () => { if (window.__draftTags) delete window.__draftTags; };
   });
 
@@ -247,7 +247,7 @@ function Composer({ user, session, onSignOut }) {
           onInput={(e) => { e.target.style.height = "auto"; e.target.style.height = e.target.scrollHeight + "px"; }}
           style={{ width: "100%", border: 0, outline: "none", resize: "none", background: "transparent", fontFamily: "var(--serif)", fontSize: 21, fontStyle: "italic", lineHeight: 1.35, color: "var(--ink-soft)", marginBottom: 16, overflow: "hidden" }} />
 
-        {/* tags — Clippy suggests; you confirm */}
+        {/* tags — Citey suggests; you confirm */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16, paddingBottom: 14, borderBottom: "1.5px solid var(--rule)" }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Tags</span>
           {tags.map(t => (
@@ -257,7 +257,7 @@ function Composer({ user, session, onSignOut }) {
           ))}
           <input placeholder="add a tag…" onKeyDown={(e) => { if (e.key === "Enter" && e.target.value.trim()) { const t = e.target.value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""); if (t) setTags(list => list.includes(t) ? list : [...list, t]); e.target.value = ""; } }}
             className="np-mono" style={{ border: "1px dashed var(--rule-strong)", background: "transparent", padding: "4px 8px", fontSize: 12, outline: "none", width: 110 }} />
-          <button onClick={() => window.__clippy && window.__clippy.suggest()} className="np-cond" style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "4px 9px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>📎 Suggest</button>
+          <button onClick={() => window.__citey && window.__citey.suggest()} className="np-cond" style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "4px 9px", fontSize: 12, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>✦ Suggest</button>
         </div>
 
         {/* toolbar */}
