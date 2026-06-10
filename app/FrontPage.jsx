@@ -113,13 +113,13 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
 
       {/* manifesto strip */}
       <div style={{ background: "var(--ink)", color: "var(--paper)" }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", gap: 26,
-          alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 13.5 }}>
+        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "11px 22px", display: "flex", gap: 26,
+          alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 16 }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="ground-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
           <span style={{ opacity: .4 }}>/</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.shield style={{ fontSize: 15 }} /> Toggle Auditability to reveal every source.</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.shield style={{ fontSize: 17 }} /> Toggle Auditability to reveal every source.</span>
           <span style={{ opacity: .4 }}>/</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.chat style={{ fontSize: 15 }} /> Every published piece is open to public suggestion.</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.chat style={{ fontSize: 17 }} /> Every published piece is open to public suggestion.</span>
         </div>
       </div>
 
@@ -175,7 +175,7 @@ function FrontLineup({ items, onOpen }) {
       <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
         <button onClick={() => open(lead)} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
           <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{lead.kicker}{lead.status === "unpublished" && <UnpubBadge />}</div>
-          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .95, margin: "0 0 14px" }}>{lead.headline}</h1>
+          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .98, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
         {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}</div>}
