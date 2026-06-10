@@ -150,3 +150,77 @@ status (string: proposed|review|accepted|rejected) · votes (number) · ts (stri
 > The `DT · …` nodes use best-guess operation/filter keys — if your n8n's Data
 > Table version names them differently, fix the dropdown once and the wiring holds.
 
+## Troubleshooting: publish answers `ok:false` / `error:"github commit failed"`
+
+If the publish webhook returns
+`{ ok:false, statusCode:502, error:"github commit failed", gh_status:null }`,
+the GitHub commit failed but the **real reason was swallowed**. `GH Update2` /
+`GH Create2` run with `continueOnFail`, so a GitHub 4xx/5xx arrives as data — but
+the `Check GH Result` node read `gh.error?.message`, while n8n usually puts the
+error in `gh.error` as a *string* and the HTTP status outside `gh.status`. So it
+collapsed to the generic message and `gh_status:null` — which also disables the
+front end's 409/422 **Retry publish** button.
+
+Replace the `Check GH Result` node's code with this — it surfaces the real status
++ message across n8n's error shapes, and reports a true success only when a commit
+SHA comes back:
+
+```js
+// Surface the REAL GitHub outcome — don't swallow it as a generic failure.
+// GH Update2 / GH Create2 run with continueOnFail, so a 4xx/5xx from GitHub
+// lands here as data. n8n shapes that error differently across versions:
+//   { error: "message string" }   ·   { error: { message, httpCode } }
+//   sometimes a top-level .status / .statusCode, sometimes nested in .context.
+// A success returns the GitHub API body: { commit:{sha}, content:{sha} }.
+const gh = $input.first().json || {};
+const build = $('Build Content2').first().json || {};
+
+const errObj = gh.error;
+const errMsg = (typeof errObj === 'string' ? errObj
+  : (errObj && (errObj.message || errObj.description))) || gh.message || null;
+
+const ctx = (errObj && (errObj.context || errObj.cause)) || {};
+const ghStatus = Number(
+  gh.status || gh.statusCode || gh.httpCode ||
+  (errObj && (errObj.httpCode || errObj.status || errObj.statusCode)) ||
+  ctx.httpCode || ctx.statusCode || 0
+) || null;
+
+const commitSha = (gh.commit && gh.commit.sha) || (gh.content && gh.content.sha) || null;
+const hasError = !!errObj || (ghStatus && ghStatus >= 400) || (!commitSha && !!errMsg);
+const statusCode = hasError ? (ghStatus || 502) : 200;
+
+return [{ json: {
+  ok: !hasError,
+  statusCode,
+  filename: build.filename,
+  bytes: build.bytes,
+  user_id: build.user_id,
+  role: build.role,
+  error: hasError ? (errMsg || 'github commit failed') : null,
+  gh_status: ghStatus,
+  commit_sha: commitSha,
+}}];
+```
+
+Re-run the publish; the response now carries the true GitHub status + message.
+Common causes:
+
+- **401 / 403** ("Bad credentials" / "Resource not accessible by integration") —
+  the GitHub OAuth2 credential on the `GH *` nodes expired or lost write scope.
+  Re-bind / reauthorize it (needs `repo` / Contents: write on
+  `clovenbradshaw-ctrl/npj`). This is the most common cause of a sudden
+  every-publish failure.
+- **409 / 422** — a blob-SHA race on overwrite. With `gh_status` now populated,
+  the front end shows **Retry publish**; one re-POST (which re-fetches the SHA)
+  resolves it.
+- **413 / 422 "too large"** — an image is still embedded as a base64 `data:` URL
+  in the body. Fresh drops upload to the media store and move to archive.org, but
+  a *legacy* article edited through the reader's Edit overlay can round-trip an
+  old embedded image. Re-insert the image (it uploads to the media store) and
+  publish again.
+
+> Note: the committed `npj-publish.n8n.json` is **behind the live instance** — it
+> predates the `Check GH Result` / `OK2` response-contract nodes. Treat the live
+> workflow as the source of truth until it's re-exported into the repo.
+
