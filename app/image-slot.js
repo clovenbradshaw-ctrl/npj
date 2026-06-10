@@ -32,6 +32,12 @@
  *                corner-drag to scale. The crop persists alongside the image
  *                in the sidecar. contain/fill stay static.
  *   position     object-position for fit=contain|fill.     (default '50% 50%')
+ *   fitcontrol   Boolean — show a Cover/Contain/Fill toggle in the hover
+ *                controls. When set, the chosen fit and the cover crop
+ *                (pan/zoom + frame aspect) are also written into light-DOM
+ *                attributes (`fit`, `data-crop="s,x,y,ar"`) and reported on the
+ *                'image-slot-change' event, so a host that persists the slot's
+ *                HTML (NPJ drafts/publish) carries the framing without a sidecar.
  *   placeholder  Empty-state caption.                      (default 'Drop an image')
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
@@ -251,6 +257,11 @@
     '  background:rgba(0,0,0,.65);color:#fff;font:11px/1 system-ui,-apple-system,sans-serif;' +
     '  backdrop-filter:blur(6px)}' +
     '.ctl button:hover{background:rgba(0,0,0,.8)}' +
+    // The Fit toggle (Cover / Contain / Fill) is opt-in: hosts that want it on a
+    // slot add the `fitcontrol` attribute (the NPJ banner + article images do).
+    // Plain deck slots never show it, so their behaviour is unchanged.
+    '.ctl .fitbtn{display:none}' +
+    ':host([fitcontrol][data-filled]) .ctl .fitbtn{display:inline-block}' +
     '.err{position:absolute;left:8px;bottom:8px;right:8px;color:#b3261e;font-size:11px;' +
     '  background:rgba(255,255,255,.85);padding:4px 6px;border-radius:5px;pointer-events:none}';
 
@@ -262,7 +273,7 @@
 
   class ImageSlot extends HTMLElement {
     static get observedAttributes() {
-      return ['shape', 'radius', 'mask', 'fit', 'position', 'placeholder', 'src', 'id'];
+      return ['shape', 'radius', 'mask', 'fit', 'position', 'placeholder', 'src', 'id', 'fitcontrol'];
     }
 
     constructor() {
@@ -284,7 +295,9 @@
         '  <div class="handle" data-c="nw"></div><div class="handle" data-c="ne"></div>' +
         '  <div class="handle" data-c="sw"></div><div class="handle" data-c="se"></div>' +
         '</div>' +
-        '<div class="ctl"><button data-act="replace" title="Replace image">Replace</button>' +
+        '<div class="ctl">' +
+        '  <button class="fitbtn" data-act="fit" title="How the image fills the frame — Cover (crop to fill), Contain (fit whole image), or Fill (stretch)">Cover</button>' +
+        '  <button data-act="replace" title="Replace image">Replace</button>' +
         '  <button data-act="clear" title="Remove image">Remove</button></div>' +
         '<input type="file" accept="' + ACCEPT.join(',') + '" hidden>';
       this._frame = root.querySelector('.frame');
@@ -295,6 +308,7 @@
       this._sub = root.querySelector('.sub');
       this._spill = root.querySelector('.spill');
       this._ghost = root.querySelector('.ghost');
+      this._fitbtn = root.querySelector('.fitbtn');
       this._err = null;
       this._input = root.querySelector('input');
       this._depth = 0;
@@ -317,6 +331,18 @@
       });
       root.addEventListener('click', (e) => {
         const act = e.target && e.target.getAttribute && e.target.getAttribute('data-act');
+        if (act === 'fit') {
+          // Cycle the fill mode and persist it. cover ↔ contain ↔ fill — cover
+          // is the only one that supports the double-click reframe (crop), so
+          // leaving cover drops out of any in-progress reframe first.
+          const order = ['cover', 'contain', 'fill'];
+          const cur = (this.getAttribute('fit') || 'cover').toLowerCase();
+          const next = order[(order.indexOf(cur) + 1) % order.length] || 'cover';
+          this._exitReframe(false);
+          this.setAttribute('fit', next); // attributeChangedCallback re-renders + re-applies
+          this._persistFraming();
+          return;
+        }
         if (act === 'replace') { this._exitReframe(true); this._input.click(); }
         if (act === 'clear') {
           this._exitReframe(false);
@@ -598,7 +624,11 @@
 
     _announce(src) {
       this.dispatchEvent(new CustomEvent('image-slot-change', {
-        bubbles: true, composed: true, detail: { id: this.id || null, src: src || null }
+        bubbles: true, composed: true, detail: {
+          id: this.id || null, src: src || null,
+          fit: (this.getAttribute('fit') || 'cover').toLowerCase(),
+          crop: this.getAttribute('data-crop') || null,
+        }
       }));
     }
 
@@ -739,6 +769,38 @@
       // crop; clearing the sidecar still falls through to src=.
       if (this.id) setSlot(this.id, v);
       else { this._local = v; }
+      // Article/banner slots (fitcontrol) also write the crop into a light-DOM
+      // attribute so it rides the host's saved HTML — there's no sidecar at
+      // publish time, so this is how a crop survives into a committed article.
+      if (this.hasAttribute('fitcontrol')) this._persistFraming();
+    }
+
+    // crop "s,x,y,ar" → {s,x,y,ar}; the frame aspect (ar) is stored so the
+    // front-end reader can reproduce the exact cover crop at any display width.
+    _parseCrop(str) {
+      if (!str) return null;
+      const p = String(str).split(',').map(Number);
+      if (!p.length || !Number.isFinite(p[0])) return null;
+      return {
+        s: p[0],
+        x: Number.isFinite(p[1]) ? p[1] : 0,
+        y: Number.isFinite(p[2]) ? p[2] : 0,
+        ar: Number.isFinite(p[3]) ? p[3] : 0,
+      };
+    }
+
+    // Write the current fill mode + crop into the light DOM and tell the host
+    // to save. The `fit` attribute already lives in the light DOM; data-crop
+    // carries the cover pan/zoom plus the frame aspect ratio.
+    _persistFraming() {
+      const fw = this.clientWidth, fh = this.clientHeight;
+      const ar = (fw > 0 && fh > 0) ? fw / fh : 0;
+      const v = this._view || { s: 1, x: 0, y: 0 };
+      const r3 = (n) => Math.round(n * 1000) / 1000;
+      const parts = [r3(v.s || 1), r3(v.x || 0), r3(v.y || 0)];
+      if (ar) parts.push(r3(ar));
+      this.setAttribute('data-crop', parts.join(','));
+      this._announce(this.getAttribute('src') || this._userUrl || null);
     }
 
     _render() {
@@ -786,11 +848,20 @@
       const url = this._userUrl || srcAttr;
       // Don't clobber an in-flight reframe with a store-triggered re-render.
       if (!this.hasAttribute('data-reframe')) {
+        // Seed from the sidecar if present; otherwise fall back to a crop
+        // persisted in the light DOM (data-crop) — that's how a published or
+        // host-saved slot reproduces its crop without a sidecar.
+        const fv = stored || this._parseCrop(this.getAttribute('data-crop'));
         this._view = {
-          s: stored && Number.isFinite(stored.s) ? clampS(stored.s) : 1,
-          x: stored && Number.isFinite(stored.x) ? stored.x : 0,
-          y: stored && Number.isFinite(stored.y) ? stored.y : 0,
+          s: fv && Number.isFinite(fv.s) ? clampS(fv.s) : 1,
+          x: fv && Number.isFinite(fv.x) ? fv.x : 0,
+          y: fv && Number.isFinite(fv.y) ? fv.y : 0,
         };
+      }
+      // Label the Fit toggle with the current mode.
+      if (this._fitbtn) {
+        const f = (this.getAttribute('fit') || 'cover').toLowerCase();
+        this._fitbtn.textContent = f.charAt(0).toUpperCase() + f.slice(1);
       }
       this._cap.textContent = this.getAttribute('placeholder') || 'Drop an image';
       // Toggle via style.display — the [hidden] attribute alone loses to

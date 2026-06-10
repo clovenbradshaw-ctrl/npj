@@ -116,9 +116,13 @@
       });
     });
     if (!state || !state.headline) return { article: null, sources, versions, events: events.map(e => e.ev) };
-    // the lead/banner image, lifted out of the body so the reader and the front
-    // page can use it without walking the blocks (it still lives in body too).
-    const bannerBlock = (Array.isArray(state.body) ? state.body : []).find(b => b && b.type === "img" && b.banner);
+    // the lead image, lifted out of the body so the reader and the front page
+    // can use it without walking the blocks (it still lives in body too). An
+    // explicit banner wins; failing that the first inline photo becomes the
+    // front-page thumbnail — so an article with any image always shows one on
+    // the front page, while only a real banner is lifted into the reader hero.
+    const imgBlocks = (Array.isArray(state.body) ? state.body : []).filter(b => b && b.type === "img" && b.src);
+    const bannerBlock = imgBlocks.find(b => b.banner) || imgBlocks[0] || null;
     const article = {
       slug: state.slug || "untitled",
       kicker: state.column || "Published",
@@ -136,7 +140,10 @@
       // for everyone but admins; the log itself is never removed — a later
       // REC{status:"published"} brings it back. Absent field → published.
       status: state.status === "unpublished" ? "unpublished" : "published",
-      image: bannerBlock ? { src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "" } : null,
+      image: bannerBlock ? {
+        src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
+        banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
+      } : null,
       body: Array.isArray(state.body) ? state.body : [],
       sources, versions
     };
@@ -219,6 +226,20 @@
        <span class="eo-claim" data-src="k1 k2" data-id="…">text</span>  (the
          post-publish edit surface) — an explicit claim span, used so published
          claims survive a round trip through contentEditable untouched. */
+  // <image-slot data-crop="s,x,y,ar"> → {s,x,y,ar}. Mirrors image-slot's own
+  // parser; ar is the frame aspect at crop time so the cover crop reproduces.
+  function parseCrop(str) {
+    if (!str) return null;
+    const p = String(str).split(",").map(Number);
+    if (!p.length || !Number.isFinite(p[0])) return null;
+    return {
+      s: p[0],
+      x: Number.isFinite(p[1]) ? p[1] : 0,
+      y: Number.isFinite(p[2]) ? p[2] : 0,
+      ar: Number.isFinite(p[3]) ? p[3] : 0,
+    };
+  }
+
   function htmlToBlocks(html) {
     const root = document.createElement("div"); root.innerHTML = html || "";
     let idSeq = 0;
@@ -348,6 +369,14 @@
             const block = { type: "img", src, caption };
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
+            // fill mode + crop chosen on the slot ride along so the reader and
+            // the front page render the same framing the author saw (a banner
+            // cropped 'cover', letterboxed 'contain', or stretched 'fill').
+            const fit = (slot.getAttribute("fit") || "").toLowerCase();
+            if (fit === "contain" || fit === "fill") block.fit = fit;
+            const crop = parseCrop(slot.getAttribute("data-crop"));
+            // only meaningful when there's an actual pan/zoom or a non-cover fit
+            if (crop && crop.ar && (block.fit || crop.s !== 1 || crop.x || crop.y)) block.crop = crop;
             blocks.push(block);
           }
         }
@@ -395,7 +424,11 @@
         const alt = (b.store && b.src && b.src !== b.store) ? b.src : "";
         const cls = b.banner ? "cmp-embed nr-banner" : "cmp-embed";
         const slotId = (b.banner ? "eo-banner-" : "eo-img-") + bi;
-        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + ' shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+        // round-trip the chosen fill mode + crop so re-editing keeps the framing
+        const fitAttr = b.fit ? ' fit="' + esc(b.fit) + '"' : '';
+        const cropAttr = (b.crop && b.crop.ar)
+          ? ' data-crop="' + esc([b.crop.s, b.crop.x, b.crop.y, b.crop.ar].join(",")) + '"' : '';
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";

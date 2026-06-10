@@ -146,7 +146,7 @@ function Composer({ user, session, onSignOut }) {
     window.NpjPlainText.insert(text);
     updateWc();
   };
-  const insertImage = () => { insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" style="width:100%;height:300px" shape="rect" placeholder="Drop a photo"></image-slot><figcaption class="np-mono">photo · drag an image, then add a caption &amp; credit</figcaption></figure>`); setInsertOpen(false); };
+  const insertImage = () => { insertHTML(`<figure contenteditable="false" class="cmp-embed"><image-slot id="img-${Date.now()}" fitcontrol style="width:100%;height:300px" shape="rect" placeholder="Drop a photo"></image-slot><figcaption class="np-mono">photo · drag an image, then add a caption &amp; credit</figcaption></figure>`); setInsertOpen(false); };
   const insertDivider = () => { insertHTML(`<hr class="cmp-hr"/>`); setInsertOpen(false); };
   const insertEmbed = (e) => {
     insertHTML(`<div contenteditable="false" class="cmp-embed cmp-widget"><div class="cmp-widget-h"><span class="np-mono">::embed[${e.key}]</span><span class="cmp-tag">whitelisted widget</span></div><div class="cmp-widget-b"><strong>${e.label}</strong><span>${e.hint}</span></div><div class="np-mono cmp-widget-f">sandboxed · no raw HTML or scripts execute</div></div>`);
