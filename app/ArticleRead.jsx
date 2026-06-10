@@ -272,12 +272,15 @@ function ArticleRead(props) {
             {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
           </blockquote>
         );
-        if (b.type === "img") return (
-          <figure key={i} style={{ margin: "26px 0" }}>
-            <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-            {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
-          </figure>
-        );
+        if (b.type === "img") {
+          if (b.banner) return null; // the banner is lifted into the hero above — never inline
+          return (
+            <figure key={i} style={{ margin: "26px 0" }}>
+              <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
+            </figure>
+          );
+        }
         if (b.type === "embed") return (
           <figure key={i} style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
             <a href={b.url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>
@@ -343,6 +346,17 @@ function ArticleRead(props) {
     </header>
   );
 
+  // the lead/banner image — from the folded article's derived `image`, or the
+  // banner-flagged block in the body. Rendered once, as a hero under the
+  // headline; the body map skips the same block so it never doubles up.
+  const heroImg = (A.image && A.image.src) ? A.image : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
+  const Hero = (heroImg && heroImg.src) ? (
+    <figure style={{ margin: "0 0 28px" }}>
+      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
+    </figure>
+  ) : null;
+
   const Main = (
     <div style={{ minWidth: 0 }}>
       {A.status === "unpublished" && (
@@ -356,6 +370,7 @@ function ArticleRead(props) {
         <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)", border: "1px solid var(--reject)", padding: "9px 10px", marginBottom: 16, lineHeight: 1.5 }}>{statusErr}</div>
       )}
       {Header}
+      {Hero}
       {Body}
       <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
     </div>
@@ -532,4 +547,4 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
   );
 }
 
-Object.assign(window, { ArticleRead });
+Object.assign(window, { ArticleRead, MediaImg });

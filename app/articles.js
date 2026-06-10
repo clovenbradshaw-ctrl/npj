@@ -32,7 +32,7 @@
   const OWNER_REPO = "clovenbradshaw-ctrl/npj";
   const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
   const API_LIST = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR + "?ref=main";
-  const IDX_CACHE_KEY = "npj_articles_idx_v1";
+  const IDX_CACHE_KEY = "npj_articles_idx_v2";
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
 
@@ -116,6 +116,9 @@
       });
     });
     if (!state || !state.headline) return { article: null, sources, versions, events: events.map(e => e.ev) };
+    // the lead/banner image, lifted out of the body so the reader and the front
+    // page can use it without walking the blocks (it still lives in body too).
+    const bannerBlock = (Array.isArray(state.body) ? state.body : []).find(b => b && b.type === "img" && b.banner);
     const article = {
       slug: state.slug || "untitled",
       kicker: state.column || "Published",
@@ -133,6 +136,7 @@
       // for everyone but admins; the log itself is never removed — a later
       // REC{status:"published"} brings it back. Absent field → published.
       status: state.status === "unpublished" ? "unpublished" : "published",
+      image: bannerBlock ? { src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "" } : null,
       body: Array.isArray(state.body) ? state.body : [],
       sources, versions
     };
@@ -175,7 +179,7 @@
           slug: article.slug || slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
           column: article.column, tags: article.tags, published: article.published, updated: article.updated,
           authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
-          status: article.status
+          status: article.status, image: article.image
         };
         cache[f.name] = { sha: f.sha, meta };
         return meta;
@@ -192,7 +196,7 @@
   // Fill window.NPJ.FRONT from the committed record. Returns the metas.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, status: m.status });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     return metas;
   }
@@ -312,9 +316,17 @@
         const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
         const isArchive = (u) => !!u && (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u));
         const okSrc = (u) => !!u && (window.NpjMedia ? window.NpjMedia.isPublishable(u) : isArchive(u));
+        // the lead/banner image: the composer marks it with the nr-banner class
+        // (or a data-banner flag / an eo-banner slot id). It rides in the body
+        // like any image but carries banner:true, so the reader can lift it into
+        // a hero above the piece and the front page can use it as the lead photo.
+        const isBanner = !!(node.classList && node.classList.contains("nr-banner")) ||
+          node.hasAttribute("data-banner") || (slot && /(^|[-_])banner/i.test(slot.getAttribute("id") || ""));
+        // the empty banner figure carries a placeholder caption ("banner · …") — drop it
+        const caption = /^banner(\s*·|\s|$)/i.test(capText) ? "" : capText;
         if (node.hasAttribute("data-eo-img")) {
           const s = plainImg && plainImg.getAttribute("src");
-          if (s) blocks.push({ type: "img", src: s, caption: capText });
+          if (s) { const block = { type: "img", src: s, caption }; if (isBanner) block.banner = true; blocks.push(block); }
         } else if (slot) {
           // a slot can carry two URLs (src + data-alt): the archive.org one is
           // the canonical `src`; the media-store one rides as `store` so the
@@ -328,8 +340,9 @@
           });
           const src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
           if (src) {
-            const block = { type: "img", src, caption: capText };
+            const block = { type: "img", src, caption };
             if (storeU && storeU !== src) block.store = storeU;
+            if (isBanner) block.banner = true;
             blocks.push(block);
           }
         }
@@ -375,7 +388,9 @@
       if (b.type === "img") {
         const primary = b.store || b.src || "";
         const alt = (b.store && b.src && b.src !== b.store) ? b.src : "";
-        return '<figure contenteditable="false" class="cmp-embed"><image-slot id="eo-img-' + bi + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + ' shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+        const cls = b.banner ? "cmp-embed nr-banner" : "cmp-embed";
+        const slotId = (b.banner ? "eo-banner-" : "eo-img-") + bi;
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + ' shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
