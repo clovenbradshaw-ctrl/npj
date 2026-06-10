@@ -2,9 +2,11 @@
    project (a shared Matrix room) is a card that shows who is invited — joined
    members and pending invitees, read live from the homeserver — plus every
    document inside it. Drafts that belong to no project sit in their own group,
-   and the published record (the EO event logs in articles/*.jsonl) closes the
-   page. Gated to a signed-in session — guests are pointed at the Matrix
-   sign-in on the Submit page. */
+   and the published record (per-document folders of timestamped version files
+   in articles/<slug>/, plus legacy articles/*.jsonl logs) closes the page —
+   each piece badged published / updated / unpublished, with the admin able to
+   unpublish (take it off the site) or republish right from its row. Gated to
+   a signed-in session — guests are pointed at the Matrix sign-in on Submit. */
 
 function DocSpinner() { return <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-1px" }} />; }
 
@@ -46,7 +48,7 @@ function MemberChips({ list, me }) {
   );
 }
 
-function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onNewsroom, onSignIn }) {
+function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onSignIn }) {
   const signedIn = !!session;
   const me = session && session.user_id;
   const [drafts, setDrafts] = useState(null);       // null = loading
@@ -54,11 +56,37 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
   const [members, setMembers] = useState({});       // roomId → [{mxid, membership}]
   const [published, setPublished] = useState(null); // { articles: EO log metas, legacy: root .md files }
   const [confirmId, setConfirmId] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(null); // slug with an unpublish/republish in flight
+  const [statusErr, setStatusErr] = useState(null);
   const [q, setQ] = useState("");
   const { isAdmin } = React.useContext(window.LayoutCtx);
   // unpublished pieces stay listed for admins (badged, still openable) but
   // drop off the list for everyone else
   const pubArticles = published ? published.articles.filter(m => isAdmin || m.status !== "unpublished") : [];
+
+  // admin-only: take a piece off the site / put it back — one REC version file
+  // carrying the status, committed to the document's folder. Nothing deleted.
+  const setDocStatus = async (m, next) => {
+    setStatusErr(null);
+    const token = window.MatrixAuth && window.MatrixAuth.token();
+    if (!token) { setStatusErr("Sign in with Matrix to manage publication — the webhook re-verifies the token server-side."); return; }
+    if (next === "unpublished" && !window.confirm("Unpublish “" + m.headline + "”?\n\nIt comes off the site for everyone but admins. Every version stays in GitHub — you can republish anytime.")) return;
+    setStatusBusy(m.slug);
+    try {
+      const out = await window.NpjArticles.setArticleStatus({ slug: m.slug, status: next, actor: me, token });
+      if (!out.res.ok) {
+        setStatusErr("Rejected (HTTP " + out.res.status + ") — nothing changed." + (out.res.status === 401 || out.res.status === 403 ? " That Matrix account isn't authorized." : ""));
+      } else {
+        setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
+          ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "dir", logPath: "articles/" + m.slug }
+          : x) } : p);
+        window.NpjArticles.loadFront().catch(() => {}); // the front page reflects it on next visit
+      }
+    } catch (e) {
+      setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
+    }
+    setStatusBusy(null);
+  };
 
   // drafts: both layers, newest first (app/drafts.js heals local vs Matrix).
   // Re-list whenever a background sync lands so "backing up…" flips to
@@ -88,8 +116,8 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
     return () => { alive = false; };
   }, [signedIn]);
 
-  // published record: the EO event logs in articles/*.jsonl (the real record),
-  // plus any legacy .md files still at the repo root (best-effort)
+  // published record: the versioned event logs under articles/ (the real
+  // record), plus any legacy .md files still at the repo root (best-effort)
   useEffect(() => {
     if (!signedIn) return;
     let alive = true;
@@ -176,7 +204,9 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
           )}
         </div>
         <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
-          <button className="btn btn-primary btn-sm" onClick={() => (d.kind === "post" && onOpenPost) ? onOpenPost() : onOpen(d.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+          {/* every draft — including legacy "post" drafts from the old Submit
+              composer — opens in the Newsroom editor */}
+          <button className="btn btn-primary btn-sm" onClick={() => onOpen(d.id)} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
             <I.arrow style={{ fontSize: 12 }} /> Open
           </button>
           {confirmId === d.id ? (
@@ -265,30 +295,53 @@ function DocumentsPage({ session, onOpen, onOpenPost, onOpenArticle, onHome, onN
             )}
             {drafts && soloDrafts.map(d => draftRow(d, false))}
 
-            {/* ---- the published record: EO event logs in articles/*.jsonl ---- */}
+            {/* ---- the published record: one version folder per document ---- */}
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.check style={{ fontSize: 14 }} /> Published · EO event logs committed to GitHub
+              <I.check style={{ fontSize: 14 }} /> Published · versioned event logs committed to GitHub
             </div>
+            {statusErr && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)", border: "1px solid var(--reject)", padding: "8px 10px", marginBottom: 8, lineHeight: 1.5 }}>{statusErr}</div>}
             {!published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> reading the public record…</div>}
             {published && pubArticles.length === 0 && published.legacy.length === 0 && (
-              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its event log lands in articles/ and is listed here.</div>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its version folder lands in articles/ and is listed here.</div>
             )}
-            {published && pubArticles.map(m => (
-              <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1 }}>
-                <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, lineHeight: 1.1 }}>{m.headline}</span>
-                {m.status === "unpublished" && <span className="np-mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".06em", color: "var(--reject)", border: "1px solid var(--reject)", padding: "1px 5px", textTransform: "uppercase" }}>⊘ Unpublished</span>}
-                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{m.kicker}{m.published ? " · " + m.published : ""} · {m.versions} version{m.versions !== 1 ? "s" : ""}</span>
-                <span style={{ flex: 1 }} />
-                {onOpenArticle && (
-                  <button onClick={() => onOpenArticle(m.slug)} className="btn btn-sm btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
-                    <I.arrow style={{ fontSize: 12 }} /> Read
-                  </button>
-                )}
-                <a href={"https://github.com/clovenbradshaw-ctrl/npj/commits/main/articles/" + m.slug + ".jsonl"} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <I.ext style={{ fontSize: 12 }} /> event log
-                </a>
-              </div>
-            ))}
+            {published && pubArticles.map(m => {
+              // the row's status: unpublished (off the site) · updated (edited
+              // since publish — newest version file wins) · published
+              const badge = m.status === "unpublished"
+                ? { label: "⊘ Unpublished", color: "var(--reject)" }
+                : (m.versions || 1) > 1
+                ? { label: "⊛ Updated" + (m.updated ? " " + m.updated : ""), color: "var(--review)" }
+                : { label: "● Published", color: "var(--verified)" };
+              // folder docs link to their version folder; legacy single-file
+              // logs to the file's commit history
+              const logHref = m.storage === "file"
+                ? "https://github.com/clovenbradshaw-ctrl/npj/commits/main/" + (m.logPath || ("articles/" + m.slug + ".jsonl"))
+                : "https://github.com/clovenbradshaw-ctrl/npj/tree/main/" + (m.logPath || ("articles/" + m.slug));
+              const busy = statusBusy === m.slug;
+              return (
+                <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1 }}>
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, lineHeight: 1.1 }}>{m.headline}</span>
+                  <span className="np-mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".06em", color: badge.color, border: "1px solid " + badge.color, padding: "1px 5px", textTransform: "uppercase" }}>{badge.label}</span>
+                  <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{m.kicker}{m.published ? " · " + m.published : ""} · {m.versions} version{m.versions !== 1 ? "s" : ""}</span>
+                  <span style={{ flex: 1 }} />
+                  {onOpenArticle && (
+                    <button onClick={() => onOpenArticle(m.slug)} className="btn btn-sm btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <I.arrow style={{ fontSize: 12 }} /> Read
+                    </button>
+                  )}
+                  {isAdmin && (m.status === "unpublished" ? (
+                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "published")} title="Republish — put it back on the site"
+                      style={{ background: "var(--yellow)", fontWeight: 700, opacity: busy ? .5 : 1 }}>↺ {busy ? "Working…" : "Republish"}</button>
+                  ) : (
+                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "unpublished")} title="Unpublish — take it off the site (every version stays in GitHub)"
+                      style={{ borderColor: "var(--reject)", color: "var(--reject)", opacity: busy ? .5 : 1 }}>⊘ {busy ? "Working…" : "Unpublish"}</button>
+                  ))}
+                  <a href={logHref} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <I.ext style={{ fontSize: 12 }} /> {m.storage === "file" ? "event log" : "versions"}
+                  </a>
+                </div>
+              );
+            })}
             {published && published.legacy.length > 0 && (
               <React.Fragment>
                 <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "12px 0 4px" }}>legacy markdown files (pre-EO-log) still at the repo root:</div>

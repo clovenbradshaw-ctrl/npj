@@ -12,9 +12,9 @@ founding admin curates the site and grows the network from there.
 | Path | What it is |
 |---|---|
 | `index.html` | the app shell — loads everything below (served at the repo root) |
-| `articles/` | **the published record** — one append-only EO event log per article (`<slug>.jsonl`) |
+| `articles/` | **the published record** — one folder per document (`<slug>/`) of timestamped version files, one EO event each; legacy single-file logs (`<slug>.jsonl`) still readable |
 | `app/` | the React (in-browser Babel) front end |
-| `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds logs into readable articles, publishes (INS) and appends edits (REC) |
+| `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
 | `app/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
 | `app/data.js` | content layer — **framework only**, seeded empty |
 | `app/layout.jsx` | the editable site chrome + the permission model |
@@ -29,25 +29,42 @@ founding admin curates the site and grows the network from there.
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
 
-## Articles are append-only EO event logs
+## Articles are append-only EO event logs — one folder of version files per document
 
-Publishing commits **one JSONL line** — an `INS` event carrying the whole piece
-(headline, dek, body blocks, span-bound sources, authors, assignees) — to
-`articles/<slug>.jsonl`. Every edit after publish appends **one `REC` line** to
-the *same file* through the webhook's `append` mode, so the log is the
-article's complete, auditable change history; nothing is ever rewritten. The
-front page lists the logs straight from GitHub, the reader folds a log into the
-formatted article (`#article;read=<slug>` is the share link), and the version
-badge opens a word-level diff between any two events. **Edit after publish** is
-gated to the admin and the article's `assignees` (the publisher by default) —
-enforced in the n8n webhook against the log's own genesis line, not just in the UI.
+Each document owns a folder, and every event lands as a **new timestamped
+file** inside it:
 
-**Unpublish never deletes.** An admin can hide a published piece from the
-control bar (or reopen it from Documents). "Unpublish" appends one more
-`REC` event carrying `{"status":"unpublished"}` — so the act of hiding is
-itself part of the permanent record, and the whole log stays in GitHub and git
-history. An unpublished piece drops off the front page, the Documents list and
-the reader for everyone **except admins**, who keep seeing it badged and can
+```
+articles/<slug>/20260610T231501123Z-ins-x7k2.jsonl   ← the publish (INS, the whole piece)
+articles/<slug>/20260611T010203456Z-rec-9bd1.jsonl   ← an edit (REC, just what changed)
+```
+
+Publishing commits one `INS` event file carrying the whole piece (headline,
+dek, body blocks, span-bound sources, authors, assignees). Every edit after
+publish commits one more `REC` file into the same folder. **No commit ever
+updates an existing file** — the old single-file `append` mode rode GitHub's
+update-with-SHA call, which kept rejecting commits; create-only version files
+can't conflict. The folder is the article's complete, auditable change
+history, and uploading the same document again simply lands a newer `INS`
+file: it becomes the current version and every earlier version stays on the
+shelf. Pre-existing single-file logs (`articles/<slug>.jsonl`) are still read,
+folding in before the folder's files.
+
+The front page lists the record straight from GitHub (one git-tree call), the
+reader folds a document's version files into the formatted article
+(`#article;read=<slug>` is the share link), and the version badge opens a
+word-level diff between any two events. **Edit after publish** is gated to the
+admin and the article's `assignees` (the publisher by default) — enforced in
+the n8n webhook against the document's genesis event, not just in the UI.
+
+**Unpublish never deletes — it just takes the piece off the site.** An admin
+can do it from the article control bar or straight from its row under
+Documents, where every piece is badged **published / updated / unpublished**.
+"Unpublish" commits one more `REC` version file carrying
+`{"status":"unpublished"}` — so the act of hiding is itself part of the
+permanent record, and the whole folder stays in GitHub and git history. An
+unpublished piece drops off the front page, the Documents list and the reader
+for everyone **except admins**, who keep seeing it badged and can
 **Republish** it (another `REC` with `status:"published"`) at any time. Nothing
 is ever truly removed; the site just stops serving it.
 
@@ -75,8 +92,9 @@ can't lose it (GitHub + Matrix):
 Two ways in, surfaced on the **Submit** page:
 
 1. **Email a tip** — anyone, no account: `peoplesjournalism@proton.com`.
-2. **Sign in with Matrix** — contributors on the allowlist. No account yet? Pick a
-   homeserver at <https://matrix.org/ecosystem/hosting/>.
+2. **Sign in with Matrix** — contributors on the allowlist. Signing in lands you
+   in **Documents** (your drafts, projects and the published record). No account
+   yet? Pick a homeserver at <https://matrix.org/ecosystem/hosting/>.
 
 ## Sourcing is manual and span-bound — on both ends
 
