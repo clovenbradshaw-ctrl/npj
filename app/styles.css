@@ -346,6 +346,14 @@ a { color: inherit; }
 .md-preview .claim-src.needs-quote { background: rgba(230,123,60,.16); border-bottom: 1.5px dashed var(--reject, #e67b3c); }
 .newsroom.nr-light .md-preview .claim-src.needs-quote { background: rgba(230,123,60,.22); }
 .md-preview .claim-src.needs-quote::after { content: "⚑"; font-size: 9px; color: var(--reject, #e67b3c); vertical-align: super; margin-left: 1px; }
+/* an OWNED claim — the author stands behind it (analysis / account / voice),
+   grounded by honest declaration rather than a citation. Citey records the
+   stance; it publishes as the author's prose. */
+.md-preview .claim-src[data-stance] { background: rgba(124,116,222,.16); border-bottom: 1.5px solid #7c74de; }
+.newsroom.nr-light .md-preview .claim-src[data-stance] { background: rgba(124,116,222,.2); }
+.md-preview .claim-src[data-stance]::after { content: "⊢"; font-size: 9px; color: #7c74de; vertical-align: super; margin-left: 1px; }
+.md-preview .claim-src[data-stance="testimony"]::after { content: "⊨"; }
+.md-preview .claim-src[data-stance="voice"]::after { content: "⊩"; }
 /* "armed" — a source is picked and waiting for you to select the words it
    backs; the page invites a text selection */
 .md-preview.nr-arming { cursor: text; box-shadow: inset 0 0 0 2px var(--yellow); }

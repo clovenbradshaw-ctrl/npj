@@ -16,3 +16,6 @@ screenshots/
 uploads/
 scraps/
 *.log
+
+# dev-only deps (the app is no-build; Babel/React load from unpkg at runtime)
+node_modules/

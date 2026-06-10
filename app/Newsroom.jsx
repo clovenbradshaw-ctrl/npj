@@ -1,7 +1,7 @@
 /* NPJ newsroom — the editor. Ships empty. Manual, span-bound sourcing (drafteo
    style: select the exact words → bind a source; one source can back many spans).
    Adds: banner + inline images, a proper link/jump-link popover, a section
-   contents rail, Clippy-assisted tags, real Matrix room invites + server-side
+   contents rail, Citey-assisted grounding + tags, real Matrix room invites + server-side
    room recovery (survives a browser wipe), permission-gated publish, versioning. */
 
 /* themeable palette — resolved by the --nr-* vars on .newsroom / .newsroom.nr-light
@@ -68,9 +68,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const scroller = useRef(null);                     // the editor scroll container (the page scrolls inside it)
   const selRange = useRef(null);
 
-  // let Clippy drop suggested tags in
+  // let Citey drop suggested tags in (and read the columns for its column hint)
   useEffect(() => {
-    window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags };
+    window.__draftTags = { add: (t) => setTags(list => list.includes(t) ? list : [...list, t]), get: () => tags, columns: () => columns };
     return () => { if (window.__draftTags) delete window.__draftTags; };
   });
 
@@ -421,14 +421,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // ---- pin the source-span: the words IN THE SOURCE that back this claim ----
   const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
   const [pinQuote, setPinQuote] = useState("");
+  const [spanHits, setSpanHits] = useState([]);     // Citey's ranked candidate lines from the source
+  const [srcPaste, setSrcPaste] = useState(null);   // null = hidden; string = paste box shown
   const openPin = (cid, key, claimText) => {
     // re-opening an existing binding? read back whatever quote is on it
     let existing = "";
     if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
-    setPinQuote(existing);
+    setPinQuote(existing); setSpanHits([]); setSrcPaste(null);
     setPinTarget({ cid, key, claimText });
   };
-  const closePin = () => { setPinTarget(null); setPinQuote(""); };
+  const closePin = () => { setPinTarget(null); setPinQuote(""); setSpanHits([]); setSrcPaste(null); };
   const savePin = () => {
     const t = pinTarget; if (!t) return;
     const q = String(pinQuote || "").trim();
@@ -443,20 +445,53 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // same source can be matched against text we've already pulled
     const rec = window.NPJ.SOURCES[t.key];
     if (rec && (!rec.text || rec.text.indexOf(q) < 0)) rec.text = (rec.text ? rec.text + "\n" : "") + q;
+    const flipped = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
     closePin(); setRev(v => v + 1); scheduleSave();
+    // let Citey flip ⊥→⊤ and re-cost the publish gate
+    if (window.__citey) { if (flipped) window.__citey.evaluateSpan(flipped); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
   };
-  // hand the claim + source over to Clippy and let him locate the supporting span
-  const findWithClippy = () => {
-    const t = pinTarget; if (!t || !window.__clippy || !window.__clippy.findSpan) return;
+  // Citey ranks the source's sentences and points at the line that backs the claim
+  // — mechanical (citey-assist.js), no model. The author pins; Citey never invents a
+  // citation. No source text on record yet → reveal a paste box and rank that.
+  const findSourceSpan = () => {
+    const t = pinTarget; if (!t) return;
     const rec = window.NPJ.SOURCES[t.key] || {};
-    window.__clippy.findSpan({
-      claimText: t.claimText,
-      source: { key: t.key, title: rec.title, outlet: rec.outlet, text: rec.text || "" },
-      onPick: (quote) => setPinQuote(quote)
-    });
+    const txt = String(rec.text || "").trim();
+    if (!txt) { setSrcPaste(""); setSpanHits([]); return; }
+    setSpanHits(window.CiteyAssist ? window.CiteyAssist.rankSpans(t.claimText, txt) : []);
+    setSrcPaste(null);
   };
-  // every bound span still missing its source-span
-  const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0; };
+  const rankPaste = (text) => {
+    const t = pinTarget; if (!t || !String(text || "").trim()) return;
+    const rec = window.NPJ.SOURCES[t.key];
+    if (rec) rec.text = (rec.text ? rec.text + "\n" : "") + text.trim();
+    setSpanHits(window.CiteyAssist ? window.CiteyAssist.rankSpans(t.claimText, text) : []);
+    setSrcPaste(null);
+  };
+  // Citey's grounding bridge — the popover's pin / own / unown act here so React
+  // state (rev) and the autosave stay consistent. Owning a claim removes the
+  // incomplete citation and records the author's stance; it publishes as prose.
+  useEffect(() => {
+    window.__npjGround = {
+      focused: () => window.__citey && window.__citey.focused ? window.__citey.focused() : null,
+      pin: (el) => { if (!el) return; const cid = el.getAttribute("data-cid"); if (!cid) return; openPin(cid, el.getAttribute("data-src") || el.getAttribute("data-cite"), (el.textContent || "").trim()); },
+      own: (el, stance) => {
+        if (!el) return; const cid = el.getAttribute("data-cid");
+        if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
+        el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
+        el.classList.remove("needs-quote");
+        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : "analysis";
+        el.setAttribute("data-stance", norm);
+        el.setAttribute("title", "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
+        setRev(v => v + 1); scheduleSave();
+      },
+      unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      gate: () => window.CiteyBrain ? window.CiteyBrain.publishGate(ed.current) : null
+    };
+    return () => { if (window.__npjGround) delete window.__npjGround; };
+  });
+  // every bound span still missing its source-span (owned claims are grounded, skip them)
+  const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => !el.getAttribute("data-stance") && !(el.getAttribute("data-quote") || "").trim()).length : 0; };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
@@ -736,7 +771,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__clippy && window.__clippy.suggest()} title="Clippy: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "1px 6px", cursor: "pointer" }}>📎</button></div>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__citey && window.__citey.suggest()} title="Citey: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "1px 6px", cursor: "pointer" }}>✦</button></div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
               {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
               <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
@@ -760,7 +795,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.source style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
           {(() => { const nq = needsQuoteCount(); return nq ? (
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
-              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — 📎 Clippy can find them.
+              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — Citey can find them.
             </div>
           ) : null; })()}
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
@@ -876,11 +911,31 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
             </div>
           )}
-          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Paste the EXACT words in the source that back this claim — or let Clippy find them.</div>
+          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Paste the EXACT words in the source that back this claim — or let Citey find them.</div>
           <textarea autoFocus value={pinQuote} onChange={e => setPinQuote(e.target.value)} placeholder="The supporting words, quoted verbatim from the source…"
             style={{ width: "100%", minHeight: 64, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
+          {/* Citey's ranked candidate lines — click to drop into the quote box */}
+          {spanHits.length > 0 && (
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)" }}>Citey's best matches — click to pin:</div>
+              {spanHits.map((h, j) => (
+                <button key={j} onClick={() => setPinQuote(h.s)} title="Use this line as the source-span"
+                  style={{ textAlign: "left", border: "1px solid rgba(255,255,255,.25)", background: "rgba(255,255,255,.06)", color: "var(--paper)", padding: "6px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
+                  <span style={{ borderLeft: "3px solid var(--yellow)", paddingLeft: 7, display: "block" }}>“{h.s.length > 200 ? h.s.slice(0, 200) + "…" : h.s}”</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {/* no source text on record — paste a passage and Citey ranks within it */}
+          {srcPaste !== null && (
+            <div style={{ marginTop: 8 }}>
+              <textarea rows={3} value={srcPaste} onChange={e => setSrcPaste(e.target.value)} placeholder="Paste the source passage here — Citey will pick the line that backs your claim…"
+                style={{ width: "100%", resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" }} />
+              <button onClick={() => rankPaste(srcPaste)} className="np-cond" style={{ marginTop: 5, border: "1px solid var(--yellow)", background: "var(--yellow)", color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" }}>Find the line</button>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-            <button onClick={findWithClippy} className="np-cond" style={{ flex: "0 0 auto", background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)", padding: "6px 11px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>📎 Find it with Clippy</button>
+            <button onClick={findSourceSpan} className="np-cond" style={{ flex: "0 0 auto", background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)", padding: "6px 11px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>📎 Find the line</button>
             <span style={{ flex: 1 }} />
             <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
             <button onClick={savePin} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
@@ -1102,7 +1157,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     if (flight.missing.length) return halt(1, flight.missing.length + " unresolved · build failed",
       flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record (" + flight.missing.slice(0, 3).join(", ") + (flight.missing.length > 3 ? "…" : "") + "). Re-bind or remove them, then publish again.");
     if (flight.unpinned) return halt(1, flight.unpinned + " span" + (flight.unpinned === 1 ? "" : "s") + " not pinned · build failed",
-      flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source but " + (flight.unpinned === 1 ? "doesn't" : "don't") + " pin the exact words in it. Click the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span — Clippy can find it — then publish again.");
+      flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source but " + (flight.unpinned === 1 ? "doesn't" : "don't") + " pin the exact words in it. Click the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span — Citey can find it — then publish again.");
     upd(1, { state: "done", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · 0 unresolved · 0 unpinned · build passed ✓" });
     // 3 — archive check, against the wayback machine itself: anything without
     // a recorded snapshot gets a live availability lookup, and upgrades stick

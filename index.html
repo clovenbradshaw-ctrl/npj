@@ -38,15 +38,20 @@
   window.useMemo = React.useMemo;
 </script>
 
-<!-- plain scripts: matrix auth, durable drafts, clippy frame data -->
+<!-- plain scripts: matrix auth, durable drafts -->
 <script src="app/matrix-auth.js"></script>
 <!-- media store: uploads image-slot drops to the Matrix homeserver while drafting, frozen to archive.org at publish -->
 <script src="app/media-store.js"></script>
 <script src="app/drafts.js"></script>
-<script src="app/clippy-data.js"></script>
 <script src="app/image-slot.js"></script>
 <!-- the published record: EO event logs in articles/*.jsonl — list, fold, publish, append edits -->
 <script src="app/articles.js"></script>
+<!-- Citey — the grounding assistant. State is mechanical (reads the editor's own
+     grounding); voice is leashed (templated, no model). Plain scripts, order matters. -->
+<script src="app/citey-assist.js"></script>
+<script src="app/citey-states.js"></script>
+<script src="app/CiteyBrain.js"></script>
+<script src="app/CiteyVoice.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
@@ -66,7 +71,7 @@
 <script type="text/babel" src="app/Composer.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
 <script type="text/babel" src="app/Documents.jsx"></script>
-<script type="text/babel" src="app/Clippy.jsx"></script>
+<script type="text/babel" src="app/Citey.jsx"></script>
 <script type="text/babel" src="app/AdminEditor.jsx"></script>
 </head>
 <body>
@@ -343,7 +348,7 @@ function App() {
       </TweaksPanel>
 
       <AdminEditor />
-      <ClippyAgent route={route} />
+      <CiteyAgent route={route} editorSelector=".md-preview" />
     </window.LayoutCtx.Provider>
   );
 }
