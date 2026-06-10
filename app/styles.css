@@ -339,8 +339,13 @@ a { color: inherit; }
 .md-cite { font-family: var(--mono); font-size: 9.5px; color: var(--yellow); background: rgba(255,236,1,.14); border: 1px solid rgba(255,236,1,.4); padding: 0 4px; border-radius: 2px; vertical-align: super; line-height: 0; margin-left: 2px; }
 /* on paper, yellow-on-paper citation chips would vanish — flip to ink on yellow */
 .newsroom.nr-light .md-cite { color: var(--ink); background: rgba(255,236,1,.55); border-color: rgba(22,20,13,.4); }
-.md-preview .claim-src { background: rgba(255,236,1,.2); border-bottom: 1.5px solid var(--yellow); padding: 0 1px; }
+.md-preview .claim-src { background: rgba(255,236,1,.2); border-bottom: 1.5px solid var(--yellow); padding: 0 1px; cursor: pointer; }
 .newsroom.nr-light .md-preview .claim-src { background: rgba(255,236,1,.4); border-bottom-color: var(--yellow-deep); }
+/* a span that's bound to a source but has no pinned source-span yet — the
+   citation is incomplete until you point at the exact words in the source */
+.md-preview .claim-src.needs-quote { background: rgba(230,123,60,.16); border-bottom: 1.5px dashed var(--reject, #e67b3c); }
+.newsroom.nr-light .md-preview .claim-src.needs-quote { background: rgba(230,123,60,.22); }
+.md-preview .claim-src.needs-quote::after { content: "⚑"; font-size: 9px; color: var(--reject, #e67b3c); vertical-align: super; margin-left: 1px; }
 /* "armed" — a source is picked and waiting for you to select the words it
    backs; the page invites a text selection */
 .md-preview.nr-arming { cursor: text; box-shadow: inset 0 0 0 2px var(--yellow); }

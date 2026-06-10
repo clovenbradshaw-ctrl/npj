@@ -242,21 +242,26 @@
           if (tag === "span" && c.classList.contains("eo-claim")) {
             flush();
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
-            if (src.length) toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId() });
-            else buf += plain(c);
+            if (src.length) {
+              let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+              toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
+            } else buf += plain(c);
             return;
           }
           if (tag === "sup" && c.classList.contains("md-cite")) {
             if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
             const key = c.getAttribute("data-cite"); if (!key) return;
+            // the pinned source-span: the exact words in the source backing this claim
+            const quote = (c.getAttribute("data-quote") || "").trim();
             const prev = toks[toks.length - 1];
             if (!buf.trim() && prev && typeof prev === "object" && prev.c) {
               if (prev.src.indexOf(key) < 0) prev.src.push(key); // text[^a][^b] → one claim, two sources
+              if (quote) { prev.q = prev.q || {}; prev.q[key] = quote; }
               return;
             }
             const { head, claim } = splitClaim(buf);
             if (head) toks.push(head);
-            if (claim.trim()) toks.push({ c: claim, src: [key], id: newId() });
+            if (claim.trim()) toks.push({ c: claim, src: [key], id: newId(), q: quote ? { [key]: quote } : undefined });
             else if (head) toks.push(claim);
             buf = "";
             return;
@@ -335,7 +340,7 @@
   function tokensToHtml(tokens) {
     return (tokens || []).map(t => {
       if (typeof t === "string") return esc(t);
-      if (t.c != null) return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+      if (t.c != null) return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
       if (t.t === "br") return "<br/>";
       if (t.t === "strong") return "<strong>" + esc(t.text) + "</strong>";
       if (t.t === "em") return "<em>" + esc(t.text) + "</em>";

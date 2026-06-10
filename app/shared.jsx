@@ -103,9 +103,12 @@ function SourceTag({ type }) {
 }
 
 /* ---------- the source hover/click card ---------- */
-function SourceCard({ srcKey, onClose, pinned }) {
+function SourceCard({ srcKey, onClose, pinned, quote }) {
   const s = window.NPJ.SOURCES[srcKey];
   if (!s) return null;
+  // the pinned source-span for THIS claim wins over the source's generic pull
+  // quote — it's the exact words in the source that back the passage you hovered
+  const cited = (quote && String(quote).trim()) || "";
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -122,7 +125,13 @@ function SourceCard({ srcKey, onClose, pinned }) {
         <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 4 }}>{s.id}</div>
         <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
-        {s.pull_quote && (
+        {cited ? (
+          <div style={{ marginBottom: 10 }}>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 3 }}>The cited passage — in the source</div>
+            <div style={{ borderLeft: "3px solid var(--yellow-deep)", paddingLeft: 9, fontStyle: "italic",
+              fontSize: 13.5, lineHeight: 1.34, color: "var(--ink)" }}>“{cited}”</div>
+          </div>
+        ) : s.pull_quote && (
           <div style={{ borderLeft: "3px solid var(--yellow-deep)", paddingLeft: 9, fontStyle: "italic",
             fontSize: 13.5, lineHeight: 1.34, marginBottom: 10, color: "var(--ink)" }}>{s.pull_quote}</div>
         )}
