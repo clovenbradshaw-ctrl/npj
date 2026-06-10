@@ -100,7 +100,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
 }
 
 function ArticleRead(props) {
-  const { readMode, setReadMode, direction, setDirection, showSugg, setShowSugg,
+  const { audit, setAudit, showSugg, setShowSugg,
           suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
           isEditor, setIsEditor, me, onHome, onNewsroom, onEdited } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
@@ -126,7 +126,7 @@ function ArticleRead(props) {
   const jump = (id) => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" }); };
   const artVersions = A.versions && A.versions.length ? A.versions : [{ sha: A.base_sha || "v1", ts: A.published, author: (A.authors || [])[0], message: "Published", text: window.NPJ.articlePlainText() }];
 
-  const showMarkers = readMode === "audit" || direction === "ledger";
+  const showMarkers = audit;
   const openByClaim = {};
   suggestions.forEach(s => { if (s.status === "proposed" || s.status === "review") openByClaim[s.claimId] = (openByClaim[s.claimId] || 0) + 1; });
 
@@ -217,8 +217,6 @@ function ArticleRead(props) {
     );
   });
 
-  const receiptsFor = (block) => (block.tokens || []).filter(t => t && t.c && claimById[t.id]);
-
   const Body = (
     <article style={{ fontFamily: "var(--serif)" }}>
       {A.body.map((b, i) => {
@@ -258,28 +256,19 @@ function ArticleRead(props) {
         if (b.type === "hr") return <hr key={i} style={{ border: 0, borderTop: "2.5px solid var(--ink)", width: 110, margin: "30px auto" }} />;
         if (b.type === "code") return <pre key={i} className="np-mono np-scroll" style={{ fontSize: 13, lineHeight: 1.55, background: "var(--paper-2)", border: "1.5px solid var(--ink)", padding: "12px 14px", overflowX: "auto", margin: "0 0 20px" }}>{b.text}</pre>;
         if (b.type === "verse") return <pre key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17.5, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 20px", padding: "0 0 0 20px", borderLeft: "3px solid var(--rule-strong, var(--ink))" }}>{b.text}</pre>;
-        return (
-          <React.Fragment key={i}>
-            <p style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>
-            {direction === "receipts" && readMode === "audit" && receiptsFor(b).length > 0 && (
-              <div className="fade-in" style={{ display: "flex", flexWrap: "wrap", gap: 8, margin: "-6px 0 22px" }}>
-                {receiptsFor(b).map(t => <Receipt key={t.id} claim={claimById[t.id]} onEnter={enterClaim} onLeave={scheduleLeave} onSuggest={startCompose} openCount={openByClaim[t.id]} />)}
-              </div>
-            )}
-          </React.Fragment>
-        );
+        return <p key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>;
       })}
     </article>
   );
 
   // One reading column shared by the headline, the body and the methods
-  // footer, so the article always starts directly under the headline. The
-  // evidence rail (Ledger / Evidence) sits to the right of it; on narrow
-  // screens it stacks underneath instead of crowding the prose.
+  // footer, so the article always starts directly under the headline. With
+  // auditability on, the source ledger rides to the right of it (and stacks
+  // underneath on narrow screens); off, it's a single clean column.
   const COL = 700;
-  const hasRail = direction === "ledger" || direction === "split";
-  const railW = direction === "split" ? 320 : 286;
-  const railGap = direction === "split" ? 36 : 40;
+  const hasRail = audit;
+  const railW = 286;
+  const railGap = 40;
   const stackRail = hasRail && isNarrow;
 
   const Header = (
@@ -332,7 +321,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg,
+      <ControlBar {...{ audit, setAudit, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true),
@@ -340,16 +329,14 @@ function ArticleRead(props) {
 
       <div style={{ maxWidth: hasRail ? 1180 : COL, padding: "30px 22px 80px",
         marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
-        className={readMode === "audit" ? "read-audit" : "read-clean"}>
+        className={audit ? "read-audit" : "read-clean"}>
 
         {hasRail ? (
           <div style={{ display: "grid",
             gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + COL + "px) " + railW + "px",
             gap: railGap, alignItems: "start", justifyContent: "center" }}>
             {Main}
-            {direction === "ledger"
-              ? <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
-              : <EvidencePanel sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />}
+            <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
           </div>
         ) : (
           <div style={{ maxWidth: COL, margin: "0 auto" }}>{Main}</div>
@@ -379,23 +366,18 @@ function ArticleRead(props) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
-  const divider = <span style={{ width: 1, height: 22, background: "var(--rule)" }} />;
+function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <div className="seg">
-          <button data-on={readMode === "clean" ? "1" : "0"} onClick={() => setReadMode("clean")}><I.eye style={{ fontSize: 13, verticalAlign: "-2px", marginRight: 4 }} />Clean</button>
-          <button data-on={readMode === "audit" ? "1" : "0"} onClick={() => setReadMode("audit")}><I.shield style={{ fontSize: 13, verticalAlign: "-2px", marginRight: 4 }} />Audit</button>
-        </div>
-
-        {divider}
-
-        <div className="seg" title="Evidence layout — 3 directions to compare">
-          {[["ledger", "Ledger"], ["receipts", "Receipts"], ["split", "Split"]].map(([k, l]) => (
-            <button key={k} data-on={direction === k ? "1" : "0"} onClick={() => setDirection(k)}>{l}</button>
-          ))}
-        </div>
+        <button onClick={() => setAudit(!audit)} aria-pressed={audit}
+          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
+          style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "5px 12px",
+            border: "1.5px solid var(--ink)", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".04em",
+            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
+          <I.shield style={{ fontSize: 14, verticalAlign: "-2px" }} /> Auditability
+          <span className="np-mono" style={{ fontSize: 10, fontWeight: 600, padding: "0 5px", borderRadius: 2, border: "1px solid " + (audit ? "var(--yellow)" : "var(--rule-strong)") }}>{audit ? "ON" : "OFF"}</span>
+        </button>
 
         <span style={{ flex: 1 }} />
 
@@ -434,25 +416,7 @@ function ControlBar({ readMode, setReadMode, direction, setDirection, showSugg, 
   );
 }
 
-/* ---- evidence layouts ---- */
-function Receipt({ claim, onEnter, onLeave, onSuggest, openCount }) {
-  const k = claim.src[0]; const s = srcOf(k);
-  return (
-    <div onMouseEnter={(e) => onEnter(e, claim)} onMouseLeave={onLeave}
-      style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "7px 9px", maxWidth: 240, cursor: "help",
-        boxShadow: "3px 3px 0 rgba(22,20,13,.1)" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-        <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{claim.num}</span>
-        <SourceTag type={s.type} />
-        <span style={{ flex: 1 }} />
-        <I.archive style={{ fontSize: 13, color: "var(--verified)" }} />
-      </div>
-      <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, lineHeight: 1.1 }}>{s.title}</div>
-      <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 3 }}>{s.id} · {s.retrieved}</div>
-    </div>
-  );
-}
-
+/* ---- the source ledger (shown when auditability is on) ---- */
 function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump }) {
   return (
     <aside style={{ position: "sticky", top: 64, borderLeft: "1.5px solid var(--ink)", paddingLeft: 18 }}>
@@ -480,34 +444,6 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
                 </div>
               </div>
               {on && spans.length > 0 && <div className="fade-in"><CitedSpanList claims={spans} onJump={onJump} /></div>}
-            </div>
-          );
-        })}
-      </div>
-    </aside>
-  );
-}
-
-function EvidencePanel({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump }) {
-  return (
-    <aside style={{ position: "sticky", top: 64 }}>
-      <div className="np-eyebrow" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
-        <I.source style={{ fontSize: 14 }} /> Evidence · {sourceList.length} archived
-      </div>
-      <div className="np-scroll" style={{ maxHeight: "calc(100vh - 150px)", overflowY: "auto", paddingRight: 4 }}>
-        {sourceList.map(({ key, num }) => {
-          const on = activeSrc === key; const spans = spansForSource(key);
-          return (
-            <div key={key} onMouseEnter={() => setActiveSrc(key)} onMouseLeave={() => setActiveSrc(null)}
-              style={{ border: "1.5px solid var(--ink)", marginBottom: 9, transform: on ? "translateX(-4px)" : "none",
-                boxShadow: on ? "5px 5px 0 var(--yellow-deep)" : "3px 3px 0 rgba(22,20,13,.08)", transition: "all .14s", background: "var(--card)" }}>
-              <SourceCard srcKey={key} />
-              {on && spans.length > 0 && (
-                <div className="fade-in" style={{ borderTop: "1.5px solid var(--ink)" }}>
-                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Cited in {spans.length} passage{spans.length !== 1 ? "s" : ""} — click to jump</div>
-                  <CitedSpanList claims={spans} onJump={onJump} />
-                </div>
-              )}
             </div>
           );
         })}

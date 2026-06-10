@@ -117,7 +117,7 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
           alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 13.5 }}>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="ground-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
           <span style={{ opacity: .4 }}>/</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.eye style={{ fontSize: 15 }} /> Switch between Clean Read and Audit Mode.</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.shield style={{ fontSize: 15 }} /> Toggle Auditability to reveal every source.</span>
           <span style={{ opacity: .4 }}>/</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.chat style={{ fontSize: 15 }} /> Every published piece is open to public suggestion.</span>
         </div>
