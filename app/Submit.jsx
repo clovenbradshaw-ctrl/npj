@@ -54,7 +54,7 @@ function AccountGate({ onSignIn }) {
   return (
     <div>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>Get involved</div>
-      <h1 className="npj-submit-h" style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .9, margin: "0 0 14px" }}>Two ways in.</h1>
+      <h1 className="npj-submit-h" style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .95, margin: "0 0 14px" }}>Two ways in.</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "58ch", margin: "0 0 28px" }}>
         Send us a tip from anywhere — no account needed. Or, if you're a contributor, sign in with <strong style={{ color: "var(--ink)" }}>Matrix</strong> to draft and edit alongside the newsroom.
       </p>

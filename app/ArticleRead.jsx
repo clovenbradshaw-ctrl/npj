@@ -274,7 +274,7 @@ function ArticleRead(props) {
   const Header = (
     <header style={{ margin: "0 0 26px" }}>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>{A.kicker}</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 76, lineHeight: .9, margin: "0 0 18px" }}>{A.headline}</h1>
+      <h1 className="npj-article-h" style={{ fontFamily: "var(--display)", fontSize: 88, lineHeight: .96, letterSpacing: "-.01em", margin: "0 0 20px" }}>{A.headline}</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1.4, color: "var(--ink)", margin: "0 0 20px", fontStyle: "italic" }}>{A.dek}</p>
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
         <div style={{ display: "flex", gap: 10 }}>{A.authors.map(a => <Handle key={a} mxid={a} showName />)}</div>
