@@ -264,7 +264,9 @@ function ArticleRead(props) {
   // One reading column shared by the headline, the body and the methods
   // footer, so the article always starts directly under the headline. With
   // auditability on, the source ledger rides to the right of it (and stacks
-  // underneath on narrow screens); off, it's a single clean column.
+  // underneath on narrow screens); off, it's a single clean column. The
+  // reading column stays put either way — turning auditability on only
+  // reveals the ledger on the right, it never shoves the article sideways.
   const COL = 700;
   const hasRail = audit;
   const railW = 286;
@@ -327,14 +329,18 @@ function ArticleRead(props) {
         canEdit: canEditArticle, onEdit: () => setEditing(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
-      <div style={{ maxWidth: hasRail ? 1180 : COL, padding: "30px 22px 80px",
+      <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: "30px 22px 80px",
         marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
         className={audit ? "read-audit" : "read-clean"}>
 
         {hasRail ? (
           <div style={{ display: "grid",
-            gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + COL + "px) " + railW + "px",
+            // an empty left gutter mirrors the ledger's width, so the reading
+            // column lands in the exact same place as the clean read — audit
+            // on just paints the ledger into the right margin
+            gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + railW + "px) minmax(0, " + COL + "px) " + railW + "px",
             gap: railGap, alignItems: "start", justifyContent: "center" }}>
+            {!stackRail && <div aria-hidden="true" />}
             {Main}
             <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
           </div>
