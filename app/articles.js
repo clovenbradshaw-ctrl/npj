@@ -220,6 +220,15 @@
     let idSeq = 0;
     const newId = () => "cl-" + Date.now().toString(36) + "-" + (++idSeq);
 
+    // a marker's pinned source-span(s): a JSON array on data-quote (one source
+    // can back a claim from several spots), or an older single-string value
+    function quoteVals(raw) {
+      const t = String(raw || "").trim();
+      if (!t) return [];
+      if (t[0] === "[") { try { const a = JSON.parse(t); return Array.isArray(a) ? a.map(x => String(x || "").trim()).filter(Boolean) : []; } catch (e) {} }
+      return [t];
+    }
+
     // the claim is the trailing sentence of what was typed before the marker
     function splitClaim(buf) {
       const re = /[.!?…]["')\]]?\s+(?=\S)/g;
@@ -243,7 +252,7 @@
             flush();
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
             if (src.length) {
-              let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+              let q; try { const j = JSON.parse(c.getAttribute("data-quotes") || "null"); if (j && typeof j === "object") { q = {}; Object.keys(j).forEach(k => { const a = Array.isArray(j[k]) ? j[k] : [j[k]]; const f = a.filter(Boolean); if (f.length) q[k] = f; }); if (!Object.keys(q).length) q = undefined; } } catch (e) {}
               toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
             } else buf += plain(c);
             return;
@@ -251,17 +260,17 @@
           if (tag === "sup" && c.classList.contains("md-cite")) {
             if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
             const key = c.getAttribute("data-cite"); if (!key) return;
-            // the pinned source-span: the exact words in the source backing this claim
-            const quote = (c.getAttribute("data-quote") || "").trim();
+            // the pinned source-span(s): the exact words in the source backing this claim
+            const quotes = quoteVals(c.getAttribute("data-quote"));
             const prev = toks[toks.length - 1];
             if (!buf.trim() && prev && typeof prev === "object" && prev.c) {
               if (prev.src.indexOf(key) < 0) prev.src.push(key); // text[^a][^b] → one claim, two sources
-              if (quote) { prev.q = prev.q || {}; prev.q[key] = quote; }
+              if (quotes.length) { prev.q = prev.q || {}; prev.q[key] = quotes; }
               return;
             }
             const { head, claim } = splitClaim(buf);
             if (head) toks.push(head);
-            if (claim.trim()) toks.push({ c: claim, src: [key], id: newId(), q: quote ? { [key]: quote } : undefined });
+            if (claim.trim()) toks.push({ c: claim, src: [key], id: newId(), q: quotes.length ? { [key]: quotes } : undefined });
             else if (head) toks.push(claim);
             buf = "";
             return;

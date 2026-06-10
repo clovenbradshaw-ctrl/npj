@@ -22,7 +22,8 @@ founding admin curates the site and grows the network from there.
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
-| `app/Clippy.jsx` | drafting assistant — suggests **tags**, and helps **locate** the supporting span inside a source (never invents a citation) |
+| `app/SourceExplorer.jsx` | the source explorer — pulls a source's archived text so you can search it, read it, and pin one or more cited passages |
+| `app/Clippy.jsx` | drafting assistant — suggests **tags**, and helps **rank** the source's passages against your claim (never invents a citation) |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
@@ -82,18 +83,22 @@ In the Newsroom you select the exact words that make a claim and bind a source t
 **that span**. But binding a source is only half of it: **you can't cite a whole
 page.** Every bound span must then **pin the exact words *inside the source*** that
 back the claim. Until it does, the span is flagged (⚑ `needs-quote`) and the
-publish build refuses it — right next to the "no source record" check. The pinned
-passage rides the article (`data-quote` → the claim token's `q` map) and shows in
-the reader's citation card as *"the cited passage — in the source."* One source can
-back **several spans**, each pinned to its own words. Sources are snapshotted to
-archive.org; a claim that points at a page but no span fails the build.
+publish build refuses it — right next to the "no source record" check.
 
-**Clippy finds the span — he never invents the citation.** When you bind a source,
-hit **📎 Find it with Clippy**: he takes your claim and the source's text, ranks the
-source's sentences by overlap, and points at the one that backs the claim — you
-review and pin it. No source text yet? Paste the passage into Clippy and he ranks
-within it (and remembers it on the source for the next claim). He proposes the
-span; the author decides what's true.
+**The source explorer** (`app/SourceExplorer.jsx`) is where you do that. Binding a
+source — or clicking a flagged span — opens it: it pulls the source's **archived
+text** (`NpjArchiveCDN.fetchSourceText` reads the wayback `id_` snapshot, CORS-open
+and toolbar-free), so you can **search inside the source, read it, and select one or
+more passages** — citing the same source from several spots is fine. If the text
+can't be fetched (no snapshot yet, a CORS wall, a JS-only page) it falls back to a
+paste box and everything else works the same. The pinned passages ride the article
+(`data-quote` JSON array → the claim token's `q` map) and show in the reader's
+citation card as *"the cited passages — in the source."*
+
+**Clippy ranks, he never invents the citation.** Inside the explorer, **📎 Clippy:
+find best** takes your claim and the fetched source text, ranks the passages by
+overlap, and pre-selects the strongest — you review and pin. He proposes the span;
+the author decides what's true.
 
 **Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
 PDFs — loses its original formatting at the door: the editors rebuild the
