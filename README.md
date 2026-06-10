@@ -19,6 +19,7 @@ founding admin curates the site and grows the network from there.
 | `app/data.js` | content layer — **framework only**, seeded empty |
 | `app/layout.jsx` | the editable site chrome + the permission model |
 | `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
+| `app/identity.js` | public bylines — the append-only EO log (`site/usernames.jsonl`) binding verified mxids to chosen, auditable display names |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
@@ -62,6 +63,15 @@ can't lose it (GitHub + Matrix):
   `@collective_boundary730383:hyphae.social` is the immutable root.
 - Roles + site layout are committed to GitHub (`site/layout.json`, world-readable)
   and mirrored to a Matrix control-room state event only admins can write.
+- **Public bylines are auditable.** A Matrix ID is verified identity but a poor
+  byline, so a verified mxid binds to a chosen public name in
+  `site/usernames.jsonl` — an append-only EO event log (`app/identity.js`), one
+  `INS` line to claim a name and one `REC` line per rename, never rewritten. The
+  app folds it into the byline graph at boot, so stories show the chosen name
+  instead of the raw `@name:server`; the founding admin curates it from the
+  layout panel, and each line carries who set it and when. Schema
+  `npj/username-eo/1`; authorized exactly like the layout config (admin-only,
+  re-checked server-side in the webhook).
 - **Drafts** live in Matrix rooms; collaborators are invited by `user_id`. Every
   room the app creates is tagged with a `press.npj.room` state event, and the app
   only pays attention to tagged rooms — the rest of your Matrix account is

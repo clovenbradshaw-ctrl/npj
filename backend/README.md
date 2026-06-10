@@ -44,6 +44,8 @@ of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
 >
 > Rules enforced server-side (`Authorize` + `Build Content`):
 > - `site/layout.json` (layout + roles) → **admin** only
+> - `site/usernames.jsonl` (public byline registry, append-only EO log; reader/writer
+>   `app/identity.js`) → **admin** only — same rule as any non-article file
 > - any other file → **admin** only
 > - `articles/<slug>.jsonl` → **admin**, or an **editor** (per the committed
 >   roles) — and a non-admin touching an *existing* log must be in that log's
