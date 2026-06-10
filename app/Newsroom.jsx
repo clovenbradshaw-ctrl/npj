@@ -629,7 +629,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
         <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail }}>
-          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
+          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊨ Sources · " + sources.length]].map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>

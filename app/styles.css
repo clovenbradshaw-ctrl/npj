@@ -96,26 +96,27 @@ a { color: inherit; }
 }
 .read-clean .claim-marker { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
 
-/* the grounded glyph (⊥) — a claim standing on its source: a stem planted on
-   solid ground. Used in legends (e.g. the front-page manifesto strip) to mean
-   "this mark means the text above it is grounded in an archived source". */
-.ground-glyph {
+/* the sourcing glyph (⊨, the EVA operator) — evidence that backs a claim: the
+   double turnstile that "models" a fact. Used in legends (e.g. the front-page
+   manifesto strip) to mean "the text above it is bound to an archived source". */
+.source-glyph {
   position: relative;
   display: inline-block;
   width: 15px;
-  height: 13px;
-  border-bottom: 3px solid var(--yellow);
+  height: 14px;
+  border-left: 3px solid var(--yellow);
 }
-.ground-glyph::before {
+.source-glyph::before,
+.source-glyph::after {
   content: "";
   position: absolute;
-  left: 50%;
-  bottom: 0;
-  transform: translateX(-50%);
-  width: 3px;
-  height: 10px;
+  left: 0;
+  width: 13px;
+  height: 3px;
   background: var(--yellow);
 }
+.source-glyph::before { top: 2px; }
+.source-glyph::after { bottom: 2px; }
 
 /* claim with open suggestions gets a small flag */
 .claim[data-sugg="1"]::after {

@@ -115,7 +115,7 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
       <div style={{ background: "var(--ink)", color: "var(--paper)" }}>
         <div style={{ maxWidth: 1180, margin: "0 auto", padding: "11px 22px", display: "flex", gap: 26,
           alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 16 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="ground-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="source-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
           <span style={{ opacity: .4 }}>/</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.shield style={{ fontSize: 17 }} /> Toggle Auditability to reveal every source.</span>
           <span style={{ opacity: .4 }}>/</span>

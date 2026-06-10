@@ -41,7 +41,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     setErr(null);
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount || sel.isCollapsed || !bodyRef.current || !bodyRef.current.contains(sel.anchorNode)) {
-      setErr("Select the words a source backs, then click ⊥ Source."); return;
+      setErr("Select the words a source backs, then click ⊨ Source."); return;
     }
     const u = prompt("Source URL (an archive.org snapshot, or the original):");
     if (!u || !/^https?:\/\//.test(u)) return;
@@ -71,7 +71,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     if (window.NpjMedia && window.NpjMedia.freezeArticleMedia) {
       try { await window.NpjMedia.freezeArticleMedia(blocks, { slug: A.slug, title: headline || A.headline }); } catch (e) {}
     }
-    // any sources the body now cites (including new ⊥ Source binds) ride in the REC
+    // any sources the body now cites (including new ⊨ Source binds) ride in the REC
     const usedKeys = {};
     blocks.forEach(b => {
       (b.tokens || []).forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); });
@@ -121,7 +121,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.72)", zIndex: 5100, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "4vh 18px" }} className="fade-in">
       <style>{`
         .eo-edit-body .eo-claim { border-bottom: 2px dotted var(--yellow-deep); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
-        .eo-edit-body .eo-claim::after { content: "⊥"; font-family: var(--mono); font-size: 10px; vertical-align: super; color: var(--yellow-deep); padding-left: 1px; }
+        .eo-edit-body .eo-claim::after { content: "⊨"; font-family: var(--mono); font-size: 10px; vertical-align: super; color: var(--yellow-deep); padding-left: 1px; }
         .eo-edit-body figure[data-eo-img] img { max-width: 100%; border: 1.5px solid var(--ink); }
         .eo-edit-body figure { margin: 14px 0; }
         .eo-edit-body image-slot { max-width: 100%; }
@@ -160,8 +160,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addLink}>Link</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={insertImage}>▣ Image</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addBanner}>▤ Banner</button>
-            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={bindSourceUrl}>⊥ Source</button>
-            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>select text → ⊥ Source to cite it · drop a photo to add an image · dotted spans are existing claims</span>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={bindSourceUrl}>⊨ Source</button>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>select text → ⊨ Source to cite it · drop a photo to add an image · dotted spans are existing claims</span>
           </div>
           <div ref={bodyRef} className="eo-edit-body np-scroll" contentEditable suppressContentEditableWarning
             dangerouslySetInnerHTML={{ __html: seedHtml }}
