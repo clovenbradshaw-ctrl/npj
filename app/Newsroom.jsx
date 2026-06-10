@@ -1077,7 +1077,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Length">{flight.words} words</Row>
             <Row k="Sources">{flight.srcTotal ? flight.srcTotal + " bound · " + flight.archived + " archived" + (flight.srcTotal - flight.archived ? " · " + (flight.srcTotal - flight.archived) + " snapshot-only" : "") : "none"}</Row>
             <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}</Row>
-            {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish{window.NpjMedia && !window.NpjMedia.hasArchiveCreds() ? " (via the Wayback Machine — add archive.org keys in admin to upload directly)" : ""}</Row>}
+            {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish (Wayback Machine fallback if direct upload is unavailable)</Row>}
             {blocked && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px" }}>{blocked}</div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
