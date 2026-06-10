@@ -99,6 +99,18 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
   );
 }
 
+// Two-source image: try the live Matrix media-store copy first, fall back to
+// the durable archive.org one (then any further candidates). Both URLs ride in
+// the img block — see freezeArticleMedia (app/media-store.js).
+function MediaImg({ srcs, alt, style }) {
+  const list = (srcs || []).filter(Boolean);
+  const [i, setI] = useState(0);
+  if (!list.length) return null;
+  const idx = Math.min(i, list.length - 1);
+  return <img src={list[idx]} alt={alt || ""} loading="lazy" style={style}
+    onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
+}
+
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
@@ -233,7 +245,7 @@ function ArticleRead(props) {
         );
         if (b.type === "img") return (
           <figure key={i} style={{ margin: "26px 0" }}>
-            <img src={b.src} alt={b.caption || ""} loading="lazy" style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+            <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
             {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
           </figure>
         );
@@ -264,7 +276,9 @@ function ArticleRead(props) {
   // One reading column shared by the headline, the body and the methods
   // footer, so the article always starts directly under the headline. With
   // auditability on, the source ledger rides to the right of it (and stacks
-  // underneath on narrow screens); off, it's a single clean column.
+  // underneath on narrow screens); off, it's a single clean column. The
+  // reading column stays put either way — turning auditability on only
+  // reveals the ledger on the right, it never shoves the article sideways.
   const COL = 700;
   const hasRail = audit;
   const railW = 286;
@@ -327,14 +341,18 @@ function ArticleRead(props) {
         canEdit: canEditArticle, onEdit: () => setEditing(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
-      <div style={{ maxWidth: hasRail ? 1180 : COL, padding: "30px 22px 80px",
+      <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: "30px 22px 80px",
         marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
         className={audit ? "read-audit" : "read-clean"}>
 
         {hasRail ? (
           <div style={{ display: "grid",
-            gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + COL + "px) " + railW + "px",
+            // an empty left gutter mirrors the ledger's width, so the reading
+            // column lands in the exact same place as the clean read — audit
+            // on just paints the ledger into the right margin
+            gridTemplateColumns: stackRail ? "minmax(0, 1fr)" : "minmax(0, " + railW + "px) minmax(0, " + COL + "px) " + railW + "px",
             gap: railGap, alignItems: "start", justifyContent: "center" }}>
+            {!stackRail && <div aria-hidden="true" />}
             {Main}
             <Ledger sourceList={sourceList} activeSrc={activeSrc} setActiveSrc={setActiveSrc} spansForSource={spansForSource} onJump={jumpToClaim} />
           </div>

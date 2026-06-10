@@ -26,6 +26,35 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const cmd = (c, v) => { document.execCommand(c, false, v || null); if (bodyRef.current) bodyRef.current.focus(); };
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
 
+  // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
+  const imageFigure = (id, banner) =>
+    '<figure contenteditable="false" class="cmp-embed"><image-slot id="' + id + '" shape="rect" placeholder="' +
+    (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
+    '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
+    '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + (banner ? "banner" : "photo") +
+    ' · drag an image or an archive.org link, then caption</figcaption></figure><p><br/></p>';
+  const insertImage = () => { if (bodyRef.current) bodyRef.current.focus(); document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false)); };
+  const addBanner = () => { if (bodyRef.current) bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); };
+
+  // ---- sourcing: bind the selected words to a (new) source, like the newsroom ----
+  const bindSourceUrl = () => {
+    setErr(null);
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !bodyRef.current || !bodyRef.current.contains(sel.anchorNode)) {
+      setErr("Select the words a source backs, then click ⊥ Source."); return;
+    }
+    const u = prompt("Source URL (an archive.org snapshot, or the original):");
+    if (!u || !/^https?:\/\//.test(u)) return;
+    let outlet = "source"; try { outlet = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+    const key = "web-" + Date.now().toString(36);
+    window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet, title: "Web source", original_url: u, archive_url: /web\.archive\.org/.test(u) ? u : "", retrieved: new Date().toISOString().slice(0, 10) };
+    const span = document.createElement("span");
+    span.className = "eo-claim"; span.setAttribute("data-src", key); span.setAttribute("data-id", "cl-" + Date.now().toString(36));
+    const r = sel.getRangeAt(0);
+    try { r.surroundContents(span); } catch (e) { const f = r.extractContents(); span.appendChild(f); r.insertNode(span); }
+    sel.removeAllRanges();
+  };
+
   const parseAssignees = () => assignees.split(/[\s,]+/).map(s => s.trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
 
   const save = async () => {
@@ -36,14 +65,29 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     const { blocks } = window.NpjArticles.htmlToBlocks(html);
     if (!blocks.length) { setErr("The body is empty — there's nothing to commit."); return; }
 
+    setBusy(true);
+    // freshly-dropped images live on the media store — move them to archive.org
+    // before the body is committed (mutates the img srcs in place).
+    if (window.NpjMedia && window.NpjMedia.freezeArticleMedia) {
+      try { await window.NpjMedia.freezeArticleMedia(blocks, { slug: A.slug, title: headline || A.headline }); } catch (e) {}
+    }
+    // any sources the body now cites (including new ⊥ Source binds) ride in the REC
+    const usedKeys = {};
+    blocks.forEach(b => {
+      (b.tokens || []).forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); });
+      (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
+    });
+    const sources = {};
+    Object.keys(usedKeys).forEach(k => { const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || (A.sources && A.sources[k]); if (rec) sources[k] = rec; });
+
     // the REC operand carries ONLY what changed (plus body, which is the edit)
     const operand = { body: blocks };
+    if (Object.keys(sources).length) operand.sources = sources;
     if (headline.trim() && headline.trim() !== A.headline) operand.headline = headline.trim();
     if (dek.trim() !== (A.dek || "")) operand.dek = dek.trim();
     const nextAssignees = parseAssignees();
     if (isAdmin && nextAssignees.join(",") !== (A.assignees || []).join(",")) operand.assignees = nextAssignees;
 
-    setBusy(true);
     let out;
     try {
       out = await window.NpjArticles.appendEdit({ slug: A.slug, operand, actor: me, note: note.trim() || undefined, token });
@@ -60,7 +104,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     const ts = new Date().toISOString();
     const updated = {
       ...A, ...operand,
-      sources: A.sources, // edits here never add sources; existing bindings carry over
+      sources: Object.assign({}, A.sources, sources), // existing bindings carry over; new ones merge in
       updated: ts.slice(0, 10),
       base_sha: out.sha,
       readMins: window.NpjArticles.readMins(blocks),
@@ -79,6 +123,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
         .eo-edit-body .eo-claim { border-bottom: 2px dotted var(--yellow-deep); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
         .eo-edit-body .eo-claim::after { content: "⊥"; font-family: var(--mono); font-size: 10px; vertical-align: super; color: var(--yellow-deep); padding-left: 1px; }
         .eo-edit-body figure[data-eo-img] img { max-width: 100%; border: 1.5px solid var(--ink); }
+        .eo-edit-body figure { margin: 14px 0; }
+        .eo-edit-body image-slot { max-width: 100%; }
         .eo-edit-body figcaption { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
         .eo-edit-body h2, .eo-edit-body h3 { font-family: var(--display); line-height: 1.05; }
         .eo-edit-body blockquote { border-left: 4px solid var(--yellow-deep); margin: 16px 0; padding-left: 14px; font-family: var(--cond); font-size: 20px; }
@@ -112,7 +158,10 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "blockquote")}>“ Quote</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "p")}>¶</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addLink}>Link</button>
-            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>dotted-underline spans are source-bound claims — edit their words freely</span>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={insertImage}>▣ Image</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addBanner}>▤ Banner</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={bindSourceUrl}>⊥ Source</button>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>select text → ⊥ Source to cite it · drop a photo to add an image · dotted spans are existing claims</span>
           </div>
           <div ref={bodyRef} className="eo-edit-body np-scroll" contentEditable suppressContentEditableWarning
             dangerouslySetInnerHTML={{ __html: seedHtml }}

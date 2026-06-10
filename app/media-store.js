@@ -118,55 +118,50 @@
     return b ? URL.createObjectURL(b) : url;
   }
 
-  /* ---- archive.org S3 credentials (the admin's, stored locally) ----
-     From https://archive.org/account/s3.php — access key + secret. Kept in
-     localStorage so the static site needs no server to upload. Optional: with
-     no keys, publish uses the credential-free Wayback fallback instead. */
-  const IA_KEY = "npj_ia_s3_v1";
-  function getArchiveCreds() {
-    try { const c = JSON.parse(localStorage.getItem(IA_KEY) || "null"); return (c && c.access && c.secret) ? c : null; }
-    catch (e) { return null; }
+  /* ---- archive.org upload via the n8n backend ----
+     A browser PUT to archive.org's S3 endpoint is unreliable (CORS) and would
+     expose the IA keys, so the bytes are handed to the publish backend instead:
+     n8n uploads them server-side (keys live in n8n env), verifies, and answers
+     { ok, url }. The endpoint mirrors the publish webhook's host. */
+  function mediaEndpoint() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.mediaEndpoint) return c.mediaEndpoint; } catch (e) {}
+    const base = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
+    if (base) return base.replace(/\/[^/]+$/, "/media-npj");
+    return "https://n8n.intelechia.com/webhook/site/media-npj";
   }
-  function setArchiveCreds(access, secret, collection) {
-    try {
-      if (!access || !secret) { localStorage.removeItem(IA_KEY); return; }
-      const c = { access: String(access).trim(), secret: String(secret).trim() };
-      const col = (collection || "").trim(); if (col) c.collection = col;
-      localStorage.setItem(IA_KEY, JSON.stringify(c));
-    } catch (e) {}
-  }
-  function hasArchiveCreds() { return !!getArchiveCreds(); }
 
-  // header values must be latin1-safe — strip anything fetch would reject.
-  const hdrSafe = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "").slice(0, 200);
+  // chunked so a multi-hundred-KB image doesn't blow the call stack on apply().
+  async function blobToBase64(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let bin = ""; const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    return btoa(bin);
+  }
 
   /* uploadToArchive(blob, {identifier, filename, title}) → Promise<archive.org URL>.
-     PUTs one file into an archive.org item (auto-created on first PUT). The item
-     is keyed per article so re-publishing the same piece reuses it. */
+     POSTs the bytes (base64) + the author's Matrix token to the n8n media
+     endpoint; n8n PUTs to archive.org and answers { ok, url } (or { ok:false,
+     error }). Rejects loudly so the caller can fall back or warn. */
   async function uploadToArchive(blob, opts) {
-    const creds = getArchiveCreds();
-    if (!creds) throw new Error("No archive.org keys set.");
-    const id = opts.identifier, file = opts.filename;
-    const headers = {
-      "authorization": "LOW " + creds.access + ":" + creds.secret,
-      "x-amz-auto-make-bucket": "1",
-      "x-archive-meta-mediatype": "image",
-      "x-archive-meta-subject": "npj-media",
-      "Content-Type": (blob && blob.type) || "application/octet-stream"
-    };
-    // Only pin a collection if the admin set one — an unauthorized collection
-    // header makes archive.org reject the PUT; default lets it auto-assign.
-    if (creds.collection) headers["x-archive-meta-collection"] = hdrSafe(creds.collection);
-    if (opts.title) headers["x-archive-meta-title"] = hdrSafe(opts.title);
+    const m = MA();
+    const token = m && m.token && m.token();
+    if (!token) throw new Error("Sign in to upload to archive.org.");
+    const b64 = await blobToBase64(blob);
     let res;
     try {
-      res = await fetch("https://s3.us.archive.org/" + encodeURIComponent(id) + "/" + encPath(file), {
-        method: "PUT", headers, body: blob
+      res = await fetch(mediaEndpoint(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({
+          identifier: opts.identifier, filename: opts.filename,
+          mimetype: (blob && blob.type) || "image/webp",
+          title: opts.title || "", contentBase64: b64
+        })
       });
-    } catch (e) { throw new Error("Couldn't reach archive.org."); }
-    if (res.status === 401 || res.status === 403) throw new Error("archive.org rejected the keys (HTTP " + res.status + ").");
-    if (!res.ok) throw new Error("archive.org upload failed (HTTP " + res.status + ").");
-    return "https://archive.org/download/" + encodeURIComponent(id) + "/" + encPath(file);
+    } catch (e) { throw new Error("Couldn't reach the media upload service."); }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok || !j.url) throw new Error((j && j.error) || ("archive.org upload failed (HTTP " + res.status + ")."));
+    return j.url;
   }
 
   /* freeze(url) → Promise<archive.org URL | null>. The no-keys fallback: Save
@@ -180,18 +175,17 @@
     return (c.waybackRaw && c.waybackRaw(snap)) || snap;
   }
 
-  // one image → archive.org: download+reupload when keys exist, else Wayback.
+  // one image → archive.org: download the bytes (authed) and push them through
+  // the backend; if that can't be reached, fall back to a Wayback snapshot.
   async function toArchive(srcUrl, ctx) {
-    if (hasArchiveCreds()) {
-      try {
-        const blob = await fetchBytes(srcUrl);
-        if (blob) {
-          const mediaId = (String(srcUrl).split("/download/")[1] || "").split("/").pop() || ("img-" + Date.now());
-          const file = (mediaId.replace(/[^A-Za-z0-9._-]/g, "") || ("img-" + Date.now())) + ".webp";
-          return await uploadToArchive(blob, { identifier: ctx.identifier, filename: file, title: ctx.title });
-        }
-      } catch (e) { /* fall through to Wayback */ }
-    }
+    try {
+      const blob = await fetchBytes(srcUrl);
+      if (blob) {
+        const mediaId = (String(srcUrl).split("/download/")[1] || "").split("/").pop() || ("img-" + Date.now());
+        const file = (mediaId.replace(/[^A-Za-z0-9._-]/g, "") || ("img-" + Date.now())) + ".webp";
+        return await uploadToArchive(blob, { identifier: ctx.identifier, filename: file, title: ctx.title });
+      }
+    } catch (e) { /* fall through to Wayback */ }
     return await freeze(srcUrl);
   }
 
@@ -200,23 +194,25 @@
      store onto archive.org, rewriting its src in place. A failure leaves the
      media-store URL untouched (never a silent drop) and is counted. */
   async function freezeArticleMedia(body, opts) {
-    const out = { frozen: 0, failed: 0, method: hasArchiveCreds() ? "upload" : "wayback" };
+    const out = { frozen: 0, failed: 0, method: "upload" };
     if (!Array.isArray(body)) return out;
     const o = opts || {};
     const idSlug = String(o.slug || "media").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "media";
     const ctx = { identifier: "npj-" + idSlug, title: o.title || o.slug || "NPJ media" };
     for (const b of body) {
       if (!b || b.type !== "img" || !isStoreUrl(b.src)) continue;
+      const matrixUrl = b.src;
       const arch = await toArchive(b.src, ctx);
-      if (arch) { b.src = arch; out.frozen++; } else { out.failed++; }
+      // keep the live media-store URL as `store` so viewers can try it first and
+      // fall back to the durable archive.org `src`.
+      if (arch) { b.store = matrixUrl; b.src = arch; out.frozen++; } else { out.failed++; }
     }
     return out;
   }
 
   window.NpjMedia = {
-    canUpload, isStoreUrl, isPublishable, mxcToHttp,
-    upload, fetchBytes, resolveDisplay,
-    getArchiveCreds, setArchiveCreds, hasArchiveCreds, uploadToArchive,
+    canUpload, isStoreUrl, isPublishable, mxcToHttp, mediaEndpoint,
+    upload, fetchBytes, resolveDisplay, uploadToArchive,
     freeze, freezeArticleMedia
   };
 })();

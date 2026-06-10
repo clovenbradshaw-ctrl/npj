@@ -62,13 +62,37 @@ of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
 > (`npj-api.n8n.json` + Data Table) is therefore optional/deprecated — keep it
 > only if you want server-side suggestion storage instead of GitHub JSONL.
 
-> **Images never reach the publish webhook as bytes.** A photo dropped into the
-> newsroom uploads to the Matrix media store while drafting (`app/media-store.js`),
-> and at publish is moved onto **archive.org** — either downloaded and re-uploaded
-> as an archive.org item via the admin's archive.org S3 keys (set in the admin
-> panel; from `archive.org/account/s3.php`), or, with no keys, frozen via the
-> Wayback Machine. Only the resulting archive.org URL rides into the committed
+> **Images never reach the _publish_ webhook as bytes.** A photo dropped into an
+> editor uploads to the Matrix media store while drafting (`app/media-store.js`),
+> and at publish/save is moved onto **archive.org** through a separate media
+> webhook (below). Only the resulting archive.org URL rides into the committed
 > JSONL, so the repo stays plaintext + auditable and no base64 is ever committed.
+
+## Media uploads → archive.org (`/webhook/site/media-npj`)
+
+The browser can't reliably PUT to archive.org's S3 endpoint (CORS) and shouldn't
+hold the IA keys, so the bytes go through n8n. `app/media-store.js` POSTs
+`{ identifier, filename, mimetype, title, contentBase64 }` with the author's
+Matrix Bearer token; the `Media *` branch verifies the token + role, decodes the
+bytes, PUTs them to `s3.us.archive.org`, and returns `{ ok, url }`.
+
+```
+Media Webhook → Media Whoami → Media Fetch Roles → Media Authorize → Authorized?
+              → Media Build (base64 → binary) → IA Put (S3) → Media Result → Media OK
+```
+
+Setup in n8n (one-time):
+- Add two **environment variables**: `IA_S3_ACCESS` and `IA_S3_SECRET` (your keys
+  from `archive.org/account/s3.php`). The `IA Put` node sends
+  `authorization: LOW $IA_S3_ACCESS:$IA_S3_SECRET`.
+- Re-import `npj-publish.n8n.json`, re-bind no GitHub cred needed for this branch
+  (it only talks to archive.org), and **activate**.
+
+> ⚠️ The `IA Put` node uses n8n's HTTP Request binary-body mode
+> (`contentType: binaryData`, field `data`). If your n8n version names that
+> differently, fix it once on that node. The branch is **untested against the
+> live archive.org S3 endpoint from this environment** — confirm a test upload
+> returns `{ ok:true, url }` before relying on it.
 
 n8n workflow (`npj-publish.n8n.json`) — two webhooks that commit to
 `github.com/clovenbradshaw-ctrl/npj` (main). It commits whatever `contentRaw`
