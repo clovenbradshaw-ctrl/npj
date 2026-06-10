@@ -220,7 +220,9 @@ Common causes:
   old embedded image. Re-insert the image (it uploads to the media store) and
   publish again.
 
-> Note: the committed `npj-publish.n8n.json` is **behind the live instance** — it
-> predates the `Check GH Result` / `OK2` response-contract nodes. Treat the live
-> workflow as the source of truth until it's re-exported into the repo.
+> The committed `npj-publish.n8n.json` now carries this fix **and** the full
+> response-contract topology (`Build Content2` → `GH Update2`/`GH Create2` →
+> `Check GH Result` → `OK2`). Re-import it to apply the fix wholesale — then
+> re-bind the **GitHub OAuth2 credential** on the `GH *` nodes (credential IDs
+> don't transfer between n8n instances) and re-activate the workflow.
 
