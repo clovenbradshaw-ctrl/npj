@@ -140,6 +140,34 @@ function MediaImg({ srcs, alt, style }) {
     onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
 }
 
+// An embedded media block: the EO log only stores the URL, so the reader
+// rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
+// <audio> for direct media files, or (for anything we don't recognize) the
+// link card, since the committed artifact is always the URL itself.
+function EmbedFigure({ url, caption }) {
+  const u = String(url || "");
+  let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+  const yt = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
+  const vm = u.match(/vimeo\.com\/(\d+)/);
+  let media = null;
+  if (yt) media = <iframe src={"https://www.youtube-nocookie.com/embed/" + yt[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />;
+  else if (vm) media = <iframe src={"https://player.vimeo.com/video/" + vm[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen loading="lazy" />;
+  else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) media = <video controls preload="metadata" src={u} style={{ width: "100%", maxHeight: 460, background: "#000", display: "block" }} />;
+  else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) media = <audio controls preload="metadata" src={u} style={{ width: "100%" }} />;
+  if (media) return (
+    <figure style={{ margin: "26px 0" }}>
+      <div style={{ border: "1.5px solid var(--ink)", background: "#000", lineHeight: 0 }}>{media}</div>
+      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▶ {caption}</figcaption>}
+    </figure>
+  );
+  return (
+    <figure style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
+      <a href={u} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>↗ {host || u}</a>
+      {caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{caption}</figcaption>}
+    </figure>
+  );
+}
+
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
@@ -281,14 +309,7 @@ function ArticleRead(props) {
             </figure>
           );
         }
-        if (b.type === "embed") return (
-          <figure key={i} style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
-            <a href={b.url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>
-              ↗ {b.url}
-            </a>
-            {b.caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{b.caption}</figcaption>}
-          </figure>
-        );
+        if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
