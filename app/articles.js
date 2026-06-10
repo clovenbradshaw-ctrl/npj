@@ -33,6 +33,7 @@
   const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
   const API_LIST = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR + "?ref=main";
   const IDX_CACHE_KEY = "npj_articles_idx_v1";
+  const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
 
   const nowIso = () => new Date().toISOString();
@@ -421,11 +422,36 @@
     return appendEdit({ slug, operand: { status: next }, actor, note: finalNote, token, message });
   }
 
+  /* Publish receipts. The webhook now returns the post-commit provenance the
+     client can't know up front — the GitHub commit_sha of the line it wrote and
+     its byte count. The genesis event is serialized BEFORE the commit, so the
+     SHA can't live in the event operand; it lives here, keyed by filename, so a
+     later load can confirm the raw URL is serving the commit we actually made
+     rather than a stale CDN copy. Local-only, best-effort: never throws. */
+  function saveReceipt(rec) {
+    if (!rec || !rec.filename) return rec;
+    try {
+      const all = JSON.parse(localStorage.getItem(RECEIPT_KEY) || "{}") || {};
+      all[rec.filename] = {
+        filename: rec.filename,
+        commit_sha: rec.commit_sha || null,
+        bytes: typeof rec.bytes === "number" ? rec.bytes : null,
+        published_at: rec.published_at || nowIso()
+      };
+      localStorage.setItem(RECEIPT_KEY, JSON.stringify(all));
+    } catch (e) {}
+    return rec;
+  }
+  function getReceipt(filename) {
+    try { const all = JSON.parse(localStorage.getItem(RECEIPT_KEY) || "{}") || {}; return all[filename] || null; } catch (e) { return null; }
+  }
+
   window.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     listArticles, loadFront, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
-    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, setArticleStatus
+    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, setArticleStatus,
+    saveReceipt, getReceipt
   };
 })();
