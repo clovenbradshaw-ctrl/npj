@@ -300,7 +300,7 @@ function Composer({ user, session, onSignOut }) {
         <div style={{ marginTop: 22, borderTop: "1.5px solid var(--rule)", paddingTop: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <I.shield style={{ fontSize: 18, color: "var(--ink-soft)", flex: "0 0 auto", marginTop: 1 }} />
           <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>
-            Highlight a fact and hit <strong>⊥ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
+            Highlight a fact and hit <strong>⊨ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
           </p>
         </div>
       </div>
