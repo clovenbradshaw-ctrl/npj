@@ -888,11 +888,88 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     { code: "REC", label: "Live & open to suggestion", detail: articleUrl, state: "wait" }
   ]));
   const published = useRef(null); // the folded article, for "open it" without re-fetching
+  const payloadRef = useRef(null); // {slug,line,token,message} — held so "Retry publish" re-POSTs the exact same payload
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   const upd = (i, patch) => { if (alive.current) setSteps(list => list.map((s, j) => j === i ? { ...s, ...patch } : s)); };
   const halt = (i, detail, msg) => { upd(i, { state: "fail", detail }); if (alive.current) setOutcome({ ok: false, msg }); };
   const tick = (ms) => new Promise(r => setTimeout(r, ms));
+
+  // verify-after-publish: a 200 means the commit landed, but the raw URL is a
+  // CDN — confirm it's serving readable JSONL, not a double-base64'd blob. A
+  // 404 / network miss right after the commit is just CDN lag, not a failure,
+  // so those return null (no flag). The signal we DO flag: a first line that
+  // starts with "eyJ" (base64 of '{') instead of '{' — the workflow encoded the
+  // body twice and the article won't parse.
+  const verifyRaw = async (filename) => {
+    try {
+      const url = window.NpjArticles.RAW_BASE + "/" + filename + "?cb=" + Date.now();
+      const txt = await fetch(url, { cache: "no-store" }).then(r => r.ok ? r.text() : null);
+      if (txt == null) return null;
+      const first = (txt.split("\n", 1)[0] || "").trim();
+      if (!first) return null;
+      if (/^eyJ/.test(first)) return {
+        short: "raw file is base64, not JSON — double-encoded",
+        msg: "The commit landed, but the published file starts with “eyJ”, not “{” — the workflow base64-encoded the body twice, so the article won't parse. Don't rely on the link until the workflow's encoding is fixed."
+      };
+      try { if (JSON.parse(first).op) return null; } catch (e) {}
+      return {
+        short: "raw file's first line isn't the genesis event",
+        msg: "The commit landed, but the raw URL's first line didn't parse as the genesis JSONL event. It may be a stale CDN copy — re-check the file before sharing the link."
+      };
+    } catch (e) { return null; }
+  };
+
+  // The commit itself, factored out so "Retry publish" can re-POST the EXACT
+  // same payload. The webhook re-fetches the current blob SHA on every request,
+  // so retrying resolves a 409/422 race (something committed between its GET and
+  // PUT). Success is the JSON body's `ok` flag — NOT a bare HTTP 200 — because
+  // the webhook now reports a failed GitHub commit honestly, with the real
+  // status and message, instead of a lying 200.
+  const commit = async () => {
+    const p = payloadRef.current; if (!p) return;
+    if (alive.current) setOutcome(null);
+    upd(3, { state: "active", detail: "→ clovenbradshaw-ctrl/npj · " + window.NpjArticles.filenameFor(slug) });
+    let res;
+    try {
+      res = await window.NpjArticles.publishGenesis(p);
+    } catch (e) { return halt(3, "webhook unreachable", "Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing was committed."); }
+    const data = await res.json().catch(() => null);
+    const success = res.status === 200 && data && data.ok === true;
+    if (!success) {
+      let msg, detail;
+      if (res.status === 401) {
+        detail = "rejected — session invalid (401)";
+        msg = "Your Matrix session isn't valid for publishing — sign in again.";
+      } else if (res.status === 403 && data && data.error === "not an assignee on this article") {
+        detail = "rejected — not an assignee (403)";
+        msg = "You're signed in as " + (data.user || "your account") + " (" + (data.role || "no role") + "), but this article's genesis doesn't list you as an assignee.";
+      } else if (data && data.gh_status) {
+        detail = "GitHub " + data.gh_status + " — commit rejected";
+        msg = "GitHub rejected the commit (" + data.gh_status + "): " + (data.error || "no message") + ". Nothing was written.";
+      } else {
+        detail = "HTTP " + res.status;
+        msg = "The publish webhook answered " + res.status + ((data && data.error) ? " — " + data.error : "") + ". Nothing was committed.";
+      }
+      // 409/422 is a SHA race, not a dead end — offer a single re-POST.
+      const retry = !!(data && (data.gh_status === 409 || data.gh_status === 422));
+      upd(3, { state: "fail", detail });
+      if (alive.current) setOutcome({ ok: false, msg, retry });
+      return;
+    }
+    // committed for real — persist the receipt (the SHA the webhook just wrote)
+    const sha = data.commit_sha || null;
+    const filename = data.filename || window.NpjArticles.filenameFor(slug);
+    try { window.NpjArticles.saveReceipt({ filename, commit_sha: sha, bytes: data.bytes, published_at: new Date().toISOString() }); } catch (e) {}
+    const shaTag = sha ? " @ " + sha.slice(0, 7) : "";
+    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · " + filename + shaTag });
+    // 5 — live once Pages redeploys; confirm the raw file is readable JSONL
+    upd(4, { state: "active", detail: articleUrl + (sha ? " · committed @ " + sha.slice(0, 7) : "") });
+    await tick(400);
+    const warn = await verifyRaw(filename);
+    upd(4, { state: warn ? "fail" : "done", detail: warn ? warn.short : articleUrl + (sha ? " · committed @ " + sha.slice(0, 7) : "") });
+    if (alive.current) setOutcome({ ok: true, sha, warn: warn ? warn.msg : null });
+  };
 
   const run = async () => {
     setPhase("run");
@@ -933,17 +1010,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     published.current = gen.article;
     const token = window.MatrixAuth.token();
     if (!token) return halt(3, "no verified Matrix session", "Sign in with your admin Matrix account to publish.");
-    let res;
-    try {
-      res = await window.NpjArticles.publishGenesis({ slug, line: gen.line, token, message: "publish: " + slug });
-    } catch (e) { return halt(3, "webhook unreachable", "Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing was committed."); }
-    if (res.status === 401) return halt(3, "rejected — not authorized (401)", "That Matrix account isn't authorized to publish.");
-    if (!res.ok) return halt(3, "HTTP " + res.status, "The publish webhook answered " + res.status + " — nothing was committed.");
-    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" });
-    // 5 — live once Pages redeploys (≈ a minute after the commit)
-    upd(4, { state: "active" }); await tick(400);
-    upd(4, { state: "done" });
-    if (alive.current) setOutcome({ ok: true });
+    // hold the payload so a 409/422 race can be retried with the same bytes
+    payloadRef.current = { slug, line: gen.line, token, message: "publish: " + slug };
+    await commit();
   };
 
   const srcKeys = (sources || []).map(s => s.key);
@@ -1021,11 +1090,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
               <div className="fade-in" style={{ marginTop: 16, textAlign: "center" }}>
                 {outcome.ok
                   ? <React.Fragment>
-                      <div style={{ fontFamily: "var(--display)", fontSize: 26, color: "var(--yellow)", marginBottom: 4 }}>COMMITTED — GOING LIVE</div>
-                      <div className="np-mono" style={{ fontSize: 11, color: NR.muted, marginBottom: 16, lineHeight: 1.5 }}>{"articles/" + slug + ".jsonl is in clovenbradshaw-ctrl/npj — the article's EO event log, line 1. Every future edit appends to it. The front page lists it and the link below opens the formatted reader."}</div>
-                      <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
-                        <ShareBar dark url={articleUrl} archiveUrl={"https://web.archive.org/save/" + window.npjArticleRawUrl(slug)} title={title} />
-                      </div>
+                      <div style={{ fontFamily: "var(--display)", fontSize: 26, color: outcome.warn ? NR.warn : "var(--yellow)", marginBottom: 4 }}>{outcome.warn ? "COMMITTED — CHECK THE FILE" : "COMMITTED — GOING LIVE"}</div>
+                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || ("articles/" + slug + ".jsonl is in clovenbradshaw-ctrl/npj — the article's EO event log, line 1. Every future edit appends to it. The front page lists it and the link below opens the formatted reader.")}</div>
+                      {outcome.sha && <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, marginBottom: 16 }}>committed @ {outcome.sha.slice(0, 7)}</div>}
+                      {!outcome.warn && (
+                        <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
+                          <ShareBar dark url={articleUrl} archiveUrl={"https://web.archive.org/save/" + window.npjArticleRawUrl(slug)} title={title} />
+                        </div>
+                      )}
                     </React.Fragment>
                   : <React.Fragment>
                       <div style={{ fontFamily: "var(--display)", fontSize: 24, color: NR.warn, marginBottom: 6 }}>PUBLISH DIDN'T COMPLETE</div>
@@ -1035,6 +1107,11 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                   {outcome.ok && (
                     <button onClick={() => onPublished && onPublished(published.current || slug)} className="np-cond" style={{ background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", padding: "10px 18px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}>
                       <I.arrow style={{ fontSize: 14 }} /> Open the article
+                    </button>
+                  )}
+                  {!outcome.ok && outcome.retry && (
+                    <button onClick={commit} className="np-cond" style={{ background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", padding: "10px 18px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}>
+                      <I.lock style={{ fontSize: 14 }} /> Retry publish
                     </button>
                   )}
                   <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 15, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Back to editor</button>
