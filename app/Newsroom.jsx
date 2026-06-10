@@ -26,6 +26,16 @@ const START_DOC =
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
+// a bound span's pinned source-spans. Stored as a JSON array on data-quote; an
+// older single-string value still reads as one. [] / "" → not pinned yet.
+function quoteList(raw) {
+  const t = String(raw || "").trim();
+  if (!t) return [];
+  if (t[0] === "[") { try { const a = JSON.parse(t); return Array.isArray(a) ? a.filter(x => x && String(x).trim()) : []; } catch (e) {} }
+  return [t];
+}
+function quoteListOf(el) { return el ? quoteList(el.getAttribute("data-quote")) : []; }
+
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -125,7 +135,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               sup.setAttribute("data-cid", cid);
               if (!sup.hasAttribute("data-quote")) sup.setAttribute("data-quote", el.getAttribute("data-quote") || "");
             }
-            if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
+            if (quoteListOf(el).length === 0) el.classList.add("needs-quote");
           });
         }
         if (d.title) setTitle(d.title);
@@ -418,45 +428,32 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     openPin(cid, key, claimText);
   };
 
-  // ---- pin the source-span: the words IN THE SOURCE that back this claim ----
-  const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
-  const [pinQuote, setPinQuote] = useState("");
+  // ---- pin the source-span(s): the words IN THE SOURCE that back this claim ----
+  // Opening a binding launches the source explorer (search + read + multi-select)
+  const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText, quotes:[] }
   const openPin = (cid, key, claimText) => {
-    // re-opening an existing binding? read back whatever quote is on it
-    let existing = "";
-    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
-    setPinQuote(existing);
-    setPinTarget({ cid, key, claimText });
+    const el = ed.current && ed.current.querySelector('.claim-src[data-cid="' + cid + '"]');
+    setPinTarget({ cid, key, claimText, quotes: quoteListOf(el) });
   };
-  const closePin = () => { setPinTarget(null); setPinQuote(""); };
-  const savePin = () => {
+  const closePin = () => setPinTarget(null);
+  // the explorer hands back the chosen passage(s) — write them to the span+marker
+  const savePin = (quotes) => {
     const t = pinTarget; if (!t) return;
-    const q = String(pinQuote || "").trim();
-    if (!q) return;
+    const arr = (quotes || []).map(s => String(s || "").trim()).filter(Boolean);
+    const json = JSON.stringify(arr);
     if (ed.current) {
       ed.current.querySelectorAll('[data-cid="' + t.cid + '"]').forEach(el => {
-        el.setAttribute("data-quote", q);
-        if (el.classList.contains("claim-src")) { el.classList.remove("needs-quote"); el.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”"); }
+        el.setAttribute("data-quote", json);
+        if (el.classList.contains("claim-src")) {
+          el.classList.toggle("needs-quote", arr.length === 0);
+          el.setAttribute("title", arr.length ? arr.length + " cited passage" + (arr.length === 1 ? "" : "s") + " — “" + arr[0].slice(0, 120) + (arr[0].length > 120 ? "…" : "") + "”" : "Bound to a source — pin the words in it");
+        }
       });
     }
-    // remember the passage on the source record too, so the next claim off the
-    // same source can be matched against text we've already pulled
-    const rec = window.NPJ.SOURCES[t.key];
-    if (rec && (!rec.text || rec.text.indexOf(q) < 0)) rec.text = (rec.text ? rec.text + "\n" : "") + q;
     closePin(); setRev(v => v + 1); scheduleSave();
   };
-  // hand the claim + source over to Clippy and let him locate the supporting span
-  const findWithClippy = () => {
-    const t = pinTarget; if (!t || !window.__clippy || !window.__clippy.findSpan) return;
-    const rec = window.NPJ.SOURCES[t.key] || {};
-    window.__clippy.findSpan({
-      claimText: t.claimText,
-      source: { key: t.key, title: rec.title, outlet: rec.outlet, text: rec.text || "" },
-      onPick: (quote) => setPinQuote(quote)
-    });
-  };
   // every bound span still missing its source-span
-  const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0; };
+  const needsQuoteCount = () => { void rev; return ed.current ? Array.from(ed.current.querySelectorAll(".claim-src")).filter(el => quoteListOf(el).length === 0).length : 0; };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
@@ -760,7 +757,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.source style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
           {(() => { const nq = needsQuoteCount(); return nq ? (
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
-              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — 📎 Clippy can find them.
+              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} to open the source explorer — search the source, pick the exact passage(s), and pin them. 📎 Clippy can rank them for you.
             </div>
           ) : null; })()}
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
@@ -783,7 +780,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {sources.map(s => {
             const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key, outlet: "" };
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
-            const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
+            const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => quoteListOf(el).length === 0).length : 0;
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -861,32 +858,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
-      {/* pin the source-span: the exact words IN the source that back the claim.
-          A page is not a citation — this is what makes it one. */}
-      {pinTarget && (() => { const rec = window.NPJ.SOURCES[pinTarget.key] || {}; const ready = !!String(pinQuote || "").trim(); return (
-        <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
-            <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
-            <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
-          </div>
-          {pinTarget.claimText && (
-            <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
-              <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
-              “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
-            </div>
-          )}
-          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Paste the EXACT words in the source that back this claim — or let Clippy find them.</div>
-          <textarea autoFocus value={pinQuote} onChange={e => setPinQuote(e.target.value)} placeholder="The supporting words, quoted verbatim from the source…"
-            style={{ width: "100%", minHeight: 64, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-            <button onClick={findWithClippy} className="np-cond" style={{ flex: "0 0 auto", background: "var(--yellow)", color: "var(--ink)", border: "1px solid var(--yellow)", padding: "6px 11px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>📎 Find it with Clippy</button>
-            <span style={{ flex: 1 }} />
-            <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
-            <button onClick={savePin} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
-          </div>
-        </div>
-      ); })()}
+      {/* explore the source: search it, read it, pick the exact passage(s) that
+          back the claim — more than one is fine. A page is not a citation. */}
+      {pinTarget && window.SourceExplorer && (
+        <window.SourceExplorer sourceKey={pinTarget.key} claimText={pinTarget.claimText} initialQuotes={pinTarget.quotes}
+          onPin={savePin} onClose={closePin} />
+      )}
 
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
@@ -982,8 +959,8 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       const rec = window.NPJ.SOURCES[k];
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
       // every bound span must point at the exact words in the source, not just
-      // the page — a span with no pinned quote fails the build
-      if (!(n.getAttribute("data-quote") || "").trim()) unpinned++;
+      // the page — a span with no pinned passage fails the build
+      if (quoteList(n.getAttribute("data-quote")).length === 0) unpinned++;
     });
     const archived = (sources || []).filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
     // images still on the media store get moved onto archive.org at publish

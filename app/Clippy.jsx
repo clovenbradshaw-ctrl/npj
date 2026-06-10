@@ -188,7 +188,7 @@ function ClippyAgent({ route }) {
     push({ from: "you", text: q }); setInput(""); setBusy(true);
     const t = q.toLowerCase();
     if (/\b(tag|file|column|categor|topic)\b/.test(t)) { setBusy(false); return doSuggest(); }
-    if (/\b(sourc|cite|citation|span|quote)\b/.test(t)) { sequence(CL_SEQ.point); push({ from: "clippy", text: "Sourcing is manual and two-sided: highlight the exact words that make a claim, hit ⊨ Source to bind a snapshot, then pin the exact words IN the source that back it — a page alone isn't a citation. When you bind a span, hit “📎 Find it with Clippy” and I'll rank the source's sentences and point at the one that backs your claim. I never decide what's true — I just help you find the span." }); setBusy(false); return; }
+    if (/\b(sourc|cite|citation|span|quote)\b/.test(t)) { sequence(CL_SEQ.point); push({ from: "clippy", text: "Sourcing is manual and two-sided: highlight the exact words that make a claim, hit ⊨ Source to bind a snapshot, then open the source explorer to pin the exact words IN the source that back it — a page alone isn't a citation. The explorer pulls the archived source text so you can search it, read it, and pick one or more passages; hit “📎 Clippy: find best” in there and I'll rank the passages against your claim. I never decide what's true — I just help you find the span." }); setBusy(false); return; }
     sequence(CL_SEQ.point);
     push({ from: "clippy", text: "I'm your tagging helper — try “suggest tags”, or ask which column this belongs in." });
     setBusy(false);
