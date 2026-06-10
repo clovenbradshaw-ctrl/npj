@@ -200,16 +200,6 @@ a { color: inherit; }
 .btn-ghost { background: transparent; border-color: var(--rule); }
 .btn-sm { padding: 4px 9px; font-size: 12px; }
 
-/* segmented toggle */
-.seg { display: inline-flex; border: 1.5px solid var(--ink); background: var(--card); }
-.seg button {
-  font-family: var(--cond); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
-  font-size: 13px; padding: 6px 13px; background: transparent; border: 0; color: var(--ink-soft);
-  border-right: 1.5px solid var(--ink);
-}
-.seg button:last-child { border-right: 0; }
-.seg button[data-on="1"] { background: var(--ink); color: var(--yellow); }
-
 /* upvote pill */
 .vote {
   display: inline-flex; align-items: center; gap: 5px;

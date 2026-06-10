@@ -142,7 +142,6 @@ function App() {
   }, [session, setLayout]);
 
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
-  const initDir = ["ledger", "receipts", "split"].find(d => hp.includes(d)) || "ledger";
   const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
   // ---- the published record (EO event logs in articles/*.jsonl) ----
   // frontRev repaints the front page once the committed line-up loads;
@@ -163,8 +162,7 @@ function App() {
     if (part) return decodeURIComponent(part.slice(4));
     try { return localStorage.getItem("npj_last_doc") || "working"; } catch (e) { return "working"; }
   });
-  const [readMode, setReadMode] = useState(hp.includes("audit") ? "audit" : "clean");
-  const [direction, setDirection] = useState(initDir);
+  const [audit, setAudit] = useState(hp.includes("audit"));
   const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
   const [filter, setFilter] = useState("all");
   const [isEditor, setIsEditor] = useState(hp.includes("editor"));
@@ -205,7 +203,7 @@ function App() {
     if (b.body) r.setProperty("--serif", `'${b.body}', Georgia, serif`);
   }, [layout.brand, t.accent, t.headline, t.body]);
 
-  useEffect(() => { setReadMode(t.auditDefault ? "audit" : "clean"); }, [t.auditDefault]);
+  useEffect(() => { setAudit(!!t.auditDefault); }, [t.auditDefault]);
   useEffect(() => { setFilter(t.trustDefault); }, [t.trustDefault]);
 
   // Open a published article: fetch its EO log, fold it, install it, route.
@@ -255,14 +253,13 @@ function App() {
     const f = [route];
     if (route === "article") {
       if (window.NPJ.ARTICLE && window.NPJ.ARTICLE.slug) f.push("read=" + encodeURIComponent(window.NPJ.ARTICLE.slug));
-      if (readMode === "audit") f.push("audit");
-      f.push(direction);
+      if (audit) f.push("audit");
       if (showSugg) f.push("sugg");
       if (entityOpen) f.push("figures");
     }
     if (route === "newsroom" && draftId && draftId !== "working") f.push("doc=" + encodeURIComponent(draftId));
     history.replaceState(null, "", "#" + f.join(";"));
-  }, [route, readMode, direction, showSugg, entityOpen, draftId, articleRev]);
+  }, [route, audit, showSugg, entityOpen, draftId, articleRev]);
 
   const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };
   // "Newsroom" lands on the document explorer (your docs + projects); the
@@ -303,8 +300,7 @@ function App() {
       {route === "home" && <FrontPage key={"front-" + frontRev} onOpen={openArticle} onNewsroom={goNewsroom} onHome={goHome} />}
       {route === "article" && window.NPJ.ARTICLE && (
         <ArticleRead key={(window.NPJ.ARTICLE.slug || "a") + ":" + articleRev}
-          readMode={readMode} setReadMode={setReadMode}
-          direction={direction} setDirection={setDirection}
+          audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
           suggestions={suggestions} onVote={onVote} onResolve={onResolve} onAddSuggestion={onAddSuggestion}
           filter={filter} setFilter={setFilter} isEditor={isEditor} setIsEditor={setIsEditor}
