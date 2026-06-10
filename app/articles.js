@@ -347,7 +347,7 @@
     }).join("");
   }
   function blocksToHtml(body) {
-    return (body || []).map(b => {
+    return (body || []).map((b, bi) => {
       if (b.type === "p") return "<p>" + (tokensToHtml(b.tokens) || "<br/>") + "</p>";
       if (b.type === "h2" || b.type === "h3") return "<" + b.type + ">" + esc(b.text) + "</" + b.type + ">";
       if (b.type === "pull") return "<blockquote>" + esc(b.text) + "</blockquote>";
@@ -355,7 +355,10 @@
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";
       if (b.type === "verse") return '<pre class="verse">' + esc(b.text) + "</pre>";
-      if (b.type === "img") return '<figure data-eo-img contenteditable="false"><img src="' + esc(b.src) + '" style="max-width:100%"/>' + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+      // editable image-slot (not a static <img>) so the edit surface can
+      // replace it — a fresh drop uploads to the media store, then publish/save
+      // moves it to archive.org. The slot renders its src attribute for display.
+      if (b.type === "img") return '<figure contenteditable="false" class="cmp-embed"><image-slot id="eo-img-' + bi + '" src="' + esc(b.src) + '" shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
     }).join("\n");

@@ -29,8 +29,6 @@ function AdminEditor() {
   const [newMember, setNewMember] = useState("");
   const [newRole, setNewRole] = useState("editor");
   const [expandCol, setExpandCol] = useState(null);
-  const [ia, setIa] = useState(() => (window.NpjMedia && window.NpjMedia.getArchiveCreds()) || { access: "", secret: "" });
-  const [iaMsg, setIaMsg] = useState(null);
 
   // Every hook stays ABOVE this guard. isAdmin flips false→true the moment the
   // admin signs in, so an early return placed before some of the hooks changes
@@ -56,12 +54,6 @@ function AdminEditor() {
 
   const move = (arr, i, d) => { const a = [...arr]; const j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; };
 
-  const saveIa = () => {
-    if (!window.NpjMedia) return;
-    window.NpjMedia.setArchiveCreds(ia.access, ia.secret);
-    setIaMsg(ia.access && ia.secret ? { ok: true, text: "Keys saved — dropped photos will upload to archive.org at publish." } : { ok: false, text: "Both keys are needed — cleared for now." });
-  };
-  const clearIa = () => { setIa({ access: "", secret: "" }); if (window.NpjMedia) window.NpjMedia.setArchiveCreds("", ""); setIaMsg({ ok: true, text: "Keys cleared — images freeze via the Wayback Machine instead." }); };
 
   const doPublish = async () => {
     savePublishCfg(cfg);
@@ -231,21 +223,11 @@ function AdminEditor() {
               </div>
             </Section>
 
-            {/* Media uploads → archive.org */}
+            {/* Media uploads → archive.org (server-side via n8n) */}
             <Section label="Media · archive.org uploads">
-              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
-                Dropped photos upload to the Matrix media store while drafting, then move to <b style={{ color: AE.text }}>archive.org</b> at publish. Add your archive.org S3 keys (<b style={{ color: AE.text }}>archive.org/account/s3.php</b>) to upload directly; without them images are frozen via the Wayback Machine instead. Stored in this browser only.
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, lineHeight: 1.5 }}>
+                Dropped photos upload to the Matrix media store while drafting, then move to <b style={{ color: AE.text }}>archive.org</b> at publish — through the n8n backend, so the keys stay server-side. Set <b style={{ color: AE.text }}>IA_S3_ACCESS</b> and <b style={{ color: AE.text }}>IA_S3_SECRET</b> (from archive.org/account/s3.php) in your n8n environment; the publish workflow's media branch uses them. Nothing to enter here.
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                <AdminField value={ia.access} onChange={(v) => setIa(c => ({ ...c, access: v }))} placeholder="S3 access key" />
-                <input type="password" value={ia.secret} onChange={(e) => setIa(c => ({ ...c, secret: e.target.value }))} placeholder="S3 secret key"
-                  style={{ flex: 1, minWidth: 0, border: "1px solid " + AE.line, background: AE.field, color: AE.text, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, padding: "7px 9px", outline: "none" }} />
-                <div style={{ display: "flex", gap: 6 }}>
-                  <button onClick={saveIa} style={{ ...addBtn, flex: 1 }}>Save keys</button>
-                  <button onClick={clearIa} style={{ ...addBtn, width: "auto", padding: "0 12px" }}>Clear</button>
-                </div>
-              </div>
-              {iaMsg && <div className="np-mono" style={{ fontSize: 10, marginTop: 7, lineHeight: 1.5, color: iaMsg.ok ? "#9fe0b8" : "#e09a85" }}>{iaMsg.text}</div>}
             </Section>
 
             {/* Publish */}

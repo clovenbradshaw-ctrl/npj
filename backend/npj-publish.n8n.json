@@ -703,6 +703,260 @@
         2064
       ],
       "webhookId": "chain-head-publish"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/media-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "media-webhook-0001",
+      "name": "Media Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        -1728,
+        560
+      ],
+      "webhookId": "site-media",
+      "notes": "POST /webhook/site/media-npj\\nAuthorization: Bearer <Matrix token>\\nBody: { identifier, filename, mimetype, title, contentBase64 }\\nUploads one image to archive.org (server-side IA S3 keys) and returns { ok, url }."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "media-whoami-0001",
+      "name": "Media Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1504,
+        560
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cb",
+              "value": "={{ Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "media-roles-0001",
+      "name": "Media Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1280,
+        560
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Media auth: a valid Matrix token whose account is admin/editor may upload.\nconst who = $('Media Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Media Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\nreturn [{ json: { authorized, user_id: userId, role } }];"
+      },
+      "id": "media-authorize-0001",
+      "name": "Media Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1056,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-media-authz",
+              "leftValue": "={{ String($json.authorized === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "media-authzif-0001",
+      "name": "Media Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -832,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized', user: $json.user_id || null, role: $json.role || null }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "media-unauth-0001",
+      "name": "Respond Media Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        -608,
+        760
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode the posted image into n8n binary data + a safe archive.org identifier.\nconst hook = $('Media Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst identifier = (String(body.identifier || 'npj-media').replace(/[^A-Za-z0-9._-]/g,'-').replace(/^-+|-+$/g,'').slice(0,90)) || 'npj-media';\nconst filename = (String(body.filename || ('img-'+Date.now()+'.webp')).replace(/[^A-Za-z0-9._-]/g,'')) || ('img-'+Date.now()+'.webp');\nconst b64 = String(body.contentBase64 || '');\nconst mime = String(body.mimetype || 'image/webp');\nconst title = String(body.title || '').replace(/[^\\x20-\\x7E]/g,'').slice(0,180);\nreturn [{ json: { identifier, filename, title, mime, hasBytes: !!b64 }, binary: { data: { data: b64, mimeType: mime, fileName: filename } } }];"
+      },
+      "id": "media-build-0001",
+      "name": "Media Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -608,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://s3.us.archive.org/' + $json.identifier + '/' + $json.filename }}",
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "={{ 'LOW ' + $env.IA_S3_ACCESS + ':' + $env.IA_S3_SECRET }}"
+            },
+            {
+              "name": "x-amz-auto-make-bucket",
+              "value": "1"
+            },
+            {
+              "name": "x-archive-meta-mediatype",
+              "value": "image"
+            },
+            {
+              "name": "x-archive-meta-subject",
+              "value": "npj-media"
+            },
+            {
+              "name": "x-archive-meta-title",
+              "value": "={{ $json.title }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "media-iaput-0001",
+      "name": "IA Put",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -384,
+        480
+      ],
+      "continueOnFail": true,
+      "notes": "PUTs the image to archive.org S3. Needs IA_S3_ACCESS and IA_S3_SECRET in the n8n environment (archive.org/account/s3.php)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Surface the real archive.org result; build the public download URL on success.\nconst r = $input.first().json || {};\nconst built = $('Media Build').first().json || {};\nconst status = Number(r.statusCode || (r.error && (r.error.httpCode || r.error.status || r.error.statusCode)) || 0) || null;\nconst errored = !!r.error || (!built.hasBytes) || (status && status >= 400);\nconst ok = !errored && (!status || status < 400);\nconst url = ok ? ('https://archive.org/download/' + built.identifier + '/' + built.filename) : null;\nconst errMsg = !built.hasBytes ? 'no image bytes received'\n  : (errored ? ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org upload failed (' + (status || '?') + ')')) : null);\nreturn [{ json: { ok, statusCode: ok ? 200 : (status || 502), url, error: errMsg, identifier: built.identifier, filename: built.filename } }];"
+      },
+      "id": "media-result-0001",
+      "name": "Media Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -160,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.ok, url: $json.url, error: $json.error, identifier: $json.identifier, filename: $json.filename }) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "media-ok-0001",
+      "name": "Media OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        64,
+        480
+      ]
     }
   ],
   "connections": {
@@ -962,6 +1216,101 @@
         [
           {
             "node": "Auth Check1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Webhook": {
+      "main": [
+        [
+          {
+            "node": "Media Whoami",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Whoami": {
+      "main": [
+        [
+          {
+            "node": "Media Fetch Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Fetch Roles": {
+      "main": [
+        [
+          {
+            "node": "Media Authorize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Authorize": {
+      "main": [
+        [
+          {
+            "node": "Media Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Media Build",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Media Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Build": {
+      "main": [
+        [
+          {
+            "node": "IA Put",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IA Put": {
+      "main": [
+        [
+          {
+            "node": "Media Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Result": {
+      "main": [
+        [
+          {
+            "node": "Media OK",
             "type": "main",
             "index": 0
           }
