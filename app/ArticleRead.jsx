@@ -102,13 +102,70 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
 // Two-source image: try the live Matrix media-store copy first, fall back to
 // the durable archive.org one (then any further candidates). Both URLs ride in
 // the img block — see freezeArticleMedia (app/media-store.js).
+//
+// A media-store URL can't be loaded by a bare <img>: authenticated-media
+// homeservers (Matrix 1.11+) reject an unauthenticated GET, so we resolve it
+// through NpjMedia.resolveDisplay first — that fetches the bytes with the
+// session token and hands back a blob: URL when signed in, or the original URL
+// otherwise. Either way, if the candidate fails to paint, onError advances to
+// the next one (the archive.org copy), so the image always loads from the
+// media store when it can and from archive.org when it can't.
 function MediaImg({ srcs, alt, style }) {
   const list = (srcs || []).filter(Boolean);
   const [i, setI] = useState(0);
+  const [resolved, setResolved] = useState(null);
+  const idx = Math.min(i, Math.max(0, list.length - 1));
+  const cur = list[idx];
+  React.useEffect(() => {
+    let alive = true, made = null;
+    setResolved(null);
+    if (!cur) return;
+    const isStore = window.NpjMedia && window.NpjMedia.isStoreUrl(cur);
+    if (isStore && window.NpjMedia.resolveDisplay) {
+      window.NpjMedia.resolveDisplay(cur).then(u => {
+        if (!alive) { if (u && u !== cur && u.indexOf("blob:") === 0) URL.revokeObjectURL(u); return; }
+        if (u && u !== cur && u.indexOf("blob:") === 0) made = u;
+        setResolved(u || cur);
+      }).catch(() => { if (alive) setResolved(cur); });
+    } else {
+      setResolved(cur);
+    }
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [cur]);
   if (!list.length) return null;
-  const idx = Math.min(i, list.length - 1);
-  return <img src={list[idx]} alt={alt || ""} loading="lazy" style={style}
+  // while an authenticated store fetch is in flight, hold a neutral placeholder
+  // rather than flashing a doomed unauthenticated <img> request
+  if (resolved == null) return <div style={{ ...style, background: "var(--paper-2)" }} aria-hidden="true" />;
+  return <img src={resolved} alt={alt || ""} loading="lazy" style={style}
     onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
+}
+
+// An embedded media block: the EO log only stores the URL, so the reader
+// rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
+// <audio> for direct media files, or (for anything we don't recognize) the
+// link card, since the committed artifact is always the URL itself.
+function EmbedFigure({ url, caption }) {
+  const u = String(url || "");
+  let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+  const yt = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
+  const vm = u.match(/vimeo\.com\/(\d+)/);
+  let media = null;
+  if (yt) media = <iframe src={"https://www.youtube-nocookie.com/embed/" + yt[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />;
+  else if (vm) media = <iframe src={"https://player.vimeo.com/video/" + vm[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen loading="lazy" />;
+  else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) media = <video controls preload="metadata" src={u} style={{ width: "100%", maxHeight: 460, background: "#000", display: "block" }} />;
+  else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) media = <audio controls preload="metadata" src={u} style={{ width: "100%" }} />;
+  if (media) return (
+    <figure style={{ margin: "26px 0" }}>
+      <div style={{ border: "1.5px solid var(--ink)", background: "#000", lineHeight: 0 }}>{media}</div>
+      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▶ {caption}</figcaption>}
+    </figure>
+  );
+  return (
+    <figure style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
+      <a href={u} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>↗ {host || u}</a>
+      {caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{caption}</figcaption>}
+    </figure>
+  );
 }
 
 function ArticleRead(props) {
@@ -243,20 +300,16 @@ function ArticleRead(props) {
             {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
           </blockquote>
         );
-        if (b.type === "img") return (
-          <figure key={i} style={{ margin: "26px 0" }}>
-            <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-            {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
-          </figure>
-        );
-        if (b.type === "embed") return (
-          <figure key={i} style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
-            <a href={b.url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>
-              ↗ {b.url}
-            </a>
-            {b.caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{b.caption}</figcaption>}
-          </figure>
-        );
+        if (b.type === "img") {
+          if (b.banner) return null; // the banner is lifted into the hero above — never inline
+          return (
+            <figure key={i} style={{ margin: "26px 0" }}>
+              <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
+            </figure>
+          );
+        }
+        if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
@@ -314,6 +367,17 @@ function ArticleRead(props) {
     </header>
   );
 
+  // the lead/banner image — from the folded article's derived `image`, or the
+  // banner-flagged block in the body. Rendered once, as a hero under the
+  // headline; the body map skips the same block so it never doubles up.
+  const heroImg = (A.image && A.image.src) ? A.image : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
+  const Hero = (heroImg && heroImg.src) ? (
+    <figure style={{ margin: "0 0 28px" }}>
+      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
+    </figure>
+  ) : null;
+
   const Main = (
     <div style={{ minWidth: 0 }}>
       {A.status === "unpublished" && (
@@ -327,6 +391,7 @@ function ArticleRead(props) {
         <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)", border: "1px solid var(--reject)", padding: "9px 10px", marginBottom: 16, lineHeight: 1.5 }}>{statusErr}</div>
       )}
       {Header}
+      {Hero}
       {Body}
       <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
     </div>
@@ -503,4 +568,4 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
   );
 }
 
-Object.assign(window, { ArticleRead });
+Object.assign(window, { ArticleRead, MediaImg });

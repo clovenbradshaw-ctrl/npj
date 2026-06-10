@@ -177,6 +177,11 @@ function FrontLineup({ items, onOpen }) {
           <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{lead.kicker}{lead.status === "unpublished" && <UnpubBadge />}</div>
           <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .98, margin: "0 0 14px" }}>{lead.headline}</h1>
         </button>
+        {lead.image && lead.image.src && window.MediaImg && (
+          <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 14px" }}>
+            <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+          </button>
+        )}
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
         {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}</div>}
         {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
@@ -185,6 +190,11 @@ function FrontLineup({ items, onOpen }) {
         <div className="np-eyebrow" style={{ borderBottom: "2px solid var(--ink)", paddingBottom: 6, marginBottom: 12 }}>More</div>
         {rest.map((s, i) => (
           <article key={s.slug || i} style={{ padding: "12px 0", borderBottom: "1px solid var(--rule)" }}>
+            {s.image && s.image.src && window.MediaImg && (
+              <button onClick={() => open(s)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 8px" }}>
+                <window.MediaImg srcs={[s.image.store, s.image.src]} alt={s.image.caption || s.headline || ""} style={{ width: "100%", height: 130, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
+              </button>
+            )}
             <h3 onClick={() => open(s)} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
             {s.status === "unpublished" && <div style={{ marginBottom: 6 }}><UnpubBadge small /></div>}
             {s.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.35, color: "var(--ink-soft)", margin: "0 0 6px" }}>{s.dek}</p>}
