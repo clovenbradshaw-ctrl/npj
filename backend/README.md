@@ -62,6 +62,14 @@ of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
 > (`npj-api.n8n.json` + Data Table) is therefore optional/deprecated — keep it
 > only if you want server-side suggestion storage instead of GitHub JSONL.
 
+> **Images never reach the publish webhook as bytes.** A photo dropped into the
+> newsroom uploads to the Matrix media store while drafting (`app/media-store.js`),
+> and at publish is moved onto **archive.org** — either downloaded and re-uploaded
+> as an archive.org item via the admin's archive.org S3 keys (set in the admin
+> panel; from `archive.org/account/s3.php`), or, with no keys, frozen via the
+> Wayback Machine. Only the resulting archive.org URL rides into the committed
+> JSONL, so the repo stays plaintext + auditable and no base64 is ever committed.
+
 n8n workflow (`npj-publish.n8n.json`) — two webhooks that commit to
 `github.com/clovenbradshaw-ctrl/npj` (main). It commits whatever `contentRaw`
 it receives; everything stays plaintext and auditable.

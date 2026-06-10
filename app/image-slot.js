@@ -44,6 +44,15 @@
  *   element marks such srcs with `data-cdn` (Remove clears them) and fires a
  *   bubbling 'image-slot-change' event so hosts that persist HTML can save.
  *
+ * media store (when window.NpjMedia is present — app/media-store.js):
+ *   Dropping or browsing to a LOCAL file uploads it to the configured media
+ *   store (the Matrix homeserver) and writes the returned https URL into `src`
+ *   exactly like an archive.org link — so local drops are durable, never base64,
+ *   and never ride image bytes into a commit. The NPJ publish step then moves
+ *   those media-store images onto archive.org. Without a media store (e.g. a
+ *   logged-out standalone embed) a local drop falls back to a session-only
+ *   data-URL preview that shows but does not persist or publish.
+ *
  * Size and layout come from ordinary CSS on the element — width/height
  * inline or from a parent grid — so it composes with any layout.
  *
@@ -167,6 +176,25 @@
     }
   }
 
+  // Same downscale as toDataUrl, but yields a Blob for upload to a media store —
+  // smaller than a data URL, and the bytes go straight onto the wire.
+  async function toBlob(file, targetW) {
+    const bitmap = await createImageBitmap(file);
+    try {
+      const cap = Math.min(MAX_DIM, Math.max(1, Math.round(targetW * 2)) || MAX_DIM);
+      const scale = Math.min(1, cap / Math.max(bitmap.width, bitmap.height));
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      return await new Promise((res, rej) =>
+        canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/webp', 0.85));
+    } finally {
+      bitmap.close && bitmap.close();
+    }
+  }
+
   // ── Custom element ──────────────────────────────────────────────────────
   const stylesheet =
     ':host{display:inline-block;position:relative;vertical-align:top;' +
@@ -271,6 +299,7 @@
       this._input = root.querySelector('input');
       this._depth = 0;
       this._gen = 0;
+      this._triedAuth = null;
       this._view = { s: 1, x: 0, y: 0 };
       this._subFn = () => this._render();
       // Shadow-DOM listeners live with the shadow DOM — bound once here so
@@ -303,6 +332,15 @@
       // naturalWidth/Height aren't known until load — re-apply so the cover
       // baseline is computed from real dimensions, not the 100%×100% fallback.
       this._img.addEventListener('load', () => this._applyView());
+      // Authenticated-media homeservers refuse an unauthenticated <img> GET; if a
+      // media-store URL fails to load, swap in a token-fetched blob: URL once.
+      this._img.addEventListener('error', () => {
+        const src = this._img.getAttribute('src');
+        const media = window.NpjMedia;
+        if (!src || this._triedAuth === src || !media || !media.isStoreUrl || !media.isStoreUrl(src)) return;
+        this._triedAuth = src;
+        media.resolveDisplay(src).then((u) => { if (u && u !== src) { this._img.src = u; this._ghost.src = u; } }).catch(() => {});
+      });
       // Gated on editable + fit=cover so share links and contain/fill slots
       // stay static.
       this.addEventListener('dblclick', (e) => {
@@ -498,10 +536,22 @@
     ingestFile(file) { return this._ingest(file); }
     ingestUrl(url) { return this._ingestUrl(url); }
 
-    // A remote (archive.org) image rides the `src` ATTRIBUTE — light DOM, so
-    // hosts that persist innerHTML (drafts, publish) carry it — never the
-    // sidecar. data-cdn marks it as slot-set so Remove can tell it apart from
-    // an author-written src; 'image-slot-change' lets the host save the HTML.
+    // Point the slot at a durable remote URL (an archive.org link or a media
+    // store upload): it rides the `src` ATTRIBUTE — light DOM, so hosts that
+    // persist innerHTML (drafts, publish) carry it — never the sidecar. data-cdn
+    // marks it slot-set so Remove can tell it apart from an author-written src;
+    // 'image-slot-change' lets the host save the HTML.
+    _setRemoteSrc(url) {
+      this._exitReframe(false);
+      this._local = null;
+      if (this.id) setSlot(this.id, null); // the sidecar copy (if any) yields to the remote src
+      this.setAttribute('data-cdn', '');
+      this.setAttribute('src', url); // attributeChangedCallback re-renders
+      this._announce(url);
+    }
+
+    // An archive.org link drop/paste resolves to a direct image URL, then rides
+    // `src` via _setRemoteSrc.
     async _ingestUrl(raw) {
       const cdn = window.NpjArchiveCDN;
       if (!cdn) return;
@@ -515,12 +565,7 @@
       try {
         const url = await cdn.resolve(raw);
         if (gen !== this._gen) return;
-        this._exitReframe(false);
-        this._local = null;
-        if (this.id) setSlot(this.id, null); // the sidecar copy (if any) yields to the CDN src
-        this.setAttribute('data-cdn', '');
-        this.setAttribute('src', url); // attributeChangedCallback re-renders
-        this._announce(url);
+        this._setRemoteSrc(url);
       } catch (err) {
         if (gen !== this._gen) return;
         this._render(); // restore the placeholder caption
@@ -547,10 +592,36 @@
         this._setError('Drop a PNG, JPEG, WebP, or AVIF image.');
         return;
       }
-      // toDataUrl can take hundreds of ms on a large photo. A Clear or a
+      // Encoding/upload can take hundreds of ms on a large photo. A Clear or a
       // newer drop during that window would be clobbered when this await
-      // resumes — bump + capture a generation so stale encodes bail.
+      // resumes — bump + capture a generation so stale work bails.
       const gen = ++this._gen;
+      const media = window.NpjMedia;
+      // Preferred path: upload to the media store and ride the durable https URL
+      // in `src` (same as an archive.org link) so it persists in drafts and gets
+      // moved onto archive.org at publish — never base64 bytes in the commit.
+      if (media && media.canUpload && media.canUpload()) {
+        const prevCap = this._cap.textContent;
+        this._cap.textContent = 'Uploading…';
+        try {
+          const w = this.clientWidth || this.offsetWidth || MAX_DIM;
+          const blob = await toBlob(file, w);
+          if (gen !== this._gen) return;
+          const base = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
+          const up = await media.upload(blob, base + '.webp');
+          if (gen !== this._gen) return;
+          this._setRemoteSrc(up.url);
+        } catch (err) {
+          if (gen !== this._gen) return;
+          this._cap.textContent = prevCap;
+          this._render();
+          this._setError((err && err.message) || 'Upload failed.');
+          console.warn('<image-slot> upload failed:', err);
+        }
+        return;
+      }
+      // Fallback (no signed-in media store — e.g. a logged-out standalone embed):
+      // a session-only data-URL preview. It shows, but it does not publish.
       try {
         const w = this.clientWidth || this.offsetWidth || MAX_DIM;
         const url = await toDataUrl(file, w);
@@ -558,7 +629,7 @@
         // Only exit reframe once the new image is in hand — a rejected type
         // or decode failure leaves the in-progress crop untouched.
         this._exitReframe(false);
-        // a slot-set archive.org src would otherwise keep publishing the OLD
+        // a slot-set durable src would otherwise keep publishing the OLD
         // image underneath this local replacement — retire it
         this._dropCdnSrc();
         const val = { u: url, s: 1, x: 0, y: 0 };
@@ -677,7 +748,9 @@
       // The archive-CDN runtime (NPJ newsroom) counts as editable too: there a
       // slot persists through the host document's HTML, not the sidecar.
       const cdn = window.NpjArchiveCDN;
-      const editable = !!(window.omelette && window.omelette.writeFile) || !!cdn;
+      const media = window.NpjMedia;
+      const editable = !!(window.omelette && window.omelette.writeFile) || !!cdn ||
+        !!(media && media.canUpload && media.canUpload());
       this.toggleAttribute('data-editable', editable);
       this._sub.style.display = editable ? '' : 'none';
       const cdnLink = this._sub.querySelector('.cdn');
@@ -690,7 +763,8 @@
       // passes through unchanged.
       let stored = this.id ? getSlot(this.id) : this._local;
       if (stored && stored.u && !/^data:image\//i.test(stored.u) &&
-          !(cdn && cdn.isMediaUrl(stored.u))) stored = null;
+          !(cdn && cdn.isMediaUrl(stored.u)) &&
+          !(media && media.isStoreUrl && media.isStoreUrl(stored.u))) stored = null;
       const srcAttr = this.getAttribute('src') || '';
       this._userUrl = (stored && stored.u) || null;
       const url = this._userUrl || srcAttr;

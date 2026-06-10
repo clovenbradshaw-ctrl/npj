@@ -875,7 +875,12 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
     });
     const archived = (sources || []).filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
-    return { content: c, dek, words, spans: cites.length, missing, srcTotal: (sources || []).length, archived };
+    // images still on the media store get moved onto archive.org at publish
+    const onStore = Array.from(root.querySelectorAll("figure image-slot")).filter(slot => {
+      const s = slot.getAttribute("src");
+      return s && window.NpjMedia && window.NpjMedia.isStoreUrl(s);
+    }).length;
+    return { content: c, dek, words, spans: cites.length, missing, srcTotal: (sources || []).length, archived, mediaToFreeze: onStore };
   }, []);
 
   const [phase, setPhase] = useState("confirm");          // confirm | run
@@ -927,19 +932,35 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // articles/<slug>.jsonl. Every later edit appends to that same file, which
     // makes the log itself the article's complete change history. Authority is
     // re-verified server-side by the webhook.
-    upd(3, { state: "active" });
+    upd(3, { state: "active", detail: flight.mediaToFreeze ? "moving media to archive.org…" : ("→ clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl") });
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     const gen = window.NpjArticles.genesisFromContent(flight.content, { slug, headline: title, actor });
+    // move any media-store images onto archive.org (download + reupload, or the
+    // Wayback fallback), then rebuild the genesis line from the mutated operand
+    // so the committed body hotlinks archive.org — never the media store.
+    let line = gen.line, froze = null;
+    if (window.NpjMedia && window.NpjMedia.freezeArticleMedia) {
+      try {
+        froze = await window.NpjMedia.freezeArticleMedia(gen.operand.body, { slug, title });
+        if (froze && (froze.frozen || froze.failed)) {
+          line = window.NpjArticles.genesisLine(gen.operand, actor);
+          gen.article = window.NpjArticles.foldLog(line).article;
+        }
+      } catch (e) { /* freeze failed wholesale → commit the media-store URLs as-is */ }
+    }
     published.current = gen.article;
+    upd(3, { detail: "→ clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" });
     const token = window.MatrixAuth.token();
     if (!token) return halt(3, "no verified Matrix session", "Sign in with your admin Matrix account to publish.");
     let res;
     try {
-      res = await window.NpjArticles.publishGenesis({ slug, line: gen.line, token, message: "publish: " + slug });
+      res = await window.NpjArticles.publishGenesis({ slug, line, token, message: "publish: " + slug });
     } catch (e) { return halt(3, "webhook unreachable", "Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing was committed."); }
     if (res.status === 401) return halt(3, "rejected — not authorized (401)", "That Matrix account isn't authorized to publish.");
     if (!res.ok) return halt(3, "HTTP " + res.status, "The publish webhook answered " + res.status + " — nothing was committed.");
-    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" });
+    const mediaNote = froze && froze.frozen ? " · " + froze.frozen + " image" + (froze.frozen === 1 ? "" : "s") + " on archive.org" : "";
+    const failNote = froze && froze.failed ? " · " + froze.failed + " image" + (froze.failed === 1 ? "" : "s") + " kept on the media store (archive.org move failed)" : "";
+    upd(3, { state: "done", detail: "committed to clovenbradshaw-ctrl/npj · articles/" + slug + ".jsonl" + mediaNote + failNote });
     // 5 — live once Pages redeploys (≈ a minute after the commit)
     upd(4, { state: "active" }); await tick(400);
     upd(4, { state: "done" });
@@ -988,6 +1009,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Length">{flight.words} words</Row>
             <Row k="Sources">{flight.srcTotal ? flight.srcTotal + " bound · " + flight.archived + " archived" + (flight.srcTotal - flight.archived ? " · " + (flight.srcTotal - flight.archived) + " snapshot-only" : "") : "none"}</Row>
             <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}</Row>
+            {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish{window.NpjMedia && !window.NpjMedia.hasArchiveCreds() ? " (via the Wayback Machine — add archive.org keys in admin to upload directly)" : ""}</Row>}
             {blocked && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px" }}>{blocked}</div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
@@ -1114,7 +1136,9 @@ function htmlToMarkdown(html) {
       // local-only drops have no durable URL and stay out of the .md
       const slot = node.querySelector("image-slot");
       const img = slot && slot.getAttribute("src");
-      if (img && window.NpjArchiveCDN && window.NpjArchiveCDN.isMediaUrl(img))
+      const okImg = img && (window.NpjMedia ? window.NpjMedia.isPublishable(img)
+        : (window.NpjArchiveCDN && window.NpjArchiveCDN.isMediaUrl(img)));
+      if (okImg)
         lines.push("![" + capText.replace(/[\[\]\n]/g, " ").trim() + "](" + img + ")", "");
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
       if (capText) lines.push("*" + capText + "*", "");
