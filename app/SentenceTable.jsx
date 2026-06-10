@@ -151,7 +151,7 @@ function SentenceTable({ api, NR }) {
     React.createElement("div", { style: { margin: "12px 2px 20px", fontFamily: "var(--serif)", fontSize: 12.5, color: NR.muted, lineHeight: 1.6 } },
       React.createElement("div", { style: { fontWeight: 700, color: NR.text, marginBottom: 2 } }, "What the labels mean"),
       React.createElement("span", { style: { color: "#1f8a55", fontWeight: 700 } }, "Grounded"), " — at least one source backs the claim · ",
-      React.createElement("span", { style: { color: "#b5701b", fontWeight: 700 } }, "Needs source"), " — nothing pinned yet, blocks publish · ",
+      React.createElement("span", { style: { color: "#b5701b", fontWeight: 700 } }, "Needs source"), " — nothing pinned yet, warns on publish · ",
       React.createElement("span", { style: { color: "#6b5bd6", fontWeight: 700 } }, "Your voice"), " — opinion or analysis, no source required",
       React.createElement("div", { style: { marginTop: 4 } },
         React.createElement("b", { style: { color: NR.text } }, "Stance"), " (for your voice): ",

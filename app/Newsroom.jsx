@@ -1227,11 +1227,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // 2 — build: every bound span must resolve to a source record AND pin the
     // exact words in that source (you can't cite a whole page)
     upd(1, { state: "active" }); await tick(400);
-    if (flight.missing.length) return halt(1, flight.missing.length + " unresolved · build failed",
-      flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record (" + flight.missing.slice(0, 3).join(", ") + (flight.missing.length > 3 ? "…" : "") + "). Re-bind or remove them, then publish again.");
-    if (flight.unpinned) return halt(1, flight.unpinned + " span" + (flight.unpinned === 1 ? "" : "s") + " not pinned · build failed",
-      flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source but " + (flight.unpinned === 1 ? "doesn't" : "don't") + " pin the exact words in it. Click the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span — Citey can find it — then publish again.");
-    upd(1, { state: "done", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · 0 unresolved · 0 unpinned · build passed ✓" });
+    // Grounding gaps used to fail the build here. The author asked to be warned,
+    // not walled — so unresolved / unpinned spans now pass with a warning and ship.
+    const buildNotes = [];
+    if (flight.missing.length) buildNotes.push(flight.missing.length + " unresolved");
+    if (flight.unpinned) buildNotes.push(flight.unpinned + " unpinned");
+    if (buildNotes.length) upd(1, { state: "warn", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · " + buildNotes.join(" · ") + " · published ungrounded ⚠" });
+    else upd(1, { state: "done", detail: flight.spans + " span" + (flight.spans === 1 ? "" : "s") + " · 0 unresolved · 0 unpinned · build passed ✓" });
     // 3 — archive check, against the wayback machine itself: anything without
     // a recorded snapshot gets a live availability lookup, and upgrades stick
     // so the footnotes below cite the archived copy. Snapshot-only cites fall
@@ -1278,10 +1280,16 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   };
 
   const srcKeys = (sources || []).map(s => s.key);
-  const blocked = !flight.words ? "The draft is empty — there's nothing to publish yet."
-    : flight.missing.length ? flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record — re-bind or remove them before publishing."
-    : flight.unpinned ? flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source without pinning the exact words in it — open the flagged span" + (flight.unpinned === 1 ? "" : "s") + " (⚑) and pin the source-span before publishing."
-    : null;
+  // An empty draft has nothing to ship — that stays a hard wall. Grounding gaps
+  // no longer block the gate: they raise a warning and the author publishes anyway.
+  const blocked = !flight.words ? "The draft is empty — there's nothing to publish yet." : null;
+  const groundWarn = (() => {
+    const parts = [];
+    if (flight.missing.length) parts.push(flight.missing.length + " bound span" + (flight.missing.length === 1 ? " has" : "s have") + " no source record (" + flight.missing.slice(0, 3).join(", ") + (flight.missing.length > 3 ? "…" : "") + ")");
+    if (flight.unpinned) parts.push(flight.unpinned + " bound span" + (flight.unpinned === 1 ? " cites" : "s cite") + " a source without pinning the exact words");
+    if (!parts.length) return null;
+    return parts.join("; ") + ". You can publish anyway — these claims ship ungrounded, not held back.";
+  })();
   const Row = ({ k, children }) => (
     <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
       <span className="np-eyebrow" style={{ color: NR.muted, flex: "0 0 86px" }}>{k}</span>
@@ -1322,6 +1330,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}{flight.unpinned ? " · " + flight.unpinned + " not pinned to source" : ""}</Row>
             {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish (Wayback Machine fallback if direct upload is unavailable)</Row>}
             {blocked && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px" }}>{blocked}</div>}
+            {!blocked && groundWarn && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px", display: "flex", gap: 8 }}><span aria-hidden="true">⚠</span><span>{groundWarn}</span></div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
               <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: blocked ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Publish it</button>
@@ -1336,12 +1345,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                 <span style={{ flex: "0 0 28px", textAlign: "center" }}>
                   {s.state === "done" ? <I.check style={{ fontSize: 18, color: NR.ok }} />
                     : s.state === "fail" ? <I.x style={{ fontSize: 17, color: NR.warn }} />
+                    : s.state === "warn" ? <span style={{ fontSize: 16, color: NR.warn }}>⚠</span>
                     : s.state === "active" ? <Spinner />
                     : <span style={{ fontFamily: "var(--mono)", color: NR.muted }}>{window.NPJ.EO.glyph(s.code)}</span>}
                 </span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontFamily: "var(--cond)", fontSize: 16, color: s.state === "fail" ? NR.warn : NR.text, fontWeight: 600 }}>{s.label}</div>
-                  <div className="np-mono" style={{ fontSize: 10.5, color: s.state === "fail" ? NR.warn : NR.muted, marginTop: 2, overflowWrap: "anywhere" }}>{s.detail}</div>
+                  <div style={{ fontFamily: "var(--cond)", fontSize: 16, color: (s.state === "fail" || s.state === "warn") ? NR.warn : NR.text, fontWeight: 600 }}>{s.label}</div>
+                  <div className="np-mono" style={{ fontSize: 10.5, color: (s.state === "fail" || s.state === "warn") ? NR.warn : NR.muted, marginTop: 2, overflowWrap: "anywhere" }}>{s.detail}</div>
                   {s.sources && s.state !== "wait" && srcKeys.length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 7 }}>
                       {srcKeys.map((k) => <span key={k} className="np-mono fade-in" style={{ fontSize: 9, padding: "1px 5px", border: "1px solid " + NR.line, color: s.state === "done" ? NR.ok : NR.soft }}>{s.state === "done" ? "✓ " : "↻ "}{k.slice(0, 12)}</span>)}
