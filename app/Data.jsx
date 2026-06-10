@@ -189,7 +189,7 @@ function DataExplorer({ onHome, onNewsroom }) {
       <Masthead route="explore" onHome={onHome} onNewsroom={onNewsroom} />
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "36px 22px 70px" }}>
         <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Data explorer</div>
-        <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .9, margin: "0 0 10px" }}>The evidence, before the story.</h1>
+        <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .95, margin: "0 0 10px" }}>The evidence, before the story.</h1>
         <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "60ch", margin: "0 0 12px" }}>
           Every dataset any project has gathered, in one place — searchable, previewable, and citeable from any story across any feed. Archived datasets resolve to a permanent snapshot; the rest are a click away from it.
         </p>

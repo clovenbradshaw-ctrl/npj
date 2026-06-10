@@ -30,7 +30,7 @@ function StandardsPage({ onHome, onNewsroom, onSubmit }) {
       <div style={{ background: "var(--ink)", color: "var(--paper)" }}>
         <div style={{ maxWidth: 920, margin: "0 auto", padding: "46px 22px 40px" }}>
           <div className="np-eyebrow" style={{ color: "var(--yellow)", marginBottom: 14 }}>Who we are</div>
-          <h1 style={{ fontFamily: "var(--display)", fontSize: 72, lineHeight: .9, margin: "0 0 18px" }}>Our process.<br/>Our standards.</h1>
+          <h1 style={{ fontFamily: "var(--display)", fontSize: 72, lineHeight: .95, margin: "0 0 18px" }}>Our process.<br/>Our standards.</h1>
           <p style={{ fontFamily: "var(--serif)", fontSize: 21, lineHeight: 1.45, maxWidth: "44ch", color: "var(--paper)", opacity: .92, margin: 0 }}>
             Nashville Peoples' Journalism is community-made, community-backed, and built so you never have to take our word for it. Here is exactly how the work happens — and the line we hold while doing it.
           </p>

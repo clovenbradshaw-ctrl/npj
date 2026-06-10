@@ -393,6 +393,9 @@ a { color: inherit; }
   .npj-lead-h { font-size: 42px !important; }
   .npj-empty-h { font-size: 40px !important; }
 
+  /* article reader hero — keeps the big headline inside the column on phones */
+  .npj-article-h { font-size: 52px !important; }
+
   /* submit */
   .npj-two { grid-template-columns: 1fr !important; }
   .npj-feature-row { flex-direction: column !important; gap: 18px !important; }
@@ -404,6 +407,7 @@ a { color: inherit; }
 
 @media (max-width: 460px) {
   .npj-lead-h, .npj-empty-h, .npj-submit-h { font-size: 32px !important; }
+  .npj-article-h { font-size: 36px !important; }
   .npj-logo { height: 62px !important; }
   .npj-taglines > div { font-size: 16px !important; }
 }
