@@ -300,7 +300,7 @@ function Composer({ user, session, onSignOut }) {
         <div style={{ marginTop: 22, borderTop: "1.5px solid var(--rule)", paddingTop: 14, display: "flex", gap: 10, alignItems: "flex-start" }}>
           <I.shield style={{ fontSize: 18, color: "var(--ink-soft)", flex: "0 0 auto", marginTop: 1 }} />
           <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>
-            Highlight a fact and hit <strong>⊥ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source fails the build.
+            Highlight a fact and hit <strong>⊥ Source</strong> to bind it to evidence. On publish, each bound claim is frozen to an archive.org snapshot — and a claim with no source publishes with a warning, not a wall.
           </p>
         </div>
       </div>
@@ -334,7 +334,7 @@ function ComposerSent({ user, feed, title, collabs }) {
       <div style={{ width: 64, height: 64, borderRadius: "50%", background: "var(--verified)", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", margin: "0 auto 18px" }}><I.check style={{ fontSize: 34 }} /></div>
       <h1 style={{ fontFamily: "var(--display)", fontSize: 46, lineHeight: .95, margin: "0 0 12px" }}>Draft saved to {fname}.</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "46ch", margin: "0 auto 18px" }}>
-        “{title || "Untitled"}” is open for collaborative editing. {collabs.length - 1} collaborator{collabs.length - 1 !== 1 ? "s were" : " was"} notified and can write alongside you. Nothing publishes until a source is bound to every claim.
+        “{title || "Untitled"}” is open for collaborative editing. {collabs.length - 1} collaborator{collabs.length - 1 !== 1 ? "s were" : " was"} notified and can write alongside you. Claims without a bound source publish with a warning, not a block.
       </p>
       <p className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", maxWidth: "52ch", margin: "0 auto 18px", lineHeight: 1.5 }}>
         The draft itself is saved in this browser and backed up to your Matrix account — sign out or switch devices and it's under Documents.
