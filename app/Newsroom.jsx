@@ -424,6 +424,34 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (snap) rec.archive_url = snap;
     setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
   };
+  // Manual HTML snapshot: the auto Wayback capture often won't load, so let the
+  // author attach a page they saved themselves (browser → Save As → HTML). It's
+  // stored as a self-hosted .html file (archive.org when keys are set, else the
+  // Matrix media store) and becomes the source's snapshot — a link that loads.
+  const attachSnapshot = async (key, file) => {
+    if (!file) return;
+    const rec = window.NPJ.SOURCES[key];
+    if (!rec) return;
+    setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: true, err: null } : x));
+    try {
+      if (!(window.NpjMedia && window.NpjMedia.storeSnapshotHtml)) throw new Error("Media store unavailable.");
+      let host = "source";
+      try { host = new URL(rec.original_url || "http://source").hostname.replace(/^www\./, "") || "source"; } catch (e) {}
+      const safe = host.replace(/[^A-Za-z0-9.-]/g, "-") || "source";
+      const ext = (String(file.name || "").match(/\.(html?|mhtml)$/i) || [, "html"])[1].toLowerCase();
+      const url = await window.NpjMedia.storeSnapshotHtml(file, {
+        identifier: "npj-snap-" + key.replace(/[^A-Za-z0-9._-]/g, "-"),
+        filename: safe + "-snapshot." + ext,
+        title: (rec.title || "Source") + " — saved snapshot",
+        sourceUrl: rec.original_url || ""
+      });
+      rec.archive_url = url;
+      setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: true, err: null } : x));
+      scheduleSave();
+    } catch (e) {
+      setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, err: (e && e.message) || "Couldn't store the HTML snapshot." } : x));
+    }
+  };
   const addFiles = (fileList) => {
     const files = Array.from(fileList || []); if (!files.length) return;
     const made = files.map((f, i) => {
@@ -697,7 +725,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
               <I.doc style={{ fontSize: 15 }} /> Upload documents
             </label>
-            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual: select the exact words, then bind a source — or hit <b>Cite span</b> on a source and grab the words next. One source can back several spans.</div>
+            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual: select the exact words, then bind a source — or hit <b>Cite span</b> on a source and grab the words next. One source can back several spans. If the auto snapshot won't load, save the page yourself (browser → Save As) and attach it with <b>HTML</b> on the source.</div>
           </div>
 
           {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6, padding: "0 2px" }}>No sources yet. Ingest a URL or upload a document, then highlight a claim and bind it.</div>}
@@ -721,7 +749,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {!s.archived && !s.snapshotting && <button onClick={() => setArchiveTarget(s)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Archive</button>}
+                  {!s.snapshotting && <label title={s.archived ? "Replace the snapshot with an HTML page you saved yourself" : "Attach an HTML page you saved yourself (browser → Save As) — stored as a self-hosted snapshot that loads"}
+                    className="np-cond" style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>
+                    <input type="file" accept=".html,.htm,.mhtml,text/html" style={{ display: "none" }} onChange={e => { const f = e.target.files && e.target.files[0]; e.target.value = ""; attachSnapshot(s.key, f); }} />
+                    <I.doc style={{ fontSize: 12 }} /> {s.archived ? "Replace HTML" : "HTML"}
+                  </label>}
                 </div>
+                {s.err && <div className="np-mono" style={{ fontSize: 9.5, color: NR.warn, marginTop: 6, lineHeight: 1.4 }}>{s.err}</div>}
               </div>
             );
           })}

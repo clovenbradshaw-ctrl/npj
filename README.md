@@ -83,6 +83,17 @@ claim and bind a source to **that span**. One source can back **several spans** 
 the same piece (shared citation number). Sources are snapshotted to archive.org;
 a claim that points nowhere fails the publish build.
 
+**When the auto snapshot won't load, attach the page yourself.** The Wayback
+"Save Page Now" capture is best-effort — captures are sometimes rate-limited,
+toolbar-wrapped or broken by the page's own JavaScript, so the snapshot link
+won't reliably load. Each source card has an **HTML** button: save the page in
+your browser (*Save As → "Web Page, HTML Only"* or *Complete*) and attach the
+file. It's stored as a plain, self-hosted `.html` document — on archive.org when
+the admin's S3 keys are set (`app/media-store.js`, set in the admin panel), or on
+the Matrix media store otherwise — and that durable URL becomes the source's
+snapshot: a link that just loads. **Replace HTML** swaps a broken auto snapshot
+for one you saved.
+
 **Pasting is plain by design.** Text copied in from anywhere — web pages, docs,
 PDFs — loses its original formatting at the door: the editors rebuild the
 clipboard's plain text into clean paragraphs (blank line = new ¶), so stray

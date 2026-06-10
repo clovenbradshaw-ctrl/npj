@@ -140,9 +140,11 @@
   // header values must be latin1-safe — strip anything fetch would reject.
   const hdrSafe = (s) => String(s || "").replace(/[^\x20-\x7E]/g, "").slice(0, 200);
 
-  /* uploadToArchive(blob, {identifier, filename, title}) → Promise<archive.org URL>.
-     PUTs one file into an archive.org item (auto-created on first PUT). The item
-     is keyed per article so re-publishing the same piece reuses it. */
+  /* uploadToArchive(blob, {identifier, filename, title, mediatype, subject}) →
+     Promise<archive.org URL>. PUTs one file into an archive.org item (auto-created
+     on first PUT). The item is keyed per article so re-publishing the same piece
+     reuses it. mediatype/subject default to an image in the npj-media library;
+     source snapshots pass mediatype:"web" + subject:"npj-snapshot". */
   async function uploadToArchive(blob, opts) {
     const creds = getArchiveCreds();
     if (!creds) throw new Error("No archive.org keys set.");
@@ -150,8 +152,8 @@
     const headers = {
       "authorization": "LOW " + creds.access + ":" + creds.secret,
       "x-amz-auto-make-bucket": "1",
-      "x-archive-meta-mediatype": "image",
-      "x-archive-meta-subject": "npj-media",
+      "x-archive-meta-mediatype": opts.mediatype || "image",
+      "x-archive-meta-subject": opts.subject || "npj-media",
       "Content-Type": (blob && blob.type) || "application/octet-stream"
     };
     // Only pin a collection if the admin set one — an unauthorized collection
@@ -178,6 +180,35 @@
     const snap = await c.ensureSnapshot(url).catch(() => null);
     if (!snap) return null;
     return (c.waybackRaw && c.waybackRaw(snap)) || snap;
+  }
+
+  /* ---- manual source snapshots: store a saved HTML page ----
+     Wayback's Save Page Now captures often won't load (rate-limited, toolbar-
+     wrapped, JS-broken). The reliable alternative is to save the page yourself
+     (browser → Save As → "Web Page, HTML only" or "Complete") and store that
+     file as a plain, self-hosted HTML document.
+
+     storeSnapshotHtml(blob, {identifier, filename, title, sourceUrl}) →
+     Promise<URL>. Prefers archive.org (S3 keys): the file lands as a real
+     `text/html` item and serves inline at a stable /download/ URL that just
+     loads. With no keys but a Matrix session, it falls back to the homeserver's
+     media store (a durable https URL too). Rejects with a human-readable
+     message if neither path is available. */
+  async function storeSnapshotHtml(blob, opts) {
+    const o = opts || {};
+    const file = o.filename || "snapshot.html";
+    if (hasArchiveCreds()) {
+      const id = o.identifier || ("npj-snap-" + Date.now().toString(36));
+      return await uploadToArchive(blob, {
+        identifier: id, filename: file, title: o.title || "NPJ source snapshot",
+        mediatype: "web", subject: "npj-snapshot"
+      });
+    }
+    if (canUpload()) {
+      const up = await upload(blob, file);
+      return up.url;
+    }
+    throw new Error("Set archive.org keys in the admin panel, or sign in with Matrix, to store an HTML snapshot.");
   }
 
   // one image → archive.org: download+reupload when keys exist, else Wayback.
@@ -217,6 +248,6 @@
     canUpload, isStoreUrl, isPublishable, mxcToHttp,
     upload, fetchBytes, resolveDisplay,
     getArchiveCreds, setArchiveCreds, hasArchiveCreds, uploadToArchive,
-    freeze, freezeArticleMedia
+    freeze, freezeArticleMedia, storeSnapshotHtml
   };
 })();
