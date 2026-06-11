@@ -5,11 +5,21 @@
    "npj:datasets" — useArchiveData() below re-renders on that event. */
 
 /* ============ archive.org consent modal (Permanence/Privacy/Rights) ============ */
-function ArchiveModal({ items, onClose, onDone }) {
+function ArchiveModal({ items, onClose, onDone, srcKey }) {
   const [consent, setConsent] = useState({ permanence: false, privacy: false, rights: false });
   const [phase, setPhase] = useState("consent"); // consent | running | done
   const [i, setI] = useState(0);
-  const all = consent.permanence && consent.privacy && consent.rights;
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [, bumpReview] = useState(0);
+  const PII = window.NpjPII;
+  const rec = srcKey ? (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) : null;
+  // A source Citey can act on (an upload, or anything with text / opaque bytes)
+  // is gated behind his PII review — the Privacy consent is SATISFIED BY that
+  // review, not a self-check box. Other items keep the manual affirmation.
+  const gateable = !!(rec && PII && (/^doc-/.test(srcKey) || rec.binary || String(rec.text || "").trim()));
+  const reviewed = gateable ? PII.gateClear(rec) : false;
+  const privacyOk = gateable ? reviewed : consent.privacy;
+  const all = consent.permanence && privacyOk && consent.rights;
   const list = items && items.length ? items : [{ name: "this source" }];
 
   useEffect(() => {
@@ -28,6 +38,7 @@ function ArchiveModal({ items, onClose, onDone }) {
   );
 
   return (
+    <React.Fragment>
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.7)", zIndex: 5000, display: "flex", alignItems: "center", justifyContent: "center", padding: 22 }} className="fade-in">
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(560px,96vw)", background: "var(--card)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "13px 18px", borderBottom: "2px solid var(--ink)", background: "var(--yellow)" }}>
@@ -44,10 +55,27 @@ function ArchiveModal({ items, onClose, onDone }) {
               You're about to archive <strong style={{ color: "var(--ink)" }}>{list.length} source{list.length !== 1 ? "s" : ""}</strong> to <em>archive.org</em>. Each becomes part of the permanent public record, and every citation that points to it will resolve to its archived snapshot.
             </p>
             <div style={{ padding: "10px 12px", background: "color-mix(in srgb, var(--review) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--review) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, color: "var(--review)", marginBottom: 8 }}>
-              <strong style={{ fontWeight: 700 }}>No redactions. </strong>Archiving is all-or-nothing. If a source contains anything that shouldn't be public, redact the original and re-upload before publishing.
+              <strong style={{ fontWeight: 700 }}>Permanent &amp; public. </strong>An archived source can't be edited or deleted later. Citey reviews each upload for PII first and <strong>hard-redacts</strong> anything you don't want public — there's no taking it back once it's on archive.org.
             </div>
             <Chk k="permanence" label="Permanence">This is uploaded permanently to the Internet Archive and cannot be deleted.</Chk>
-            <Chk k="privacy" label="Privacy">I have reviewed each file and confirm it contains no private information that should not be public.</Chk>
+            {gateable ? (
+              <div style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--rule)", alignItems: "flex-start" }}>
+                <span style={{ marginTop: 1, color: reviewed ? "var(--verified)" : "var(--review)", fontSize: 16, width: 16, textAlign: "center", flex: "0 0 auto" }}>{reviewed ? <I.check /> : "⚑"}</span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>Privacy — Citey's PII review. </span>
+                  <span style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.45, color: "var(--ink-soft)" }}>
+                    {reviewed
+                      ? <React.Fragment>Reviewed — {(rec.piiReview.redactions || []).length} redacted, {(rec.piiReview.affirmations || []).length} kept on purpose.</React.Fragment>
+                      : "Citey has to scan this, and you have to redact or affirm each flagged span, before it can be archived."}
+                  </span>
+                  <div style={{ marginTop: 6 }}>
+                    <button className="btn btn-sm btn-primary" onClick={() => setReviewOpen(true)} style={reviewed ? { background: "transparent", color: "var(--ink)", borderColor: "var(--ink)" } : {}}>{reviewed ? "Re-open review" : "Review with Citey"}</button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Chk k="privacy" label="Privacy">I have reviewed this source and confirm it contains no private information that should not be public.</Chk>
+            )}
             <Chk k="rights" label="Rights">I have the right to publish this material under <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener" style={{ color: "var(--data)", textDecoration: "underline" }}>CC-BY-4.0</a>.</Chk>
           </React.Fragment>}
 
@@ -80,6 +108,10 @@ function ArchiveModal({ items, onClose, onDone }) {
         </div>
       </div>
     </div>
+    {reviewOpen && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={srcKey}
+      onClose={() => { setReviewOpen(false); bumpReview(v => v + 1); }}
+      onDone={() => { setReviewOpen(false); bumpReview(v => v + 1); }} />}
+    </React.Fragment>
   );
 }
 
@@ -322,7 +354,7 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
           </React.Fragment>
         )}
       </div>
-      {archiveTarget && <ArchiveModal items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}
+      {archiveTarget && <ArchiveModal srcKey={archiveTarget.id} items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}
     </div>
   );
 }

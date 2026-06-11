@@ -54,6 +54,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
+  const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
   const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
   const [dek, setDek] = useState("");                // explicit Subtitle field (mirrors .nr-dek)
@@ -680,15 +681,51 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (snap) rec.archive_url = snap;
     setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
   };
+  // ---- PII review (Citey's archive gate) ----
+  // Text we can actually read in-browser → Citey scans it. Binary types (pdf,
+  // image, docx) carry no extractable text without a build step, so Citey's
+  // review offers paste-or-affirm instead (rec.binary flags them).
+  const TEXT_RE = /\.(txt|text|md|markdown|csv|tsv|log|json|xml|html?|rtf|srt|vtt|ini|ya?ml)$/i;
+  const isTextFile = (f) => (f && /^text\//.test(f.type || "")) || /(json|xml|csv|html|markdown|ya?ml)/.test((f && f.type) || "") || TEXT_RE.test((f && f.name) || "");
+  // Stamp a pending review envelope on a source so the gate shows until the
+  // author has been through Citey. (The modal recomputes findings live.)
+  const scanSource = (key) => {
+    const rec = window.NPJ.SOURCES[key]; if (!rec || !window.NpjPII) return;
+    const findings = rec.text && rec.text.trim() ? (window.NpjPII.detect(rec.text) || []) : [];
+    if (!rec.piiReview) rec.piiReview = { state: "pending", basis: window.NpjPII.BASIS, scannedAt: new Date().toISOString(), redactions: [], affirmations: [] };
+    rec.piiReview.findings = findings.length; rec.piiReview.scannedAt = new Date().toISOString();
+  };
+  // A source bound for archive.org that Citey can act on (an upload, or anything
+  // with text/opaque bytes) must clear the review before it's archived.
+  const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
+  const needsPiiReview = (key) => piiGated(key) && window.NpjPII && !window.NpjPII.gateClear(window.NPJ.SOURCES[key]);
+  const piiReviewState = (key) => window.NpjPII ? window.NpjPII.reviewState(window.NPJ.SOURCES[key]) : "unscanned";
+  // Archive: gated behind Citey's PII review. Pending → open the review first,
+  // remembering to resume the archive consent once it clears.
+  const redactNext = useRef(null);
+  const tryArchive = (s) => { if (needsPiiReview(s.key)) { redactNext.current = s; setRedactTarget(s.key); } else setArchiveTarget(s); };
+
   const addFiles = (fileList) => {
     const files = Array.from(fileList || []); if (!files.length) return;
     const made = files.map((f, i) => {
       const key = "doc-" + Date.now().toString(36) + i;
-      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: "uploaded document", title: f.name, original_url: "", archive_url: "", retrieved: new Date().toISOString().slice(0, 10) };
-      return { key, archived: false, snapshotting: true };
+      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: "uploaded document", title: f.name, original_url: "", archive_url: "", retrieved: new Date().toISOString().slice(0, 10), text: "", binary: !isTextFile(f) };
+      return { key, archived: false, snapshotting: true, file: f };
     });
     setSources(s => [...made, ...s]);
-    setTimeout(() => setSources(s => s.map(x => made.find(m => m.key === x.key) ? { ...x, snapshotting: false } : x)), 1100);
+    // read text out of text-like files so Citey can scan them, then stamp a
+    // pending review and open Citey on the first upload (deferrable via "Later").
+    Promise.all(made.map(m => new Promise(resolve => {
+      if (!isTextFile(m.file)) return resolve();
+      const r = new FileReader();
+      r.onload = () => { const rec = window.NPJ.SOURCES[m.key]; if (rec) { rec.text = String(r.result || ""); rec.binary = false; } resolve(); };
+      r.onerror = () => resolve();
+      try { r.readAsText(m.file); } catch (e) { resolve(); }
+    }))).then(() => {
+      made.forEach(m => scanSource(m.key));
+      setSources(s => s.map(x => made.find(m => m.key === x.key) ? { ...x, snapshotting: false } : x));
+      if (made[0]) setRedactTarget(made[0].key);
+    });
   };
 
   // ---- Matrix: projects (shared rooms) + invites ----
@@ -994,6 +1031,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key, outlet: "" };
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
             const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
+            const reviewSt = piiGated(s.key) ? piiReviewState(s.key) : null;
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
@@ -1001,6 +1039,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   {s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
                     : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
+                  {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Citey reviews this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
+                  {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="Citey's PII review is done — cleared to archive">✓ PII reviewed</span>}
                   <span style={{ flex: 1 }} />
                   {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: unpinned ? NR.warn : NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}{unpinned ? " · " + unpinned + " ⚑" : ""}</span>}
                 </div>
@@ -1010,7 +1050,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
-                  {!s.archived && !s.snapshotting && <button onClick={() => setArchiveTarget(s)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>Archive</button>}
+                  {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Citey reviews this for PII first, then archives" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review &amp; archive" : "Archive"}</button>}
                 </div>
               </div>
             );
@@ -1121,7 +1161,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       )}
 
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
-      {archiveTarget && <ArchiveModal items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
+      {redactTarget && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={redactTarget}
+        onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
+        onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
+      {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}

@@ -28,6 +28,8 @@ founding admin curates the site and grows the network from there.
 | `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
+| `app/pii.js` | the **pii-v1 pack** — mechanical PII recognizers (regex + checksum + context, **no model**); detects candidate spans and hard-redacts them |
+| `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
@@ -191,6 +193,37 @@ rides the article's EO genesis event as `dek`.
 **The filename is the author's call.** It follows the headline by default,
 but the publish gate has a rename field — a custom name sticks with the
 draft and the committed file is named accordingly.
+
+## Citey reviews every source for PII before it's archived
+
+archive.org is permanent, public and all-or-nothing — once a source is up it
+can't be edited or taken down. So **Citey's first real job** is a redaction gate
+on the way there. Upload a document and Citey opens a review (you can defer it,
+but a source can't be archived until you've been through it):
+
+- **He scans it mechanically.** `app/pii.js` is a small, Presidio-shaped
+  `pii-v1` recognizer pack — regexes, checksums (Luhn for cards, the SSN
+  never-issued ranges, IBAN mod-97) and context words — surfacing emails, phones,
+  SSNs, cards, IBANs, IPs, street addresses, dates of birth, government IDs and
+  names. It favours **recall over precision** (missing PII costs more than
+  over-flagging) and, like the rest of Citey, runs with **no model** — every
+  finding carries a `basis` (which recognizer fired, and why).
+- **You decide each span.** Hard-**redact** it, or **keep** it public on purpose
+  (affirm). Citey can also redact any selection you make, or let you edit the
+  whole document — broad editing, not just toggling his findings.
+- **Redaction is hard.** `NpjPII.redactText` destroys the characters in place
+  (an offset-preserving █ block, so any pinned-citation offsets into the source
+  stay valid). What gets archived no longer contains them — there's no taking it
+  back, which is the whole point.
+- **The act is auditable.** Each redaction and affirmation is logged on the
+  source record with its `basis` and offsets, so you can prove what was withheld
+  without un-withholding it. The archive consent now checks that **`✓ PII
+  reviewed`** gate instead of a self-ticked "no private info" box.
+
+For a file type Citey can't read inside the browser (PDF, image, `.docx`), the
+review offers **paste-or-affirm**: paste the text for a real scan, or vouch that
+you've checked it. He's a first pass that surfaces candidates — **never a
+guarantee** — so for source-identifying material the human stays the decider.
 
 ## Images ride archive.org — it's the media CDN
 
