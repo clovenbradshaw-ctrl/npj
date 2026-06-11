@@ -32,7 +32,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
-  const [view, setView] = useState("prose");          // prose editor | sentence table — same draft
+  const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) — same draft
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
   const restored = useRef(false);                      // gate autosave until the first restore lands
@@ -566,7 +566,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     sources: () => sources.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} })),
     allCitations: () => window.NpjCitations ? window.NpjCitations.all() : [],
     citationsFor: (span) => window.NpjCitations ? window.NpjCitations.citationsFor(span) : [],
-    usageCount: (citeId) => window.NpjCitations ? window.NpjCitations.usage(citeId, ed.current).length : 0
+    usageCount: (citeId) => window.NpjCitations ? window.NpjCitations.usage(citeId, ed.current).length : 0,
+    // ---- the grounding workspace's direct-mint path (no popover): the author
+    // grabbed the exact words in the source reader — mint the reusable record
+    // (multi-part spans supported) and attach it to this sentence's claim span.
+    groundRow: (row, srcKey, quote, loc, spans) => {
+      const q = String(quote || "").trim(); if (!q || !srcKey) return false;
+      const span = rowSpanFor(row, srcKey, false); if (!span) return false;
+      if (window.NpjCitations) {
+        const id = window.NpjCitations.mint({ srcKey, quote: q, loc: loc || null, spans: spans || null });
+        window.NpjCitations.attach(span, id);
+      } else {
+        span.setAttribute("data-quote", q); span.classList.remove("needs-quote");
+      }
+      span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
+      setRev(v => v + 1); scheduleSave();
+      if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+      return true;
+    },
+    sourceRec: (key) => (window.NPJ.SOURCES || {})[key] || {},
+    // the reader can't show text it doesn't have — pasted passages stick to the
+    // source record (append-only, so existing citation offsets stay valid)
+    seedSourceText: (key, text) => {
+      const rec = window.NPJ.SOURCES[key]; const t = String(text || "").trim();
+      if (!rec || !t) return;
+      rec.text = (rec.text ? rec.text + "\n" : "") + t;
+      setRev(v => v + 1);
+    }
   };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
@@ -687,10 +713,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
             what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
         </div>
-        {/* prose / table — two views of the same draft */}
+        {/* the grounding workspace — four pivoting views of the same draft */}
         <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden" }}>
-          {[["prose", "Prose"], ["table", "Table"]].map(([k, label]) => (
-            <button key={k} onClick={() => setView(k)} className="np-cond" title={k === "table" ? "Every sentence as a row to ground" : "The prose editor"} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
+          {[["prose", "Prose", "The prose editor"],
+            ["grounding", "Grounding", "Every sentence as a row to ground"],
+            ["citations", "Citations", "The registry of reusable citation records"],
+            ["sources", "Sources", "Read the source documents and grab the words that back a claim"]].map(([k, label, ti]) => (
+            <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
         <span style={{ flex: 1 }} />
@@ -864,18 +893,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* editor — the draft renders as a bordered page on the canvas; the page
             (not the canvas) is the contentEditable, so the document border wraps
             banner, headline and body as one sheet */}
-        {/* the editor stays MOUNTED even in table view (display:none) so its DOM,
-            ranges and autosave stay valid — the table mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} style={{ display: (view === "table") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        {/* the editor stays MOUNTED even in the workspace views (display:none) so its
+            DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
+        <div className="np-scroll" ref={scroller} style={{ display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           <div className={"md-preview nr-page" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
         </div>
-        {view === "table" && !(isMobile && mTab !== "write") && (
-          <div className="np-scroll" style={{ flex: isMobile ? 1 : undefined, overflowY: "auto", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
-            <window.SentenceTable api={tableApi} NR={NR} />
+        {view !== "prose" && !(isMobile && mTab !== "write") && (
+          <div style={{ flex: isMobile ? 1 : undefined, background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0, overflow: "hidden" }}>
+            <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />
           </div>
         )}
 
