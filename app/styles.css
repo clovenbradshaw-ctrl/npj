@@ -413,21 +413,21 @@ a { color: inherit; }
   .npj-hide-sm { display: none !important; }
 
   /* masthead */
-  .npj-utility { flex-wrap: wrap !important; padding: 6px 14px !important; gap: 4px 14px !important; }
-  .npj-wordmark { padding: 12px 16px !important; gap: 12px !important; flex-wrap: wrap !important; }
+  .npj-masthead { padding: 12px 16px 16px !important; }
   .npj-logo { height: 76px !important; }
-  .npj-taglines { border-right: 0 !important; padding-right: 0 !important; text-align: left !important; }
-  .npj-taglines > div { font-size: 19px !important; }
-  .npj-colnav { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-  .npj-colnav > div:first-child { flex-wrap: nowrap !important; }
-  .npj-colnav button { white-space: nowrap; font-size: 13px !important; padding: 9px 13px !important; }
+  .npj-nav-inner { padding: 0 8px !important; }
+  .npj-nav-inner button { padding: 0 14px !important; font-size: 14px !important; }
   .npj-search { display: none !important; }
+  .npj-strip-inner { padding: 8px 16px !important; }
+  .npj-footer-inner { padding: 18px 16px !important; }
 
   /* front page */
-  .npj-lineup { grid-template-columns: 1fr !important; }
-  .npj-lineup > section { border-right: 0 !important; padding-right: 0 !important; }
-  .npj-lineup > aside { padding-left: 0 !important; margin-top: 22px; border-top: 1.5px solid var(--ink); padding-top: 16px; }
-  .npj-lead-h { font-size: 42px !important; }
+  .npj-cover { grid-template-columns: 1fr !important; gap: 24px !important; }
+  .npj-cover-h { font-size: 52px !important; }
+  .npj-row2 { grid-template-columns: 1fr !important; }
+  .npj-row2 > div { border-right: none !important; padding: 20px 0 !important; border-top: 1px solid var(--rule); }
+  .npj-more-row { grid-template-columns: 100px 1fr !important; }
+  .npj-more-row > span:last-child { display: none !important; }
   .npj-empty-h { font-size: 40px !important; }
 
   /* article reader hero — keeps the big headline inside the column on phones */
@@ -443,10 +443,9 @@ a { color: inherit; }
 }
 
 @media (max-width: 460px) {
-  .npj-lead-h, .npj-empty-h, .npj-submit-h { font-size: 32px !important; }
+  .npj-cover-h, .npj-empty-h, .npj-submit-h { font-size: 32px !important; }
   .npj-article-h { font-size: 36px !important; }
   .npj-logo { height: 62px !important; }
-  .npj-taglines > div { font-size: 16px !important; }
 }
 
 /* ============ grounding workspace (GroundingWorkspace.jsx) ============ */
