@@ -254,26 +254,37 @@ a { color: inherit; }
 .newsroom.nr-light {
   /* a real depth ramp instead of one flat beige: the canvas recedes so the
      white document sheet floats, rails/panels step up toward it, and the
-     fields you actually write in read as clean paper */
-  --nr-bg: #ddd5c1;            /* canvas behind the sheet — the deepest tone */
-  --nr-rail: #ece5d3;          /* contents rail + tab/strip chrome */
-  --nr-panel: #f2ecdf;         /* side panels — a step brighter than the rail */
+     fields you actually write in read as clean paper. Secondary tones and
+     hairlines are tuned so every text/UI pairing clears WCAG AA. */
+  --nr-bg: #e0d8c5;            /* canvas behind the sheet — the deepest tone */
+  --nr-rail: #efe9dc;          /* contents rail + tab/strip chrome */
+  --nr-panel: #f4efe4;         /* side panels — a step brighter than the rail */
   --nr-field: #fffdf6;         /* inputs + table fields — paper white */
   --nr-page: #fffdf6;          /* the document sheet */
-  --nr-line: rgba(22,20,13,.2);
-  --nr-line-strong: rgba(22,20,13,.44);
-  --nr-text: #16140d;
-  --nr-soft: #45402f;
-  --nr-muted: #6b6450;         /* darker than before so secondary text clears AA */
-  --nr-quote: #45402f;
-  --nr-link: #1f5a86;
-  --nr-code-bg: rgba(22,20,13,.055);
-  --nr-ok: #1c6a45;
-  --nr-warn: #8a5e10;
-  --nr-page-shadow: 5px 5px 0 rgba(22,20,13,.13);
+  --nr-line: rgba(22,20,13,.26);
+  --nr-line-strong: rgba(22,20,13,.5);
+  --nr-text: #16140d;          /* ~12:1 on every surface */
+  --nr-soft: #3f3a2b;          /* ~7:1 — confident secondary text */
+  --nr-muted: #595139;         /* ~4.8:1 on the deep canvas — clears AA */
+  --nr-quote: #3f3a2b;
+  --nr-link: #1a527c;          /* ~5:1 — links stay legible */
+  --nr-code-bg: rgba(22,20,13,.06);
+  --nr-ok: #15663f;            /* ~5.5:1 */
+  --nr-warn: #7e5410;          /* ~5.4:1 */
+  --nr-page-shadow: 5px 5px 0 rgba(22,20,13,.14);
 }
 .newsroom ::selection { background: var(--review); color: #fff; }
 .newsroom .np-scroll::-webkit-scrollbar-thumb { background: var(--nr-line-strong); }
+
+/* top chrome (top bar + format toolbar) sits on a brighter rail surface than
+   the editing canvas, with a defined bottom edge — so the controls read as a
+   clean header band instead of muddy text on the deep canvas (the old "hard to
+   read at the top"). Applies in both themes; light gains the most. */
+.newsroom .nr-chrome { background: var(--nr-rail); }
+.newsroom.nr-light .nr-chrome { border-bottom-color: var(--nr-line-strong) !important; }
+/* Phosphor glyphs inherit text color + size; keep them optically centered in
+   the dense toolbar and never let a slow font swap collapse their box */
+.newsroom i[class*="ph-"] { line-height: 1; }
 
 /* the document page — the draft renders as a bounded sheet centered on the
    canvas, so the document border and the headline read as one artifact:

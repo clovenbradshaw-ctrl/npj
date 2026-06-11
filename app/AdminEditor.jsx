@@ -121,7 +121,7 @@ function AdminEditor() {
                       <MiniBtn onClick={() => setSections(move(layout.sections, i, 1))} title="Move down">↓</MiniBtn>
                       <MiniBtn danger onClick={() => setSections(layout.sections.filter((_, j) => j !== i))} title="Remove">×</MiniBtn>
                     </div>
-                    <button onClick={() => setExpandCol(expandCol === i ? null : i)} style={{ background: "none", border: 0, color: AE.soft, fontFamily: "var(--mono)", fontSize: 10.5, padding: "6px 2px 2px", cursor: "pointer" }}>{expandCol === i ? "▾" : "▸"} who can publish here ({(s.publishers || []).length})</button>
+                    <button onClick={() => setExpandCol(expandCol === i ? null : i)} style={{ background: "none", border: 0, color: AE.soft, fontFamily: "var(--mono)", fontSize: 10.5, padding: "6px 2px 2px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{expandCol === i ? <I.caretDown /> : <I.caretRight />} who can publish here ({(s.publishers || []).length})</button>
                     {expandCol === i && (
                       <div style={{ paddingTop: 4 }}>
                         <div className="np-mono" style={{ fontSize: 9.5, color: "#9fe0b8", marginBottom: 5 }}>admins publish to every column</div>

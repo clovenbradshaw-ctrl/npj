@@ -40,7 +40,7 @@ function EoEvent({ s }) {
     <div style={{ marginTop: 10, borderTop: "1px dashed var(--rule-strong)", paddingTop: 8 }}>
       <button onClick={() => setOpen(o => !o)} className="np-mono" style={{ background: "none", border: 0, padding: 0,
         fontSize: 10.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 5, letterSpacing: ".02em" }}>
-        <span style={{ fontSize: 13 }}>⊨</span> {open ? "hide" : "view"} EO event <span style={{ opacity: .6 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ fontSize: 13 }}>⊨</span> {open ? "hide" : "view"} EO event <span style={{ opacity: .6, display: "inline-flex" }}>{open ? <I.caretDown /> : <I.caretRight />}</span>
       </button>
       {open && (
         <pre className="np-mono fade-in" style={{ margin: "8px 0 0", padding: "9px 10px", background: "var(--ink)", color: "#e9e4d4",
