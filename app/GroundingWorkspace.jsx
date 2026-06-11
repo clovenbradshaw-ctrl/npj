@@ -68,6 +68,28 @@ function matchScore(claim, quote) {
 }
 function clip(s, n) { s = String(s || ""); return s.length > n ? s.slice(0, n) + "…" : s; }
 
+// the sentence's stable identity, drawn small. The id (sn-…) follows the
+// sentence through edits/moves/reloads; the tooltip spells out its provenance.
+function shortId(sid) { return String(sid || "").replace(/^(sn|se)-/, "").slice(0, 8); }
+function provTip(row) {
+  const p = (row && row.provenance) || {};
+  const d = (ms) => { try { return ms ? new Date(ms).toLocaleString() : "—"; } catch (e) { return "—"; } };
+  const lines = ["Stable id " + (row.sid || "?") + " — follows this sentence through edits, moves and reloads, carrying its citations and stance."];
+  lines.push("First imported: " + d(p.firstSeen));
+  lines.push(p.groundedAt ? "First grounded: " + d(p.groundedAt) : "Not yet grounded");
+  if (p.citeIds && p.citeIds.length) lines.push(p.citeIds.length + " citation record" + (p.citeIds.length > 1 ? "s" : "") + " linked");
+  if (p.stance) lines.push("Owned as: " + p.stance);
+  return lines.join("\n");
+}
+function HashChip({ row, NR }) {
+  return (
+    <span className="np-mono" title={provTip(row)}
+      style={{ fontSize: 8.5, letterSpacing: ".03em", color: NR.muted, border: "1px solid " + NR.line, borderRadius: 4, padding: "1px 5px", cursor: "help", display: "inline-flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>
+      <window.I.hash style={{ fontSize: 9 }} /> {shortId(row.sid)}
+    </span>
+  );
+}
+
 // ---- Citey, drawn: a bent-wire logic operator whose face IS the state ----
 // ⊥ falsum (worried, orange) · ⊢ turnstile (guiding, purple) · ⊤ verum (starry, green)
 function drawCitey(stateName, width, opts) {
@@ -601,7 +623,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           Blockers only
         </label>
         <span style={{ flex: 1 }} />
-        <span className="np-mono" style={{ fontSize: 11, color: NR.muted }}>{shown.length + " of " + enriched.length + " sentences"}</span>
+        <span className="np-mono" title="Every sentence you write is imported here automatically. Each carries a stable id (the # chip) that follows it through edits and moves, keeping its citations and stance attached." style={{ fontSize: 11, color: NR.muted, cursor: "help", display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <window.I.hash style={{ fontSize: 11 }} /> {shown.length + " of " + enriched.length + " sentences · auto-imported"}
+        </span>
       </div>
       <div style={{ border: "1px solid " + NR.line, borderRadius: 10, overflow: "hidden", background: NR.field }}>
         <div style={{ display: "grid", gridTemplateColumns: "140px minmax(200px,1.6fr) minmax(180px,1fr) 168px", padding: "10px 14px", gap: 12 }}>
@@ -625,6 +649,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
               <div>
                 <button onClick={() => { setSelSid(row.sid); api.jumpTo(row); }} title="Open this sentence in the editor"
                   style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{row.text}</button>
+                <div style={{ marginTop: 5 }}><HashChip row={row} NR={NR} /></div>
               </div>
               <div>
                 {st.key === "owned"

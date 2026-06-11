@@ -16,9 +16,13 @@ const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
 const DEK_PH = "Subtitle — one line under the headline";
+// The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
+// restore and reader pipeline is unchanged — but they're driven by the explicit
+// Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
+// so the author fills in fields, not loose formatted prose.
 const START_DOC =
   '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
-  '<h1>Untitled</h1>' +
+  '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
 
@@ -42,13 +46,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
   const citeOrderRef = useRef([]);
+  // stable per-sentence identity + provenance (app/sentences.js). Rides the draft
+  // so a sentence's grounding follows it through edits, moves, reloads.
+  const sentenceLedger = useRef(window.NpjSentences ? window.NpjSentences.newLedger() : { v: 1, seq: 0, entries: {} });
   const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
   const [rev, setRev] = useState(0);                // bump to recompute span counts
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [publish, setPublish] = useState(null);
-  const [title, setTitle] = useState("Untitled");
+  const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
+  const [dek, setDek] = useState("");                // explicit Subtitle field (mirrors .nr-dek)
   const [fileSlug, setFileSlug] = useState("");      // custom filename; "" = derived from the title
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
@@ -84,7 +92,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, room });
+    const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -109,6 +118,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (alive && d) {
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
         if (d.citations && window.NpjCitations) window.NpjCitations.hydrate(d.citations); // rehydrate citation records
+        if (d.sentenceLedger && window.NpjSentences) sentenceLedger.current = window.NpjSentences.hydrateLedger(d.sentenceLedger); // stable sentence ids survive reload
         if (ed.current && d.html) {
           ed.current.innerHTML = d.html;
           // older drafts predate the dek — every article gets the field
@@ -134,6 +144,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           // skips spans that already carry data-cite-id), so legacy drafts gain
           // reusable citations the first time they're opened, with no data loss.
           if (window.NpjCitations) window.NpjCitations.migrateRoot(ed.current);
+          // hydrate the explicit Subtitle field from the restored .nr-dek node
+          const dekEl0 = ed.current.querySelector(".nr-dek");
+          if (dekEl0) setDek((dekEl0.textContent || "").trim());
         }
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
@@ -151,6 +164,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
   useEffect(() => { scheduleSave(); }, [title, fileSlug, tags, column, sources, room, scheduleSave]);
+  // entering a grounding view builds/extends the stable-id ledger (track()) — save
+  // so those ids persist even if the author switches views without editing
+  useEffect(() => { if (view !== "prose") scheduleSave(); }, [view, scheduleSave]);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -164,11 +180,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       let id = "s-" + slugify(text);
       if (seen[id]) { seen[id]++; id += "-" + seen[id]; } else seen[id] = 1;
       h.id = id;
-      items.push({ id, text, level: +h.tagName[1] });
+      // the headline is the explicit Title field, not a section jump-link
+      if (h.tagName !== "H1") items.push({ id, text, level: +h.tagName[1] });
     });
     setToc(items);
-    const h1 = ed.current.querySelector("h1");
-    if (h1) setTitle(h1.innerText.trim() || "Untitled");
     // media census: every figure with a filled image slot or an embed.
     // Figures get a stable data-mid so the rail/viewer can jump to them.
     const found = [];
@@ -185,6 +200,31 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setMedia(found);
   }, []);
   useEffect(() => { const t = setTimeout(scanHeadings, 60); return () => clearTimeout(t); }, [scanHeadings]);
+
+  // ---- explicit Title / Subtitle fields ----
+  // The fields are the source of truth; each writes through to the hidden body
+  // <h1> / .nr-dek so the publish gate, reader, markdown export and front page
+  // keep reading exactly what they always have — no pipeline change.
+  const onTitleInput = useCallback((v) => {
+    setTitle(v);
+    const root = ed.current;
+    if (root) {
+      let h1 = root.querySelector("h1");
+      if (!h1) { h1 = document.createElement("h1"); const b = root.querySelector("figure.nr-banner"); if (b) b.after(h1); else root.insertBefore(h1, root.firstChild); }
+      h1.textContent = v;
+    }
+    scheduleSave();
+  }, [scheduleSave]);
+  const onDekInput = useCallback((v) => {
+    setDek(v);
+    const root = ed.current;
+    if (root) {
+      let d = root.querySelector(".nr-dek");
+      if (!d) { d = document.createElement("p"); d.className = "nr-dek"; d.setAttribute("data-ph", DEK_PH); const h1 = root.querySelector("h1"); if (h1) h1.after(d); else root.insertBefore(d, root.firstChild); }
+      if (v) d.textContent = v; else d.innerHTML = "<br/>";
+    }
+    scheduleSave();
+  }, [scheduleSave]);
 
   const scrollToId = (id) => {
     const cont = scroller.current, body = ed.current; if (!cont || !body) return;
@@ -530,7 +570,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return plain ? wrapPlainClaim(range) : (ed.current && ed.current.querySelector('.claim-src[data-cid="' + bindRangeToSource(range, key) + '"]'));
   };
   const tableApi = {
-    segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.segment(ed.current) : [],
+    // track() = segment + reconcile against the persisted ledger, so every row
+    // carries a STABLE sid + provenance that follows the sentence through edits.
+    segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.track(ed.current, sentenceLedger.current) : [],
     // the live editor node — the workspace observes it so the grounding table
     // imports every prose sentence the moment it lands (survives the restore race)
     editorEl: () => ed.current,
@@ -902,7 +944,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
         <div className="np-scroll" ref={scroller} style={{ display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
-          <div className={"md-preview nr-page" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
+          <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
+            <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
+            <input id="nr-title-field" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Untitled headline" spellCheck={true}
+              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontFamily: "var(--display)", fontSize: isMobile ? 26 : 32, lineHeight: 1.1, padding: "2px 0 8px", outline: "none" }} />
+            <label htmlFor="nr-dek-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, margin: "14px 0 3px" }}>Subtitle</label>
+            <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
+              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 16 : 19, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
+          </div>
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
@@ -1360,6 +1411,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
               </span>
             </Row>
             <Row k="Live at">{articleUrl}</Row>
+            <Row k="Headline">{title || "Untitled"}</Row>
             <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>

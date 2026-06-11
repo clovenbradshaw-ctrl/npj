@@ -309,6 +309,16 @@ a { color: inherit; }
 .nr-page .nr-dek { font-family: var(--serif); font-style: italic; font-size: 21px; line-height: 1.35; color: var(--nr-soft); margin: 2px 0 18px; }
 .nr-page .nr-dek:empty::before,
 .nr-page .nr-dek:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); pointer-events: none; }
+
+/* The headline + dek are now filled in via the explicit Title/Subtitle fields
+   above the sheet; the in-canvas nodes stay (the publish pipeline reads them)
+   but are hidden so the canvas holds body prose only. */
+.md-preview.nr-fielded > h1:first-of-type,
+.md-preview.nr-fielded > .nr-dek { display: none; }
+/* the Title/Subtitle field group — readable placeholders + a visible focus ring */
+.nr-fields input::placeholder { color: var(--nr-muted); opacity: 1; }
+.nr-fields input:focus { border-bottom-color: var(--nr-line-strong); }
+.nr-fields input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 3px; }
 /* the drop-slot's shadow-DOM colors are black-on-black in the dark room —
    re-skin its exposed parts to the theme */
 .newsroom image-slot::part(frame) { background: var(--nr-code-bg); }
