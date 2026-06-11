@@ -5,14 +5,52 @@
 
 const TIP_EMAIL = "peoplesjournalism@proton.com";
 
-function SubmitPage({ session, onSignIn, onSignOut, onHome, onNewsroom }) {
+function SubmitPage({ session, onSignIn, onSignOut, onHome, onNewsroom, onDocs }) {
   const signedIn = !!session;
   return (
     <div className="fade-in">
       <Masthead route="submit" onHome={onHome} onNewsroom={onNewsroom} />
-      {signedIn
-        ? <Composer user={session.user_id} session={session} onSignOut={onSignOut} />
-        : <div style={{ maxWidth: 760, margin: "0 auto", padding: "52px 22px 80px" }}><AccountGate onSignIn={onSignIn} /></div>}
+      <div style={{ maxWidth: 760, margin: "0 auto", padding: "52px 22px 80px" }}>
+        {signedIn
+          ? <SignedInPanel session={session} onDocs={onDocs || onNewsroom} onSignOut={onSignOut} />
+          : <AccountGate onSignIn={onSignIn} />}
+      </div>
+    </div>
+  );
+}
+
+/* Signing in used to drop you into a free-floating "New post" composer here —
+   a writing surface attached to nothing. Sign-in now lands on Documents (the
+   workspace); this panel is what Submit shows if you come back while signed
+   in: who you are, where your work lives, and the tip inbox. */
+function SignedInPanel({ session, onDocs, onSignOut }) {
+  const { role } = React.useContext(window.LayoutCtx);
+  const mailto = "mailto:" + TIP_EMAIL + "?subject=" + encodeURIComponent("Tip for People's Journalism") +
+    "&body=" + encodeURIComponent("What happened:\n\n\nWhere / when:\n\n\nDocuments or links (we archive everything):\n\n\nHow to reach you (optional):\n");
+  return (
+    <div>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 12 }}>Signed in · {session.user_id}{role ? " · " + role : ""}</div>
+      <h1 className="npj-submit-h" style={{ fontFamily: "var(--display)", fontSize: 56, lineHeight: .95, margin: "0 0 14px" }}>You're in.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "58ch", margin: "0 0 28px" }}>
+        Your drafts, projects and the published record all live under <strong style={{ color: "var(--ink)" }}>Documents</strong> — start a new document there and it autosaves to this browser and your Matrix account.
+      </p>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 34 }}>
+        <button className="btn btn-primary" onClick={onDocs} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <I.doc style={{ fontSize: 14 }} /> Go to your documents
+        </button>
+        <button className="btn" onClick={onSignOut} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <I.lock style={{ fontSize: 13 }} /> Sign out
+        </button>
+      </div>
+      <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "6px 6px 0 rgba(22,20,13,.12)", padding: "18px 18px 20px", maxWidth: 420 }}>
+        <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Got a tip instead?</div>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 14px" }}>
+          Send what you know to the newsroom inbox. Attach documents or links — we archive every source.
+        </p>
+        <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
+          <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
+        </a>
+      </div>
     </div>
   );
 }

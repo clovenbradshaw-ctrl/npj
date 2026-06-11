@@ -6,14 +6,22 @@
 > hyphae.social, and authorizes against the roles committed in
 > `site/layout.json`. No separate publish secret. Body:
 > `{ filename, mode, contentRaw, message }`. It serves the EO article logs
-> (`articles/<slug>.jsonl`), the site layout + roles (`site/layout.json`, via
+> (per-document version folders `articles/<slug>/` + legacy
+> `articles/<slug>.jsonl`), the site layout + roles (`site/layout.json`, via
 > `npj-layout.client.js`), and `chain_head.json`. Permissions also mirror to a
 > Matrix control-room state event (`press.npj.permissions`) only admins can write.
 
-## Articles are EO event logs (`articles/<slug>.jsonl`)
+## Articles are EO event logs — one folder of version files per document
 
-A published article is **not** a markdown file: it's an append-only JSONL log
-of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
+A published article is **not** a markdown file: it's an append-only log of EO
+events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`). Each
+document owns a folder, and every event is committed as a **brand-new
+timestamped file** inside it:
+
+```
+articles/<slug>/20260610T231501123Z-ins-x7k2.jsonl   ← publish (INS)
+articles/<slug>/20260611T010203456Z-rec-9bd1.jsonl   ← edit / unpublish / republish (REC)
+```
 
 ```jsonl
 {"v":"npj/article-eo/1","op":"INS","target":"article/<slug>","ts":"…","actor":"@…",
@@ -22,19 +30,26 @@ of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
  "note":"why","operand":{ …only the fields that changed… }}
 ```
 
-- **Publish** → the Newsroom POSTs `mode:'overwrite'` with the single `INS`
-  genesis line (INS — mint an enduring anchor).
-- **Edit after publish** → the reader's Edit overlay POSTs `mode:'append'` with
-  one `REC` line (REC — restructure the frame). Nothing is rewritten; the file
-  IS the article's complete change history, and the reader folds it into the
-  current text + the version/diff viewer.
+- **Every write is a CREATE.** Publish, edit, unpublish, republish — each POSTs
+  `mode:'overwrite'` with a filename that doesn't exist yet, so the webhook
+  always takes its create path. The old single-file `append` mode rode GitHub's
+  update-with-SHA call, which kept rejecting commits (409/422); create-only
+  version files can't conflict. `append` remains in the workflow only for
+  legacy single-file logs.
+- **Re-uploading the same document** lands a newer `INS` file: the reader's
+  fold restarts from it (it becomes the current version) and every earlier
+  version file stays put — version control for free.
 - `operand.assignees` (set at publish, editable by the admin) is the edit
   allowlist for that article: **admin + assignees** may edit. Future ops (e.g.
-  EVA suggestion deposits) can append to the same log without breaking readers.
+  EVA suggestion deposits) can land in the same folder without breaking readers.
+- Legacy single-file logs (`articles/<slug>.jsonl`) are still read; they fold
+  in before the folder's version files.
 - One-off migration for legacy `.md` articles: `node backend/md-to-eo.mjs <file.md>`.
 
 > ⚠️ **Re-import `npj-publish.n8n.json` after pulling this version** — the live
-> instance must pick up the editor/assignee rules. The flow is:
+> instance must pick up the folder-path rule, or **editors** (not admins, whose
+> rule covers any filename) get a 401 when publishing into `articles/<slug>/`.
+> The flow is:
 >
 > ```
 > Publish Webhook → Whoami (hyphae.social) → Fetch Roles (raw site/layout.json)
@@ -45,10 +60,13 @@ of EO events, schema `npj/article-eo/1` (reader/writer: `app/articles.js`).
 > Rules enforced server-side (`Authorize` + `Build Content`):
 > - `site/layout.json` (layout + roles) → **admin** only
 > - any other file → **admin** only
-> - `articles/<slug>.jsonl` → **admin**, or an **editor** (per the committed
->   roles) — and a non-admin touching an *existing* log must be in that log's
->   genesis `assignees` (checked against the fetched file; otherwise **403**).
->   A brand-new log (fresh publish) just needs the editor role.
+> - `articles/<slug>.jsonl` **or** `articles/<slug>/<version>.jsonl` →
+>   **admin**, or an **editor** (per the committed roles) — and a non-admin
+>   touching an existing document must be in its genesis `assignees`
+>   (otherwise **403**). For a legacy flat log the genesis is line 1 of the
+>   fetched file; for a version folder, `Build Content2` lists the folder and
+>   reads the earliest file (via `this.helpers.httpRequest`, best-effort). A
+>   brand-new document (empty folder) just needs the editor role.
 > - nothing committed yet (bootstrap) → only the founding admin passes
 >
 > After importing: re-bind the GitHub OAuth2 credential on the `GH *` nodes and

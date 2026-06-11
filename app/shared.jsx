@@ -60,11 +60,20 @@ window.NpjPlainText = {
 /* ---------- real site URLs ----------
    Where this site actually lives — GitHub Pages, a custom domain, localhost —
    derived from the page URL, never a hardcoded domain. The share link opens the
-   formatted reader; the raw URL is the committed EO event log itself
-   (articles/<slug>.jsonl) — the durable, archivable artifact. */
+   formatted reader; the log URL is the committed EO event log itself — the
+   durable, archivable artifact. Documents now live as FOLDERS of timestamped
+   version files (articles/<slug>/), so the log URL points at the folder on
+   GitHub; legacy single-file logs (articles/<slug>.jsonl) keep their raw URL. */
 function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
 function npjArticleUrl(slug) { return npjSiteBase() + "#article;read=" + encodeURIComponent(slug); }
 function npjArticleRawUrl(slug) { return npjSiteBase() + "articles/" + slug + ".jsonl"; }
+// takes a folded article ({slug, storage, logPath}) or a bare slug (assumed folder)
+function npjArticleLogUrl(slugOrArticle) {
+  const a = (slugOrArticle && typeof slugOrArticle === "object") ? slugOrArticle : null;
+  const slug = a ? a.slug : slugOrArticle;
+  if (a && a.storage === "file") return npjArticleRawUrl(slug);
+  return "https://github.com/clovenbradshaw-ctrl/npj/tree/main/articles/" + slug;
+}
 
 function fmtDate(iso) {
   const d = new Date(iso + "T00:00:00");
@@ -152,7 +161,7 @@ function SourceCard({ srcKey, onClose, pinned, quote }) {
   );
 }
 
-/* ---------- draft save-status pill (Newsroom + Composer) ----------
+/* ---------- draft save-status pill (Newsroom) ----------
    One source of truth for "what is being saved, where, right now". Subscribes
    to NpjDrafts status events for this draft id and never claims more than is
    true: signed out (or after logout) it says "this browser only", and the
@@ -221,4 +230,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });

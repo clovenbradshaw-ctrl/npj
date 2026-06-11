@@ -348,13 +348,14 @@ function ArticleRead(props) {
         <span style={{ flex: 1 }} />
         <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 8 }}>
           <window.VersionBadge sha={A.base_sha} count={artVersions.length} onClick={() => setShowVersions(true)} />
-          {fmtDate(A.published)} · {A.readMins} min
+          {fmtDate(A.published)}{A.updated && A.updated !== A.published ? " · updated " + fmtDate(A.updated) : ""} · {A.readMins} min
         </span>
       </div>
       <div style={{ paddingTop: 14 }}>
-        {/* share link opens the reader; the wayback action targets the raw
-            EO log — the committed artifact is what gets archived */}
-        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleRawUrl(A.slug)}`} title={A.headline} />
+        {/* share link opens the reader; the wayback action targets the
+            committed EO log — the document's version folder on GitHub (or the
+            raw file, for a legacy single-file log) */}
+        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleLogUrl(A)}`} title={A.headline} />
       </div>
       {headings.length >= 2 && (
         <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
