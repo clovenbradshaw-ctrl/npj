@@ -23,8 +23,9 @@ founding admin curates the site and grows the network from there.
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
 | `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation |
-| `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
-| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags** |
+| `app/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
+| `app/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
+| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
 | `app/versions.jsx` | article version history + word-level diff |
@@ -206,12 +207,33 @@ article hotlinks the same copy in its `img` block.
 Local file drops still preview instantly, but they have no durable URL — they
 stay out of the published article until they're on archive.org.
 
-## The Data explorer (`#explore`) is fed by archive.org tags
+## Projects, articles & sources
 
-The Data page queries the Internet Archive's search API on load
-(`app/archive-sources.js`) and lists every item carrying the NPJ subject tag —
-each one becomes a searchable, previewable card on `#explore` and a citeable
-source in the composer's **Cite a dataset** picker.
+A **project** is a shared Matrix room that *buckets* the work: any number of
+**articles** (the pieces you write) and the **sources** (the documents you
+upload to back them). Membership is the unit of access — everyone invited to a
+project can open and edit **every article and every source in it**, no
+per-document grant needed. Documents (`#docs`) is where this lives: each project
+is a card with its invitees, an **Invite** control (a Matrix ID → an invite the
+homeserver authorizes), the project's articles, and the **shared source shelf**.
+
+Sources are **deduped synthetically** (`app/sources.js`): the same document
+uploaded twice — to one article, one project, or across projects — collapses to
+one row by a content **signature**, and the copies are *linked* rather than
+thrown away (so a source's cross-project life is visible, and nothing is lost).
+The grounding graph already points article → source; sources.js also walks it
+**backwards** — from any source, trace every article that cites it.
+
+## The Data explorer (`#explore`) — the archive behind the stories
+
+The Data page opens on **Published sources**: every source a *released* article
+rests on, folded out of the committed record (`app/sources.js` over
+`app/articles.js`), deduped by signature and **backtracked** — each card traces
+the trail back to the stories that cite it (open one straight from the source).
+A second tab, **All tagged items**, is the raw archive.org view: it queries the
+Internet Archive's search API on load (`app/archive-sources.js`) and lists every
+item carrying the NPJ subject tag — each a searchable, previewable card and a
+citeable source in the composer's **Cite a dataset** picker.
 
 **Tag an upload so it shows up:**
 

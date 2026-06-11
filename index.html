@@ -56,6 +56,9 @@
      segmentation for the table view. Plain scripts; require window.NPJ. -->
 <script src="app/citations.js"></script>
 <script src="app/sentences.js"></script>
+<!-- source provenance: synthetic dedup (one signature per content, linked across
+     projects) + backtracking (source → every article that cites it). No model. -->
+<script src="app/sources.js"></script>
 <!-- Citey — the grounding assistant. State is mechanical (reads the editor's own
      grounding); voice is leashed (templated, no model). Plain scripts, order matters. -->
 <script src="app/citey-assist.js"></script>
@@ -335,7 +338,7 @@ function App() {
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} />}
-      {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
+      {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} />}
       {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
 
       <TweaksPanel title="Tweaks">

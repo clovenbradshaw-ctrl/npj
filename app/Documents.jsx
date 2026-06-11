@@ -48,6 +48,136 @@ function MemberChips({ list, me }) {
   );
 }
 
+/* Permission control: invite a collaborator to a project by Matrix ID. Anyone
+   invited gets every article AND every source in the project — that's the whole
+   point of bucketing by project, so the copy says it out loud. The homeserver
+   enforces who may invite (power levels); we just surface what it returns. */
+function InviteControl({ roomId, onInvited }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const send = async () => {
+    const raw = val.trim();
+    if (!raw || busy) return;
+    setBusy(true); setMsg(null);
+    try {
+      const out = await window.MatrixAuth.invite(roomId, raw);
+      setMsg({ ok: true, text: "Invited " + out.invited + " — they'll reach every article and source here once they accept." });
+      setVal(""); onInvited && onInvited(out.invited);
+    } catch (e) {
+      const text = (e && (e.errcode === "M_FORBIDDEN")) ? "You don't have permission to invite to this project."
+        : (e && e.code === "badmxid") ? "Use a full Matrix ID — @name:server."
+        : (e && e.errcode === "M_USER_IN_USE") ? "They're already in this project."
+        : (e && e.message) || "Invite failed.";
+      setMsg({ ok: false, text });
+    }
+    setBusy(false);
+  };
+  if (!open) return (
+    <button className="btn btn-sm btn-ghost" onClick={() => setOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }}>
+      <I.plus style={{ fontSize: 11 }} /> Invite
+    </button>
+  );
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+        <input autoFocus value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") send(); if (e.key === "Escape") { setOpen(false); setMsg(null); } }}
+          placeholder="@name:server" className="np-mono" style={{ width: 168, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "5px 7px", fontSize: 11.5, outline: "none" }} />
+        <button className="btn btn-sm btn-primary" disabled={busy} onClick={send} style={{ opacity: busy ? .6 : 1 }}>{busy ? "…" : "Send"}</button>
+        <button className="btn btn-sm btn-ghost" onClick={() => { setOpen(false); setMsg(null); }}><I.x style={{ fontSize: 11 }} /></button>
+      </span>
+      {msg && <span className="np-mono" style={{ fontSize: 10, lineHeight: 1.4, color: msg.ok ? "var(--verified)" : "var(--reject)", maxWidth: 280 }}>{msg.text}</span>}
+    </span>
+  );
+}
+
+/* Start a project directly (not just as a side effect of a first invite), so the
+   bucket exists before there's anything in it. Creates the shared Matrix room. */
+function NewProjectControl({ onCreated }) {
+  const [open, setOpen] = useState(false);
+  const [val, setVal] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const create = async () => {
+    const name = val.trim();
+    if (!name || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const made = await window.MatrixAuth.createDraftRoom(name);
+      onCreated && onCreated({ roomId: made.roomId, title: name });
+      setVal(""); setOpen(false);
+    } catch (e) { setErr((e && e.message) || "Couldn't create the project."); }
+    setBusy(false);
+  };
+  if (!open) return (
+    <button className="btn btn-sm" onClick={() => setOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+      <I.plus style={{ fontSize: 12 }} /> New project
+    </button>
+  );
+  return (
+    <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+      <input autoFocus value={val} onChange={e => setVal(e.target.value)} onKeyDown={e => { if (e.key === "Enter") create(); if (e.key === "Escape") setOpen(false); }}
+        placeholder="Project name" style={{ width: 180, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontFamily: "var(--serif)", fontSize: 13, outline: "none" }} />
+      <button className="btn btn-sm btn-primary" disabled={busy} onClick={create} style={{ opacity: busy ? .6 : 1 }}>{busy ? "…" : "Create"}</button>
+      <button className="btn btn-sm btn-ghost" onClick={() => setOpen(false)}><I.x style={{ fontSize: 11 }} /></button>
+      {err && <span className="np-mono" style={{ fontSize: 10, color: "var(--reject)" }}>{err}</span>}
+    </span>
+  );
+}
+
+/* A project's shared SOURCE shelf — every source bound by any article in the
+   project, deduped by content SIGNATURE (the same upload, or the same document
+   re-uploaded, collapses to one row) and BACKTRACKED to the articles that cite
+   it. A row that also lives in other projects flags the synthetic cross-project
+   link. NpjSources.draftGroups did the grouping over every draft; we filter to
+   the ones this project touches so the cross-project spans survive. */
+function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle }) {
+  const mine = (groups || []).filter(g => g.carriers.some(c => c.project && c.project.roomId === roomId));
+  if (!mine.length) return (
+    <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>No sources yet — bind one inside an article and it's shared with every article in this project.</div>
+  );
+  const openCarrier = (cr) => {
+    if (cr.kind === "published" && cr.slug && onOpenArticle) onOpenArticle(cr.slug);
+    else if (cr.kind === "draft") onOpen(String(cr.id).replace(/^draft:/, ""));
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+      {mine.map(g => {
+        const here = g.carriers.filter(c => c.project && c.project.roomId === roomId);
+        const otherProjects = (g.projects || []).filter(p => p.roomId !== roomId);
+        const k = g.kind || {};
+        const url = g.rec && (g.rec.archive_url || g.rec.original_url);
+        return (
+          <div key={g.signature} style={{ border: "1px solid var(--rule)", background: "var(--card)", padding: "8px 10px" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <I.source style={{ fontSize: 13, color: "var(--data)", flex: "0 0 auto" }} />
+              <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1 }}>{g.title}</span>
+              <span className="np-mono" style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px solid var(--rule)", padding: "0 5px", color: k.archived ? "var(--verified)" : "var(--ink-soft)" }}>{k.archived ? "archived" : k.label}</span>
+              {g.duplicated && <span className="np-mono" title={"Identical content uploaded " + g.uploads + " times — linked, not duplicated"} style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px dashed var(--review)", color: "var(--review)", padding: "0 5px" }}>×{g.uploads} linked</span>}
+              <span style={{ flex: 1 }} />
+              {url && <a href={url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2 }}>open ↗</a>}
+            </div>
+            <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 5, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+              <span style={{ color: "var(--ink-soft)" }}>cited by</span>
+              {here.map(c => (
+                <button key={c.id} onClick={() => openCarrier(c)} title="Open the article that cites this source" style={{ cursor: "pointer", border: "1px solid var(--rule)", background: "var(--paper-2)", padding: "1px 6px", fontSize: 9.5, fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: 3 }}>
+                  <I.doc style={{ fontSize: 10 }} /> {c.title}
+                </button>
+              ))}
+            </div>
+            {otherProjects.length > 0 && (
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--review)", marginTop: 4, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
+                <I.link style={{ fontSize: 10 }} /> also used in {otherProjects.map(p => <span key={p.roomId} style={{ border: "1px solid var(--review)", padding: "0 5px" }}>{titleOf(p.roomId) || p.title || "another project"}</span>)}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onSignIn }) {
   const signedIn = !!session;
   const me = session && session.user_id;
@@ -170,8 +300,27 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     return out;
   })();
   const projectTitle = (room) => room ? ((projects.find(p => p.roomId === room.roomId) || {}).title || room.title || "project") : null;
+  const titleByRoom = (roomId) => (projects.find(p => p.roomId === roomId) || {}).title || roomId;
   const docsInProject = (roomId) => (drafts || []).filter(d => d.room && d.room.roomId === roomId);
   const soloDrafts = shownDrafts.filter(d => !d.room || !d.room.roomId);
+
+  // Source provenance over EVERY draft: deduped by content signature and
+  // backtracked to the articles that cite each source. Computed once here so a
+  // project's shelf can also see the cross-project links (NpjSources.draftGroups).
+  const allGroups = (window.NpjSources && drafts) ? window.NpjSources.draftGroups(drafts) : [];
+
+  // optimistic UI: a just-sent invite shows pending immediately; a new project
+  // appears without waiting on the next homeserver sync
+  const addPendingMember = (roomId, mxid) => setMembers(m => {
+    const cur = m[roomId] || [];
+    if (cur.some(x => x.mxid === mxid)) return m;
+    return { ...m, [roomId]: [...cur, { mxid, membership: "invite" }] };
+  });
+  const addProject = ({ roomId, title }) => setRooms(r => {
+    const draftsIdx = (r && r.drafts) || [];
+    if (draftsIdx.some(d => d.roomId === roomId)) return r;
+    return { ...(r || { joined: [], drafts: [] }), drafts: [{ roomId, title, ts: new Date().toISOString() }, ...draftsIdx] };
+  });
 
   // one document row — used inside a project card and in the no-project group
   const draftRow = (d, inProject) => {
@@ -239,10 +388,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "0 9px" }}>
                   <I.search style={{ fontSize: 14, color: "var(--ink-soft)" }} />
-                  <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search drafts…" style={{ border: 0, background: "transparent", padding: "8px 0", width: 150, fontFamily: "var(--serif)", fontSize: 13.5, outline: "none" }} />
+                  <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search articles…" style={{ border: 0, background: "transparent", padding: "8px 0", width: 150, fontFamily: "var(--serif)", fontSize: 13.5, outline: "none" }} />
                 </span>
                 <button className="btn btn-primary" onClick={newDoc} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <I.plus style={{ fontSize: 13 }} /> New document
+                  <I.plus style={{ fontSize: 13 }} /> New article
                 </button>
               </div>
             </div>
@@ -251,13 +400,16 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                  A project is a shared Matrix room: one set of invitees, any
                  number of documents. Each card shows WHO IS INVITED (live from
                  the homeserver) and the documents inside. */}
-            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "0 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.folder style={{ fontSize: 14 }} /> Projects {rooms ? "· " + projects.length : ""}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, margin: "0 0 10px", flexWrap: "wrap" }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "flex", alignItems: "center", gap: 7, margin: 0 }}>
+                <I.folder style={{ fontSize: 14 }} /> Projects {rooms ? "· " + projects.length : ""}
+              </div>
+              <NewProjectControl onCreated={addProject} />
             </div>
-            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", margin: "0 0 10px", lineHeight: 1.5 }}>A project holds any number of documents and shares one set of invitees — everyone listed on a project can work on all of its documents. Recovered from Matrix, not this browser — wipe or switch devices and they're still here after you sign in.</div>
+            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", margin: "0 0 10px", lineHeight: 1.5 }}>A project buckets its <strong>articles</strong> and the <strong>sources</strong> that back them under one set of invitees — everyone invited can open and edit every article and source in it. Recovered from Matrix, not this browser — wipe or switch devices and they're still here after you sign in.</div>
             {(!rooms || !drafts) && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center", marginBottom: 10 }}><DocSpinner /> recovering your workspace (this browser + your Matrix account)…</div>}
             {rooms && drafts && projects.length === 0 && (
-              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)", marginBottom: 8 }}>No projects yet. Invite a collaborator from the Newsroom and a project is created for you.</div>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)", marginBottom: 8 }}>No projects yet. Start one with <strong>New project</strong> above, or invite a collaborator from an article — a project is created for you.</div>
             )}
             {rooms && drafts && projects.map(p => {
               const docs = docsInProject(p.roomId).filter(match);
@@ -266,18 +418,37 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                 <div key={p.roomId} style={{ border: "1.5px solid var(--ink)", background: "var(--paper-2)", boxShadow: "4px 4px 0 rgba(22,20,13,.10)", padding: "12px 15px", marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
                     <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 19, display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 15 }} /> {p.title || "Untitled project"}</span>
-                    <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{docs.length} document{docs.length !== 1 ? "s" : ""}</span>
+                    <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{docs.length} article{docs.length !== 1 ? "s" : ""}</span>
                     {p.ts && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{timeAgo(p.ts)}</span>}
                   </div>
                   {p.topic && <div style={{ fontFamily: "var(--serif)", fontSize: 12, color: "var(--ink-soft)", marginTop: 2 }}>{p.topic}</div>}
+
+                  {/* permission controls: who's invited + invite more. Anyone here
+                      reaches every article and source in the project. */}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--rule)" }}>
                     <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10 }}>Invited</span>
                     <MemberChips list={members[p.roomId]} me={me} />
+                    <span style={{ flex: 1 }} />
+                    <InviteControl roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
                   </div>
-                  <div style={{ marginTop: 10 }}>
-                    {docs.length === 0 && <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>{query ? "no documents match the search" : "no documents in this project yet"}</div>}
-                    {docs.map(d => draftRow(d, true))}
+                  <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 5, display: "flex", alignItems: "center", gap: 5 }}>
+                    <I.shield style={{ fontSize: 11 }} /> Everyone invited can open and edit every article and source in this project.
                   </div>
+
+                  {/* articles in the project */}
+                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10, margin: "13px 0 6px", display: "flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 12 }} /> Articles</div>
+                  {docs.length === 0 && <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>{query ? "no articles match the search" : "no articles in this project yet"}</div>}
+                  {docs.map(d => draftRow(d, true))}
+
+                  {/* sources shared across every article in the project, deduped +
+                      backtracked (NpjSources). Hidden while a search is active so
+                      the project view stays focused on the matching articles. */}
+                  {!query && (
+                    <React.Fragment>
+                      <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10, margin: "13px 0 6px", display: "flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 12 }} /> Sources · available to every article here</div>
+                      <ProjectSources groups={allGroups} roomId={p.roomId} titleOf={titleByRoom} onOpen={onOpen} onOpenArticle={onOpenArticle} />
+                    </React.Fragment>
+                  )}
                 </div>
               );
             })}
@@ -285,12 +456,12 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
 
             {/* ---- documents that belong to no project ---- */}
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.doc style={{ fontSize: 14 }} /> Your documents · not in a project {drafts ? "· " + soloDrafts.length : ""}
+              <I.doc style={{ fontSize: 14 }} /> Your articles · not in a project {drafts ? "· " + soloDrafts.length : ""}
             </div>
             {drafts && soloDrafts.length === 0 && (
               <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "22px 20px", textAlign: "center", marginBottom: 8 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17, marginBottom: 4 }}>{query ? "Nothing matches “" + q.trim() + "”." : "Nothing here."}</div>
-                <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>{query ? "Try another search." : "Start a document and it autosaves here — and to your Matrix account. Invite someone and it moves into a project."}</div>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>{query ? "Try another search." : "Start an article and it autosaves here — and to your Matrix account. Invite someone and it moves into a project."}</div>
               </div>
             )}
             {drafts && soloDrafts.map(d => draftRow(d, false))}
