@@ -1,9 +1,9 @@
-/* NPJ masthead + front page. The masthead chrome (columns, taglines, utility
-   links) is driven by the admin-curated layout config via LayoutCtx. The front
-   page filters the line-up by the selected column (article.tags). Ships empty:
-   until something is published it shows a clean "no stories yet" state. */
+/* NPJ masthead + front page — revamped layout.
+   The masthead is now a two-piece chrome: a yellow header band (logo +
+   taglines + utility links) and a dark section nav bar. The front page
+   drops the manifesto strip and restructures the lineup into a full-bleed
+   cover story, a three-column second row, and a compact "More" list. */
 
-/* striped image placeholder with mono label */
 function Placeholder({ label, h = 220, dark = false }) {
   const stroke = dark ? "rgba(255,255,255,.10)" : "rgba(22,20,13,.09)";
   return (
@@ -16,123 +16,149 @@ function Placeholder({ label, h = 220, dark = false }) {
   );
 }
 
-/* ---------------- Masthead (global chrome, layout-driven) ---------------- */
+/* ---- Masthead ---- */
 function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const sections = (layout.sections || []).map(s => s.name);
   const utility = layout.utility || [];
   const taglines = layout.taglines || [];
-  const navBtn = { background: "none", border: 0, color: "var(--paper)", textTransform: "uppercase", letterSpacing: ".08em", fontWeight: 600, fontSize: 12.5, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 };
   const navFor = (n) => (window.__nav && window.__nav[n]) ? window.__nav[n] : onHome;
   const clickColumn = (name) => { if (onColumn) onColumn(name); else onHome(); };
+  const displayTaglines = taglines.length > 0 ? taglines : ["created", "backed", "edited"];
 
   return (
     <header>
-      {/* utility bar */}
-      <div className="npj-utility" style={{ background: "var(--ink)", color: "var(--paper)", display: "flex",
-        justifyContent: "space-between", alignItems: "center", padding: "4px 22px", fontFamily: "var(--cond)", fontSize: 12.5, gap: 14 }}>
-        <span className="np-mono" style={{ fontSize: 11, opacity: .82, whiteSpace: "nowrap" }}>People's Journalism · community newsroom</span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 18, textTransform: "uppercase", letterSpacing: ".08em", whiteSpace: "nowrap", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          {utility.map((u, i) => <button key={i} onClick={() => navFor(u.nav)()} style={navBtn}>{u.label}</button>)}
-          {(window.__nav && window.__nav.user) && (
-            <button onClick={() => window.__nav.docs && window.__nav.docs()} style={navBtn}>
-              <I.doc style={{ fontSize: 13 }} /> Documents
-            </button>
-          )}
-          <button onClick={() => window.__nav && window.__nav.account()} style={navBtn}>{(window.__nav && window.__nav.user) ? window.__nav.user.split(":")[0].replace(/^@/, "") : "Sign in"}</button>
-          <button onClick={onNewsroom} style={{ ...navBtn, color: "var(--yellow)" }}>
-            <I.lock style={{ fontSize: 13 }} /> Newsroom
+      {/* yellow masthead band */}
+      <div className="npj-masthead" style={{ background: "var(--yellow)", padding: "22px 72px 26px" }}>
+        <div style={{ maxWidth: 1760, margin: "0 auto", display: "flex", alignItems: "center", gap: 32 }}>
+          <button onClick={onHome} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", margin: "-8px 0 -10px -14px", flexShrink: 0 }}>
+            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/im/NPD%20wide.png" alt="People's Journalism" style={{ height: 168, display: "block" }} />
           </button>
-        </span>
-      </div>
-
-      {/* wordmark band */}
-      <div style={{ background: "var(--yellow)", borderBottom: "3px solid var(--ink)" }}>
-        <div className="npj-wordmark" style={{ maxWidth: 1180, margin: "0 auto", padding: "18px 26px", display: "flex",
-          alignItems: "center", justifyContent: "space-between", gap: 28 }}>
-          <button onClick={onHome} style={{ display: "flex", alignItems: "center", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/im/NPD%20wide.png" alt="People's Journalism" style={{ height: 150, display: "block" }} />
-          </button>
-          {taglines.length > 0 && (
-            <div className="npj-taglines" style={{ textAlign: "right", borderRight: "4px solid var(--ink)", paddingRight: 18 }}>
-              {taglines.map((w, i) => (
-                <div key={i} style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 30, lineHeight: 1.02, letterSpacing: "-.01em", textTransform: "lowercase" }}>
-                  <span style={{ fontWeight: 500, color: "var(--ink-soft)" }}>community-</span>{w}.
-                </div>
-              ))}
+          <div style={{ flex: 1 }} />
+          <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", gap: 28 }}>
+            <div style={{ width: 2.5, background: "var(--ink)" }} />
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 2 }}>
+              <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 34, lineHeight: 1.04, textAlign: "right" }}>
+                {displayTaglines.map((t, i) => (
+                  <div key={i}><span style={{ fontWeight: 500, color: "var(--ink-soft)" }}>community-</span>{t}.</div>
+                ))}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 22, marginTop: 12, fontFamily: "var(--mono)", fontSize: 11.5, letterSpacing: ".08em", textTransform: "uppercase" }}>
+                {utility.length > 0
+                  ? utility.map((u, i) => (
+                      <button key={i} onClick={() => navFor(u.nav)()} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink)", fontFamily: "var(--mono)", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>{u.label}</button>
+                    ))
+                  : <button onClick={() => navFor("standards")()} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink)", fontFamily: "var(--mono)", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>Our Standards</button>
+                }
+                <button onClick={onNewsroom} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink)", fontWeight: 600, fontFamily: "var(--mono)", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>⊠ Newsroom log in</button>
+              </div>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {/* column nav — hidden while reading an article to cut toolbar stacking */}
-      {route !== "article" && sections.length > 0 && (
-      <nav style={{ background: "var(--paper)", borderBottom: "1.5px solid var(--ink)" }}>
-        <div className="npj-colnav" style={{ maxWidth: 1180, margin: "0 auto", padding: "0 22px", display: "flex",
-          alignItems: "stretch", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", gap: 0, flexWrap: "wrap" }}>
+      {/* dark section nav — hidden inside the article reader to avoid toolbar stacking */}
+      {route !== "article" && (
+        <nav style={{ background: "var(--ink)", color: "var(--paper)" }}>
+          <div className="npj-nav-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "0 72px", display: "flex", alignItems: "stretch", height: 58 }}>
             {sections.map((s, i) => {
               const on = activeColumn ? activeColumn === s : i === 0;
               return (
-                <button key={s + i} className="np-cond" onClick={() => clickColumn(s)} style={{ background: on ? "var(--ink)" : "none",
-                  color: on ? "var(--yellow)" : "var(--ink)", border: 0, padding: "9px 16px", fontSize: 15,
-                  fontWeight: 600, textTransform: "uppercase", letterSpacing: ".04em", borderRight: "1px solid var(--rule)", cursor: "pointer" }}>{s}</button>
+                <button key={s + i} onClick={() => clickColumn(s)} style={{
+                  flexShrink: 0, display: "flex", alignItems: "center", padding: "0 26px",
+                  background: on ? "var(--yellow)" : "none",
+                  color: on ? "var(--ink)" : "var(--paper)",
+                  border: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17,
+                  letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer"
+                }}>{s}</button>
               );
             })}
+            <div style={{ flex: 1 }} />
+            <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 70 }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "#8c8676" }}>⌕</span>
+              <input type="text" placeholder="Search records, snapshots…" style={{ width: "100%", minWidth: 0, border: 0, borderBottom: "1px solid rgba(255,255,255,.35)", background: "transparent", fontFamily: "var(--mono)", fontSize: 13, color: "var(--paper)", outline: "none", padding: "4px 0" }} />
+            </div>
+            <button onClick={() => window.__nav && window.__nav.submit && window.__nav.submit()} style={{
+              display: "flex", alignItems: "center", alignSelf: "center", flexShrink: 0, whiteSpace: "nowrap",
+              background: "var(--yellow)", color: "var(--ink)", padding: "9px 20px",
+              fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, letterSpacing: ".1em",
+              textTransform: "uppercase", border: 0, cursor: "pointer"
+            }}>Submit a story</button>
           </div>
-          <button className="np-cond npj-search" style={{ background: "none", border: 0, padding: "9px 14px", display: "inline-flex",
-            alignItems: "center", gap: 6, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--ink-soft)" }}>
-            <I.search style={{ fontSize: 16 }} /> Search records
-          </button>
-        </div>
-      </nav>
+        </nav>
       )}
     </header>
   );
 }
 
-/* ---------------- Front page ---------------- */
+/* ---- Archive status strip ---- */
+function ArchiveStrip() {
+  const snaps = (window.NPJ && window.NPJ.SOURCES) ? Object.keys(window.NPJ.SOURCES).length : null;
+  if (snaps === 0) return null;
+  return (
+    <div style={{ background: "var(--paper)", borderBottom: "1px solid var(--rule)" }}>
+      <div className="npj-strip-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "11px 72px", display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--reject)", display: "inline-block", flexShrink: 0 }} />
+        {snaps !== null
+          ? <span><strong style={{ color: "var(--ink)" }}>{snaps}</strong> sources captured</span>
+          : <span>Sources archived to web.archive.org</span>
+        }
+        <span style={{ flex: 1 }} />
+        <button onClick={() => window.__nav && window.__nav.explore && window.__nav.explore()} style={{
+          background: "none", border: 0, padding: 0, cursor: "pointer",
+          color: "var(--ink)", fontFamily: "var(--mono)", fontWeight: 600,
+          fontSize: 12, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3
+        }}>OPEN THE ARCHIVE →</button>
+      </div>
+    </div>
+  );
+}
+
+/* ---- Front Page ---- */
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
   const F = window.NPJ.FRONT || {};
   const sections = (layout.sections || []).map(s => s.name);
   const [col, setCol] = useState(null);
 
-  // gather every published piece + its tags (empty until something ships)
   const all = [];
   if (F.lead) all.push({ ...F.lead, _lead: true, tags: F.lead.tags || [] });
   (F.secondary || []).forEach(s => all.push({ ...s, tags: s.tags || [] }));
-  // unpublished pieces drop off the line-up for everyone but admins, who keep
-  // seeing them (badged) so they can reopen and republish
   const visible = all.filter(a => isAdmin || a.status !== "unpublished");
   const shown = col ? visible.filter(a => (a.tags || []).includes(col)) : visible;
 
   return (
     <div className="fade-in">
-      <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} activeColumn={col} onColumn={(name) => setCol(c => c === name ? null : name)} />
-
-      {/* manifesto strip */}
-      <div style={{ background: "var(--ink)", color: "var(--paper)" }}>
-        <div style={{ maxWidth: 1180, margin: "0 auto", padding: "11px 22px", display: "flex", gap: 26,
-          alignItems: "center", flexWrap: "wrap", fontFamily: "var(--cond)", fontSize: 16 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><span className="ground-glyph" aria-hidden="true" /> Hover any claim to audit its archived source.</span>
-          <span style={{ opacity: .4 }}>/</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.shield style={{ fontSize: 17 }} /> Toggle Auditability to reveal every source.</span>
-          <span style={{ opacity: .4 }}>/</span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.chat style={{ fontSize: 17 }} /> Every published piece is open to public suggestion.</span>
-        </div>
-      </div>
-
-      <main style={{ maxWidth: 1180, margin: "0 auto", padding: "26px 22px 60px" }}>
+      <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom}
+        activeColumn={col} onColumn={(name) => setCol(c => c === name ? null : name)} />
+      <ArchiveStrip />
+      <main style={{ maxWidth: 1760, margin: "0 auto", padding: "34px 72px 0" }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
           : <FrontLineup items={shown} onOpen={onOpen} />}
       </main>
+      <FrontFooter />
     </div>
   );
 }
 
-/* clean empty state for the launch */
+/* ---- Footer ---- */
+function FrontFooter() {
+  return (
+    <footer style={{ background: "var(--ink)", color: "#e3ddcc", marginTop: 36 }}>
+      <div className="npj-footer-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "24px 72px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <span aria-hidden="true" style={{ position: "relative", display: "inline-block", width: 15, height: 13, borderBottom: "3px solid var(--yellow)", flexShrink: 0 }}>
+          <span style={{ position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)", width: 3, height: 10, background: "var(--yellow)" }} />
+        </span>
+        <span style={{ fontStyle: "italic", fontSize: 16.5 }}>Every underlined claim stands on an archived source.</span>
+        <span style={{ flex: 1, minWidth: 20 }} />
+        <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY · documents public record</span>
+      </div>
+    </footer>
+  );
+}
+
+/* ---- Empty state ---- */
 function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
   return (
     <div style={{ maxWidth: 720, margin: "40px auto", textAlign: "center", padding: "10px 0 30px" }}>
@@ -159,52 +185,9 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
   );
 }
 
-/* line-up renderer (used once pieces exist) — every item carries the slug of
-   its committed EO log, and opening it loads + folds that log into the reader */
+/* ---- Shared sub-components ---- */
 function UnpubBadge({ small }) {
   return <span className="np-mono" style={{ fontSize: small ? 9 : 10, fontWeight: 600, letterSpacing: ".06em", color: "var(--reject)", border: "1px solid var(--reject)", padding: small ? "1px 5px" : "2px 7px", textTransform: "uppercase" }}>⊘ Unpublished</span>;
-}
-
-function FrontLineup({ items, onOpen }) {
-  // lead with a live piece so an admin's hidden draft never takes the marquee
-  const lead = items.find(a => a.status !== "unpublished") || items[0];
-  const rest = items.filter(a => a !== lead);
-  const open = (a) => onOpen && onOpen(a.slug);
-  return (
-    <div className="npj-lineup" style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 0 }}>
-      <section style={{ paddingRight: 30, borderRight: "1.5px solid var(--ink)" }}>
-        <button onClick={() => open(lead)} className="headline-link" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-          <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>{lead.kicker}{lead.status === "unpublished" && <UnpubBadge />}</div>
-          <h1 className="npj-lead-h" style={{ fontFamily: "var(--display)", fontSize: 70, lineHeight: .98, margin: "0 0 14px" }}>{lead.headline}</h1>
-        </button>
-        {lead.image && lead.image.src && window.MediaImg && (
-          <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 14px" }}>
-            <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} fit={lead.image.fit} crop={lead.image.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-          </button>
-        )}
-        {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
-        {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}{lead.updated && lead.updated !== lead.published ? " · updated " + shortDate(lead.updated) : ""}</div>}
-        {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
-      </section>
-      <aside style={{ paddingLeft: 24 }}>
-        <div className="np-eyebrow" style={{ borderBottom: "2px solid var(--ink)", paddingBottom: 6, marginBottom: 12 }}>More</div>
-        {rest.map((s, i) => (
-          <article key={s.slug || i} style={{ padding: "12px 0", borderBottom: "1px solid var(--rule)" }}>
-            {s.image && s.image.src && window.MediaImg && (
-              <button onClick={() => open(s)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 8px" }}>
-                <window.MediaImg srcs={[s.image.store, s.image.src]} alt={s.image.caption || s.headline || ""} style={{ width: "100%", height: 130, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
-              </button>
-            )}
-            <h3 onClick={() => open(s)} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
-            {s.status === "unpublished" && <div style={{ marginBottom: 6 }}><UnpubBadge small /></div>}
-            {s.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.35, color: "var(--ink-soft)", margin: "0 0 6px" }}>{s.dek}</p>}
-            {s.published && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 4 }}>{shortDate(s.published)}{s.updated && s.updated !== s.published ? " · updated " + shortDate(s.updated) : ""}</div>}
-            {(s.tags || []).length > 0 && <TagRow tags={s.tags} small />}
-          </article>
-        ))}
-      </aside>
-    </div>
-  );
 }
 
 function TagRow({ tags, small }) {
@@ -212,6 +195,95 @@ function TagRow({ tags, small }) {
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
       {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: small ? 9.5 : 11, border: "1px solid var(--ink)", padding: "2px 7px", background: "var(--paper-2)" }}>#{t}</span>)}
     </div>
+  );
+}
+
+/* ---- Front-page lineup ---- */
+function FrontLineup({ items, onOpen }) {
+  const lead = items.find(a => a.status !== "unpublished") || items[0];
+  const rest = items.filter(a => a !== lead);
+  const row2 = rest.slice(0, 3);
+  const more = rest.slice(3);
+  const open = (a) => onOpen && onOpen(a.slug);
+
+  return (
+    <>
+      {/* Cover story: image left, text right */}
+      <section className="npj-cover" style={{ display: "grid", gridTemplateColumns: "1fr 1.08fr", gap: 52, alignItems: "start", paddingBottom: 44 }}>
+        <div>
+          {lead.image && lead.image.src && window.MediaImg
+            ? (
+                <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
+                  <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} fit={lead.image.fit} crop={lead.image.crop} style={{ width: "100%", height: 620, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
+                </button>
+              )
+            : (
+                <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
+                  <Placeholder label="hero image" h={620} />
+                </button>
+              )
+          }
+        </div>
+        <article style={{ paddingTop: 2 }}>
+          <div className="np-mono" style={{ fontWeight: 600, fontSize: 12.5, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--reject)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+            {lead.kicker || "Cover Story"}
+            {lead.status === "unpublished" && <UnpubBadge />}
+          </div>
+          <button onClick={() => open(lead)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "block", width: "100%" }}>
+            <h1 className="npj-cover-h" style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 94, lineHeight: .94, letterSpacing: ".002em", textTransform: "uppercase", margin: "0 0 22px" }}>{lead.headline}</h1>
+          </button>
+          {lead.published && (
+            <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink-soft)", marginBottom: 18 }}>
+              {fmtDate(lead.published)}{lead.updated && lead.updated !== lead.published ? " · updated " + shortDate(lead.updated) : ""}
+            </div>
+          )}
+          {lead.dek && <p style={{ fontSize: 24, lineHeight: 1.5, margin: "0 0 24px", maxWidth: "60ch" }}>{lead.dek}</p>}
+          {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
+        </article>
+      </section>
+
+      {/* Second row — up to 3 cards in a column grid */}
+      {row2.length > 0 && (
+        <section className="npj-row2" style={{ borderTop: "2.5px solid var(--ink)", display: "grid", gridTemplateColumns: `repeat(${Math.min(row2.length, 3)}, 1fr)` }}>
+          {row2.map((s, i) => {
+            const isLast = i === row2.length - 1;
+            return (
+              <div key={s.slug || i} style={{ padding: "26px " + (isLast ? "0" : "36px") + " 34px " + (i === 0 ? "0" : "36px"), borderRight: isLast ? "none" : "1.5px solid var(--ink)" }}>
+                {s.image && s.image.src && window.MediaImg && (
+                  <button onClick={() => open(s)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", marginBottom: 20 }}>
+                    <window.MediaImg srcs={[s.image.store, s.image.src]} alt={s.image.caption || s.headline || ""} style={{ width: "100%", height: 270, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
+                  </button>
+                )}
+                <div className="np-mono" style={{ fontWeight: 500, fontSize: 12, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--ink-soft)", marginBottom: 12 }}>
+                  {(s.tags || [])[0] || "Latest"}
+                </div>
+                <h2 onClick={() => open(s)} style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 28, lineHeight: 1.04, textTransform: "uppercase", margin: "0 0 12px", cursor: "pointer", display: "inline" }}>{s.headline}</h2>
+                {s.status === "unpublished" && <div style={{ marginTop: 6 }}><UnpubBadge small /></div>}
+                {s.dek && <p style={{ fontSize: 17.5, lineHeight: 1.5, margin: "12px 0 16px", color: "var(--ink)" }}>{s.dek}</p>}
+                {s.published && <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>{shortDate(s.published)}</div>}
+              </div>
+            );
+          })}
+        </section>
+      )}
+
+      {/* More from the newsroom — compact list rows */}
+      {more.length > 0 && (
+        <section style={{ borderTop: "2.5px solid var(--ink)", padding: "20px 0 12px" }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>More from the newsroom</div>
+          {more.map((s, i) => (
+            <div key={s.slug || i} className="npj-more-row" style={{ display: "grid", gridTemplateColumns: "150px 1fr 170px", gap: 22, alignItems: "baseline", padding: "15px 0", borderTop: "1px solid var(--rule)" }}>
+              <span className="np-mono" style={{ fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink-soft)" }}>{(s.tags || [])[0] || "Latest"}</span>
+              <button onClick={() => open(s)} style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 23, lineHeight: 1.05, textTransform: "uppercase", background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}>
+                {s.headline}
+                {s.status === "unpublished" && <span style={{ marginLeft: 8 }}><UnpubBadge small /></span>}
+              </button>
+              <span className="np-mono" style={{ fontSize: 12, color: "var(--ink-soft)", textAlign: "right" }}>{s.published ? shortDate(s.published) : ""}</span>
+            </div>
+          ))}
+        </section>
+      )}
+    </>
   );
 }
 
