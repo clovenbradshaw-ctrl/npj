@@ -459,3 +459,29 @@ a { color: inherit; }
 @keyframes citey-wander { 0%, 100% { transform: translate(0, 0); } 18% { transform: translate(2.5px, -1px); } 38% { transform: translate(-2px, 1px); } 58% { transform: translate(1px, 2px); } 78% { transform: translate(-1.5px, -1.5px); } }
 @keyframes citey-wave { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-16deg); } }
 @keyframes star-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* ---- the corner-sprite (Citey.jsx) idle + interstitial motion ----
+   "boil": the hand-drawn wobble — bent wire never sits perfectly still.
+   "morph": the interstitial Citey plays when his shape CHANGES state, so the
+   reshape reads as a deliberate transformation instead of a hard glyph swap.
+   "breathe": a barely-there scale so an idle, quiet Citey still feels alive. */
+@keyframes citey-boil {
+  0%   { transform: translate(0,0) rotate(0deg); }
+  25%  { transform: translate(.5px,-.4px) rotate(.45deg); }
+  50%  { transform: translate(-.4px,.5px) rotate(-.4deg); }
+  75%  { transform: translate(.4px,.3px) rotate(.35deg); }
+  100% { transform: translate(0,0) rotate(0deg); }
+}
+@keyframes citey-morph {
+  0%   { transform: scale(.6) rotate(-9deg);  opacity: .25; }
+  45%  { transform: scale(1.14) rotate(4.5deg); opacity: 1; }
+  72%  { transform: scale(.95) rotate(-1.6deg); }
+  100% { transform: scale(1) rotate(0);        opacity: 1; }
+}
+@keyframes citey-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+@keyframes citey-eye-wander { 0%, 100% { transform: translate(0,0); } 22% { transform: translate(1.4px,-.8px); } 50% { transform: translate(-1.2px,.7px); } 76% { transform: translate(.8px,1px); } }
+
+/* Motion-sensitive readers: Citey holds still (state still reads, just calm). */
+@media (prefers-reduced-motion: reduce) {
+  [data-citey-anim] *, [data-citey-anim] { animation: none !important; transition: none !important; }
+}

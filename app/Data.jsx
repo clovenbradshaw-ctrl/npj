@@ -152,6 +152,69 @@ function DatasetCard({ d, onCite, onArchive, compact }) {
   );
 }
 
+/* ============ published sources: the archive behind released stories ============ */
+// The Data tab's spine: every source cited by a PUBLISHED article, folded out of
+// the committed record (NpjSources.buildPublishedIndex), deduped by content
+// signature and backtracked to the stories that link to it.
+function usePublishedSources() {
+  const [snap, setSnap] = useState(() => ({
+    state: window.NpjSources ? window.NpjSources.publishedState() : "idle",
+    groups: window.NpjSources ? window.NpjSources.publishedGroups() : null
+  }));
+  useEffect(() => {
+    if (!window.NpjSources) return;
+    const off = window.NpjSources.onChange(s => setSnap({ state: s.state, groups: s.groups }));
+    window.NpjSources.buildPublishedIndex().catch(() => {});
+    return off;
+  }, []);
+  return snap;
+}
+
+// One source, with the trail back to the articles that cite it (the inverse of
+// "read the source" — trace who relied on it).
+function PublishedSourceCard({ g, onOpenArticle }) {
+  const [open, setOpen] = useState(false);
+  const k = g.kind || {};
+  const url = g.rec && (g.rec.archive_url || g.rec.original_url);
+  const pubArticles = g.carriers.filter(c => c.kind === "published");
+  const n = pubArticles.length;
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px" }}>
+        <I.archive style={{ fontSize: 20, color: k.archived ? "var(--verified)" : "var(--data)", flex: "0 0 auto" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17, lineHeight: 1.08 }}>{g.title}</div>
+          <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ color: "var(--data)" }}>{k.label}</span>
+            <span>cited by {n} article{n !== 1 ? "s" : ""}</span>
+            {g.duplicated && <span title="Identical content uploaded more than once — linked, not duplicated" style={{ color: "var(--review)" }}>×{g.uploads} uploads linked</span>}
+          </div>
+        </div>
+        {url
+          ? <a href={url} target="_blank" rel="noopener" className={k.archived ? "chip chip-accepted" : "btn btn-sm"} style={{ flex: "0 0 auto", textDecoration: "none" }}><I.archive style={{ fontSize: 12 }} /> {k.archived ? "Archived" : "Open"}</a>
+          : <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>no snapshot</span>}
+        <button className="btn btn-sm btn-ghost" onClick={() => setOpen(o => !o)} style={{ flex: "0 0 auto" }}>{open ? "Hide trail" : "Trace ↩"}</button>
+      </div>
+      {open && (
+        <div className="fade-in" style={{ borderTop: "1px solid var(--rule)", padding: "10px 14px" }}>
+          <div className="np-eyebrow" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 7 }}>Linked from</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {pubArticles.map(c => (
+              <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                <button onClick={() => onOpenArticle && c.slug && onOpenArticle(c.slug)} title="Read this article" style={{ cursor: "pointer", textAlign: "left", border: 0, background: "transparent", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, color: "var(--ink)", textDecoration: "underline", textUnderlineOffset: 2, padding: 0 }}>{c.title}</button>
+                {(c.quotes || []).slice(0, 1).map((q, i) => (
+                  <span key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12, color: "var(--ink-soft)" }}>“{q.length > 110 ? q.slice(0, 110) + "…" : q}”</span>
+                ))}
+              </div>
+            ))}
+            {n === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>No published article cites this yet.</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============ data explorer page ============ */
 function ArchiveTagHowTo({ failed }) {
   const tag = (window.NPJ.ARCHIVE || {}).tag || "npj-source";
@@ -175,54 +238,88 @@ function ArchiveTagHowTo({ failed }) {
   );
 }
 
-function DataExplorer({ onHome, onNewsroom }) {
+function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
   const data = useArchiveData();
   const arc = window.NPJ.ARCHIVE || {};
+  const pub = usePublishedSources();
   const projects = ["All", ...Array.from(new Set(data.map(d => d.project)))];
+  // "published" (default) = the archive behind released stories, backtracked.
+  // "all" = every archive.org item carrying the tag, story or no story.
+  const [mode, setMode] = useState("published");
   const [q, setQ] = useState("");
   const [proj, setProj] = useState("All");
   const [archiveTarget, setArchiveTarget] = useState(null);
-  const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(q.toLowerCase()));
+  const ql = q.toLowerCase();
+  const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(ql));
+  const pubGroups = (pub.groups || []).filter(g =>
+    !ql || ((g.title || "") + " " + ((g.rec && (g.rec.archive_url || g.rec.original_url)) || "") + " " + g.carriers.map(c => c.title).join(" ")).toLowerCase().includes(ql));
 
   return (
     <div className="fade-in">
       <Masthead route="explore" onHome={onHome} onNewsroom={onNewsroom} />
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "36px 22px 70px" }}>
         <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Data explorer</div>
-        <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .95, margin: "0 0 10px" }}>The evidence, before the story.</h1>
-        <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "60ch", margin: "0 0 12px" }}>
-          Every dataset any project has gathered, in one place — searchable, previewable, and citeable from any story across any feed. Archived datasets resolve to a permanent snapshot; the rest are a click away from it.
+        <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .95, margin: "0 0 10px" }}>The evidence, behind the story.</h1>
+        <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "62ch", margin: "0 0 16px" }}>
+          The archive of record — every source a published article rests on, in one place, with a trail back to the stories that cite it. Identical material uploaded more than once is linked, not duplicated, even across projects.
         </p>
-        <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 24, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          {arc.state === "loading" && <span>querying archive.org for subject:"{arc.tag}"…</span>}
-          {arc.state === "ok" && <span style={{ color: "var(--verified)" }}>● live from archive.org — {data.length} item{data.length !== 1 ? "s" : ""} tagged "{arc.tag}"</span>}
-          {arc.state === "error" && <span style={{ color: "var(--reject)" }}>archive.org query failed{arc.error ? " (" + arc.error + ")" : ""}</span>}
-          {arc.state !== "loading" && <button onClick={() => window.NPJ.loadArchiveSources && window.NPJ.loadArchiveSources()} className="np-mono" style={{ border: "1px solid var(--rule)", background: "var(--card)", fontSize: 10, padding: "1px 8px", cursor: "pointer", color: "var(--ink-soft)" }}>refresh</button>}
+
+        {/* the two cuts: the archive behind released stories, vs. every tagged item */}
+        <div style={{ display: "flex", gap: 0, marginBottom: 18, border: "1.5px solid var(--ink)", width: "fit-content" }}>
+          {[["published", "Published sources"], ["all", "All tagged items"]].map(([m, label]) => (
+            <button key={m} onClick={() => setMode(m)} className="np-cond" style={{ fontSize: 13, padding: "7px 16px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, border: 0, borderRight: m === "published" ? "1.5px solid var(--ink)" : 0, cursor: "pointer",
+              background: mode === m ? "var(--ink)" : "var(--card)", color: mode === m ? "var(--yellow)" : "var(--ink)" }}>{label}</button>
+          ))}
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "0 12px", flex: "1 1 260px" }}>
             <I.search style={{ fontSize: 16, color: "var(--ink-soft)" }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search datasets, columns, projects…"
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "published" ? "Search sources, or the stories citing them…" : "Search datasets, columns, projects…"}
               style={{ flex: 1, border: 0, background: "transparent", padding: "11px 0", fontFamily: "var(--serif)", fontSize: 15, outline: "none" }} />
           </div>
-          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{shown.length} of {data.length}</span>
-        </div>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 20 }}>
-          {projects.map(p => (
-            <button key={p} onClick={() => setProj(p)} className="np-cond" style={{ fontSize: 13, padding: "5px 12px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600,
-              border: "1.5px solid var(--ink)", background: proj === p ? "var(--ink)" : "var(--card)", color: proj === p ? "var(--yellow)" : "var(--ink)" }}>{p}</button>
-          ))}
+          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{mode === "published" ? pubGroups.length + " source" + (pubGroups.length !== 1 ? "s" : "") : shown.length + " of " + data.length}</span>
         </div>
 
-        {shown.map(d => <DatasetCard key={d.id} d={d} onArchive={setArchiveTarget} />)}
-        {shown.length === 0 && (data.length === 0 && arc.state !== "loading"
-          ? <ArchiveTagHowTo failed={arc.state === "error"} />
-          : <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)" }}>{arc.state === "loading" ? "Loading from archive.org…" : "No datasets match."}</div>)}
-        {data.length > 0 && (
-          <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 18 }}>
-            add a source: upload to archive.org with the subject tag <TagCode>{arc.tag || "npj-source"}</TagCode> (+ optional <TagCode>npj-project:Name</TagCode>)
-          </div>
+        {mode === "published" ? (
+          <React.Fragment>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {pub.state === "loading" && <span><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", verticalAlign: "-1px", marginRight: 6 }} />reading the published record…</span>}
+              {pub.state === "ok" && <span style={{ color: "var(--verified)" }}>● folded from the committed articles — sources deduped + backtracked</span>}
+              {pub.state === "error" && <span style={{ color: "var(--reject)" }}>couldn't read the published record</span>}
+            </div>
+            {pubGroups.map(g => <PublishedSourceCard key={g.signature} g={g} onOpenArticle={onOpenArticle} />)}
+            {pubGroups.length === 0 && pub.state !== "loading" && (
+              <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No source matches" : "No published sources yet"}</div>
+                <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: 0 }}>{q ? "Try another search, or switch to All tagged items." : "When a story ships, every source its claims rest on lands here — with a trail back to the article. Browse everything on archive.org under All tagged items."}</p>
+              </div>
+            )}
+          </React.Fragment>
+        ) : (
+          <React.Fragment>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {arc.state === "loading" && <span>querying archive.org for subject:"{arc.tag}"…</span>}
+              {arc.state === "ok" && <span style={{ color: "var(--verified)" }}>● live from archive.org — {data.length} item{data.length !== 1 ? "s" : ""} tagged "{arc.tag}"</span>}
+              {arc.state === "error" && <span style={{ color: "var(--reject)" }}>archive.org query failed{arc.error ? " (" + arc.error + ")" : ""}</span>}
+              {arc.state !== "loading" && <button onClick={() => window.NPJ.loadArchiveSources && window.NPJ.loadArchiveSources()} className="np-mono" style={{ border: "1px solid var(--rule)", background: "var(--card)", fontSize: 10, padding: "1px 8px", cursor: "pointer", color: "var(--ink-soft)" }}>refresh</button>}
+            </div>
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 20 }}>
+              {projects.map(p => (
+                <button key={p} onClick={() => setProj(p)} className="np-cond" style={{ fontSize: 13, padding: "5px 12px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600,
+                  border: "1.5px solid var(--ink)", background: proj === p ? "var(--ink)" : "var(--card)", color: proj === p ? "var(--yellow)" : "var(--ink)" }}>{p}</button>
+              ))}
+            </div>
+            {shown.map(d => <DatasetCard key={d.id} d={d} onArchive={setArchiveTarget} />)}
+            {shown.length === 0 && (data.length === 0 && arc.state !== "loading"
+              ? <ArchiveTagHowTo failed={arc.state === "error"} />
+              : <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)" }}>{arc.state === "loading" ? "Loading from archive.org…" : "No datasets match."}</div>)}
+            {data.length > 0 && (
+              <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 18 }}>
+                add a source: upload to archive.org with the subject tag <TagCode>{arc.tag || "npj-source"}</TagCode> (+ optional <TagCode>npj-project:Name</TagCode>)
+              </div>
+            )}
+          </React.Fragment>
         )}
       </div>
       {archiveTarget && <ArchiveModal items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}

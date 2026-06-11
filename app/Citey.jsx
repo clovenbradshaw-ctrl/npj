@@ -126,7 +126,7 @@ function baselineCue(gate) {
 class CiteyAgent extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { tier: 'smart', current: null, gate: CiteyStore.getGate(), anchorY: null, menu: false, mode: 'actions', tags: [], col: null, focusState: null, hidden: CiteyStore.getHidden(), walk: null };
+    this.state = { tier: 'smart', current: null, gate: CiteyStore.getGate(), anchorY: null, menu: false, mode: 'actions', tags: [], col: null, focusState: null, hidden: CiteyStore.getHidden(), walk: null, hovered: false };
     this._gateTimer = null;
   }
 
@@ -336,11 +336,21 @@ class CiteyAgent extends React.Component {
     const isOwned = fState === 'asserted' || fState === 'testimony' || fState === 'voice';
     const needsWork = fState === 'falsum' || fState === 'suspicious' || fState === 'negation';
 
+    // Subtler by default: a smaller sprite that sits quiet (and a touch faded)
+    // until you hover it, focus a claim (a message), or open the menu — then it
+    // comes fully forward. He still changes SHAPE with the grounding state; the
+    // change just plays as an interstitial morph (see the keyed group below).
+    const active = this.state.hovered || this.state.menu || (cur && cur.msg) || (cur && !cur.baseline);
+    const SIZE = 104;
     const wrapStyle = {
-      position: 'fixed', right: '26px', zIndex: 5400, width: '150px', cursor: 'pointer',
-      bottom: this.state.anchorY == null ? '24px' : 'auto',
+      position: 'fixed', right: '20px', zIndex: 5400, width: SIZE + 'px', cursor: 'pointer',
+      bottom: this.state.anchorY == null ? '20px' : 'auto',
       top: this.state.anchorY == null ? 'auto' : this.state.anchorY + 'px',
-      transition: 'top .5s cubic-bezier(.3,1,.4,1)'
+      opacity: active ? 1 : 0.78,
+      filter: active ? 'none' : 'saturate(.82)',
+      transition: 'top .5s cubic-bezier(.3,1,.4,1), opacity .4s ease, filter .4s ease, transform .35s cubic-bezier(.3,1.4,.5,1)',
+      transform: active ? 'scale(1)' : 'scale(.9)',
+      transformOrigin: 'right bottom'
     };
     const chip = (extra) => Object.assign({
       textAlign: 'left', width: '100%', border: '1px solid #3a3833', background: '#26241f', color: '#EDE7DA',
@@ -348,7 +358,9 @@ class CiteyAgent extends React.Component {
     }, extra || {});
 
     return (
-      React.createElement('div', { style: wrapStyle },
+      React.createElement('div', { style: wrapStyle, 'data-citey-anim': true,
+        onMouseEnter: () => this.setState({ hovered: true }),
+        onMouseLeave: () => this.setState({ hovered: false }) },
         // ---- action popover ----
         this.state.menu ? React.createElement('div', {
           onClick: e => e.stopPropagation(),
@@ -371,23 +383,37 @@ class CiteyAgent extends React.Component {
         ) : null,
 
         // ---- body + eyes (click to open the action menu) ----
-        React.createElement('div', { onClick: this._toggleMenu, title: 'Citey — ground every claim before you publish', style: { position: 'relative', width: '150px', height: '176px', margin: '0 auto' } },
-          React.createElement('svg', { viewBox: '0 0 150 180', width: 150, height: 180, style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
-            React.createElement('g', { fill: 'none', stroke: d.color, strokeWidth: 13, strokeLinecap: 'round', strokeLinejoin: 'round' },
-              React.createElement('path', { d: d.bodyPath })
+        // Nested groups COMPOSE their transforms: bob (drift up/down) ∘ boil
+        // (hand-drawn wobble) ∘ morph (the interstitial). The morph group is
+        // KEYED on the state name, so React remounts it whenever Citey changes
+        // shape — replaying citey-morph so the reshape reads as a transformation.
+        React.createElement('div', { onClick: this._toggleMenu, title: 'Citey — ground every claim before you publish', style: { position: 'relative', width: SIZE + 'px', height: Math.round(SIZE * 1.2) + 'px', margin: '0 auto' } },
+          React.createElement('svg', { viewBox: '0 0 150 180', width: SIZE, height: Math.round(SIZE * 1.2), style: { position: 'absolute', left: 0, top: 0, overflow: 'visible' } },
+            React.createElement('g', { style: { animation: 'citey-bob 3.8s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: 'center bottom' } },
+              React.createElement('g', { style: { animation: 'citey-boil 2.6s ease-in-out infinite', transformBox: 'fill-box', transformOrigin: 'center' } },
+                React.createElement('g', { key: cur.state, style: { animation: 'citey-morph .5s cubic-bezier(.4,1.5,.5,1)', transformBox: 'fill-box', transformOrigin: 'center' } },
+                  React.createElement('path', { d: d.bodyPath, fill: 'none', stroke: d.color, strokeWidth: 13, strokeLinecap: 'round', strokeLinejoin: 'round', style: { transition: 'stroke .45s ease' } })
+                )
+              )
             )
           ),
-          React.createElement('div', { style: { position: 'absolute', top: '13px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '6px', zIndex: 3 } },
-            React.createElement('img', { src: EYE_BASE + d.eyes[0] + '.png', draggable: false, style: { width: '50px', height: 'auto', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,.18))' } }),
-            React.createElement('img', { src: EYE_BASE + d.eyes[1] + '.png', draggable: false, style: { width: '50px', height: 'auto', filter: 'drop-shadow(0 4px 6px rgba(0,0,0,.18))' } })
+          // centering wrapper (its translateX must NOT be clobbered by the
+          // animations) → blink (scaleY) → wander (translate) → the eye pair
+          React.createElement('div', { style: { position: 'absolute', top: Math.round(SIZE * 0.085) + 'px', left: '50%', transform: 'translateX(-50%)', zIndex: 3 } },
+            React.createElement('div', { style: { animation: 'citey-blink 5.2s ease-in-out infinite' } },
+              React.createElement('div', { style: { display: 'flex', gap: '4px', animation: 'citey-eye-wander 8s ease-in-out infinite' } },
+                React.createElement('img', { key: 'el' + d.eyes[0], src: EYE_BASE + d.eyes[0] + '.png', draggable: false, style: { width: Math.round(SIZE * 0.33) + 'px', height: 'auto', filter: 'drop-shadow(0 3px 5px rgba(0,0,0,.18))' } }),
+                React.createElement('img', { key: 'er' + d.eyes[1], src: EYE_BASE + d.eyes[1] + '.png', draggable: false, style: { width: Math.round(SIZE * 0.33) + 'px', height: 'auto', filter: 'drop-shadow(0 3px 5px rgba(0,0,0,.18))' } })
+              )
+            )
           ),
           // a small badge when claims still need grounding
           (gate.undeclared && !this.state.menu) ? React.createElement('div', {
-            style: { position: 'absolute', top: '-2px', right: '14px', minWidth: '20px', height: '20px', padding: '0 5px', borderRadius: '10px', background: '#D8412C', color: '#fff', fontFamily: CITEY_MONO, fontWeight: 700, fontSize: '11px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 8px rgba(0,0,0,.3)' }
+            style: { position: 'absolute', top: '-2px', right: '8px', minWidth: '18px', height: '18px', padding: '0 5px', borderRadius: '9px', background: '#D8412C', color: '#fff', fontFamily: CITEY_MONO, fontWeight: 700, fontSize: '10.5px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 3px 8px rgba(0,0,0,.3)' }
           }, gate.undeclared) : null
         ),
-        // tier badge
-        React.createElement('div', { style: { textAlign: 'center', marginTop: '6px', fontFamily: CITEY_MONO, fontSize: '9.5px', letterSpacing: '1.3px', textTransform: 'uppercase', color: '#A8A294' } },
+        // tier badge — fades in only when Citey is forward, so the idle sprite stays quiet
+        React.createElement('div', { style: { textAlign: 'center', marginTop: '3px', fontFamily: CITEY_MONO, fontSize: '8.5px', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#A8A294', opacity: active ? 0.9 : 0, transition: 'opacity .3s ease' } },
           tier === 'smarter' ? 'smarter · graph walk' : 'smart · reflex')
       )
     );
