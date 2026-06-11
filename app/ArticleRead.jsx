@@ -454,15 +454,6 @@ function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityO
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <button onClick={() => setAudit(!audit)} aria-pressed={audit}
-          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
-          style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "5px 12px",
-            border: "1.5px solid var(--ink)", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".04em",
-            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
-          <I.shield style={{ fontSize: 14, verticalAlign: "-2px" }} /> Auditability
-          <span className="np-mono" style={{ fontSize: 10, fontWeight: 600, padding: "0 5px", borderRadius: 2, border: "1px solid " + (audit ? "var(--yellow)" : "var(--rule-strong)") }}>{audit ? "ON" : "OFF"}</span>
-        </button>
-
         <span style={{ flex: 1 }} />
 
         {canEdit && (
@@ -482,6 +473,13 @@ function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityO
             <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>
         ))}
+
+        <button className="btn btn-sm" onClick={() => setAudit(!audit)} aria-pressed={audit}
+          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7,
+            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
+          <I.shield style={{ fontSize: 14 }} /> Auditability
+        </button>
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
