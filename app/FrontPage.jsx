@@ -179,7 +179,7 @@ function FrontLineup({ items, onOpen }) {
         </button>
         {lead.image && lead.image.src && window.MediaImg && (
           <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 14px" }}>
-            <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+            <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} fit={lead.image.fit} crop={lead.image.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
           </button>
         )}
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
