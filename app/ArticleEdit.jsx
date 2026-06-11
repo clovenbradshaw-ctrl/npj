@@ -30,7 +30,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
   const imageFigure = (id, banner) =>
-    '<figure contenteditable="false" class="cmp-embed"><image-slot id="' + id + '" shape="rect" placeholder="' +
+    '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" fitcontrol shape="rect" placeholder="' +
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
     '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + (banner ? "banner" : "photo") +

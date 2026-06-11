@@ -21,7 +21,7 @@ const DEK_PH = "Subtitle — one line under the headline";
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
 // so the author fills in fields, not loose formatted prose.
 const START_DOC =
-  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
+  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
   '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
@@ -254,7 +254,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
-  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`;
+  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`;
   const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
 
   // ---- images come in by paste/drop too ----

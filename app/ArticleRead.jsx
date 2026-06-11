@@ -110,7 +110,41 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
 // otherwise. Either way, if the candidate fails to paint, onError advances to
 // the next one (the archive.org copy), so the image always loads from the
 // media store when it can and from archive.org when it can't.
-function MediaImg({ srcs, alt, style }) {
+// A framed, cropped render that reproduces <image-slot>'s cover/contain/fill
+// framing on the read side. The frame takes the author's saved aspect ratio
+// (crop.ar) so the cover pan/zoom (s,x,y) lands exactly where it did in the
+// editor, at any display width. Falls back to a plain object-fit while the
+// natural dimensions aren't known yet.
+function CropFrame({ src, alt, style, fit, crop, onError }) {
+  const [nat, setNat] = useState(null);
+  React.useEffect(() => { setNat(null); }, [src]);
+  const ar = (crop && crop.ar) || (16 / 9);
+  const f = fit || "cover";
+  const wrap = { position: "relative", overflow: "hidden", width: "100%", aspectRatio: String(ar), display: "block", ...style };
+  let imgStyle;
+  if (f === "cover" && nat && nat.w && nat.h) {
+    // same geometry as image-slot._applyView, with the frame normalised to
+    // fw=ar, fh=1 (only the ratio matters — left/top/width/height are frame-%).
+    const iw = nat.w, ih = nat.h, s = (crop && crop.s) || 1;
+    const base = Math.max(ar / iw, 1 / ih), k = base * s;
+    imgStyle = {
+      position: "absolute", maxWidth: "none", transform: "translate(-50%,-50%)",
+      width: (iw * k / ar * 100) + "%", height: (ih * k * 100) + "%",
+      left: (50 + ((crop && crop.x) || 0)) + "%", top: (50 + ((crop && crop.y) || 0)) + "%",
+    };
+  } else {
+    imgStyle = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: f === "fill" ? "fill" : (f === "contain" ? "contain" : "cover") };
+  }
+  return (
+    <div style={wrap}>
+      <img src={src} alt={alt || ""} loading="lazy" style={imgStyle}
+        onLoad={(e) => setNat({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
+        onError={onError} />
+    </div>
+  );
+}
+
+function MediaImg({ srcs, alt, style, fit, crop }) {
   const list = (srcs || []).filter(Boolean);
   const [i, setI] = useState(0);
   const [resolved, setResolved] = useState(null);
@@ -136,8 +170,12 @@ function MediaImg({ srcs, alt, style }) {
   // while an authenticated store fetch is in flight, hold a neutral placeholder
   // rather than flashing a doomed unauthenticated <img> request
   if (resolved == null) return <div style={{ ...style, background: "var(--paper-2)" }} aria-hidden="true" />;
-  return <img src={resolved} alt={alt || ""} loading="lazy" style={style}
-    onError={() => setI(n => (n < list.length - 1 ? n + 1 : n))} />;
+  const onError = () => setI(n => (n < list.length - 1 ? n + 1 : n));
+  // a saved crop (or a non-cover fit) renders in an aspect-locked frame
+  if ((crop && crop.ar) || fit === "contain" || fit === "fill") {
+    return <CropFrame src={resolved} alt={alt} style={style} fit={fit} crop={crop} onError={onError} />;
+  }
+  return <img src={resolved} alt={alt || ""} loading="lazy" style={style} onError={onError} />;
 }
 
 // An embedded media block: the EO log only stores the URL, so the reader
@@ -304,7 +342,7 @@ function ArticleRead(props) {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
             <figure key={i} style={{ margin: "26px 0" }}>
-              <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
             </figure>
           );
@@ -368,13 +406,16 @@ function ArticleRead(props) {
     </header>
   );
 
-  // the lead/banner image — from the folded article's derived `image`, or the
-  // banner-flagged block in the body. Rendered once, as a hero under the
-  // headline; the body map skips the same block so it never doubles up.
-  const heroImg = (A.image && A.image.src) ? A.image : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
+  // the banner image — lifted into a hero under the headline. ONLY an explicit
+  // banner is lifted (A.image.banner); a first-inline image picked up as the
+  // front-page thumbnail stays inline in the body (the body map skips banner
+  // blocks, so a lifted banner never doubles up).
+  const heroImg = (A.image && A.image.src && A.image.banner)
+    ? A.image
+    : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
     <figure style={{ margin: "0 0 28px" }}>
-      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
     </figure>
   ) : null;
