@@ -30,21 +30,26 @@
 
   // Mint a citation, de-duping on srcKey + normalized quote so the same span of
   // the same source is one record no matter how many times it's pinned.
+  // `spans` (optional) carries a MULTI-PART pin — [{ quote, loc }, …] when the
+  // support lives in more than one place in the source; the joined quote stays
+  // the record's quote so every legacy reader is unchanged.
   function mint(opts) {
     opts = opts || {};
     var srcKey = opts.srcKey || null;
     var raw = String(opts.quote || '');
     var key = cmp(raw);
     if (!key) return null;
+    var spans = (opts.spans && opts.spans.length > 1) ? opts.spans : null;
     var R = reg();
     for (var id in R) {
       if (R[id].srcKey === srcKey && cmp(R[id].quote) === key) {
         if (opts.loc && !R[id].loc) R[id].loc = opts.loc;       // enrich with offsets if newly known
+        if (spans && !R[id].spans) R[id].spans = spans;
         return id;
       }
     }
     var cid = newId();
-    R[cid] = { id: cid, srcKey: srcKey, quote: raw.trim(), loc: opts.loc || null, createdAt: nowIso(), label: raw.trim().slice(0, 48) };
+    R[cid] = { id: cid, srcKey: srcKey, quote: raw.trim(), loc: opts.loc || null, spans: spans, createdAt: nowIso(), label: raw.trim().slice(0, 48) };
     return cid;
   }
 

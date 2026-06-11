@@ -424,3 +424,14 @@ a { color: inherit; }
   .npj-logo { height: 62px !important; }
   .npj-taglines > div { font-size: 16px !important; }
 }
+
+/* ============ grounding workspace (GroundingWorkspace.jsx) ============ */
+/* Citey, drawn: the bent-wire operator's idle motion + the table's row flash */
+@keyframes rowflash { 0%, 28% { background-color: rgba(255,236,1,.22); } 100% { background-color: rgba(255,236,1,0); } }
+@keyframes citey-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes citey-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+@keyframes citey-pop { 0% { transform: scale(.55) rotate(-7deg); } 60% { transform: scale(1.12) rotate(2.5deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes citey-hop { 0%, 100% { transform: translateY(0) scaleY(1); } 28% { transform: translateY(-13px) scaleY(1.06); } 52% { transform: translateY(0) scaleY(.9); } 74% { transform: translateY(-5px) scaleY(1.02); } }
+@keyframes citey-wander { 0%, 100% { transform: translate(0, 0); } 18% { transform: translate(2.5px, -1px); } 38% { transform: translate(-2px, 1px); } 58% { transform: translate(1px, 2px); } 78% { transform: translate(-1.5px, -1.5px); } }
+@keyframes citey-wave { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-16deg); } }
+@keyframes star-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

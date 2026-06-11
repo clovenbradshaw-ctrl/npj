@@ -21,6 +21,8 @@ founding admin curates the site and grows the network from there.
 | `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
+| `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
+| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation |
 | `app/Documents.jsx` | the article explorer — grouped by project, each showing who is invited |
 | `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags** |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
@@ -114,6 +116,37 @@ source's sentences by overlap, and points at the one that backs the claim — yo
 review and pin it. No source text yet? Paste the passage and Citey ranks within it
 (and remembers it on the source for the next claim). He proposes the span; the
 author decides what's true.
+
+## The Grounding Workspace — four pivoting views of one draft
+
+Next to **Prose** (the editor), the Newsroom's view switcher opens the
+**grounding workspace** (`app/GroundingWorkspace.jsx`): three more views of the
+*same* draft, each a different cut of its grounding record, with a side panel
+that always shows a second view and **pivots** as you work:
+
+- **Grounding** — every sentence is a row: its status pill (⊤ grounded · ⊨ N
+  sources · ⊥ needs source · ⊩/⊨/⊢ owned · ¬ sources disagree), the citations
+  attached to it, and its stance. Click a sentence and the panel shows its
+  grounding card; click a citation chip and the panel pivots to the registry.
+- **Citations** — the registry of reusable records. A citation is a pinned span
+  of a source — exact words plus character offsets (multi-part when the support
+  lives in more than one place). One record can back many sentences ("USED ×n");
+  unlinking a sentence never destroys the record. **In context** opens the quote
+  highlighted inside its source; **Usage ×n** lights up every sentence it backs.
+- **Sources** — the documents themselves, rendered as paper with a letterhead
+  (kind · title · archived-or-not). Search within the document, see every cited
+  span highlighted in place, and — from any "+ Cite" — go in **armed**: Citey
+  shades the passages he scents (mechanical word overlap, dotted, never a
+  one-click pin), and you drag-select the exact words. Grab two spans if the
+  support lives in two places; *⊕ Cite this span* mints the reusable record.
+
+A **Ground truth** strip keeps the running tally (grounded / yours / conflicts /
+needs sources) and the gate chip — **⚑ N blockers** until every sentence is
+grounded or owned, **⊤ gate open** after. **Walk me through** hands Citey the
+floor: he steps sentence-by-sentence through everything unsourced with one
+honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / Infer ⊢).
+All of it reads and writes the same editor DOM and autosave as Prose; the views
+can't diverge.
 
 ## Citey — every claim grounded before it ships
 
