@@ -252,22 +252,25 @@ a { color: inherit; }
   color: var(--nr-text);
 }
 .newsroom.nr-light {
-  --nr-bg: #e7e1cf;
-  --nr-rail: #efe9d8;
-  --nr-panel: #efe9d8;
-  --nr-field: #fffdf6;
-  --nr-page: #fffdf6;
-  --nr-line: rgba(22,20,13,.18);
-  --nr-line-strong: rgba(22,20,13,.4);
+  /* a real depth ramp instead of one flat beige: the canvas recedes so the
+     white document sheet floats, rails/panels step up toward it, and the
+     fields you actually write in read as clean paper */
+  --nr-bg: #ddd5c1;            /* canvas behind the sheet — the deepest tone */
+  --nr-rail: #ece5d3;          /* contents rail + tab/strip chrome */
+  --nr-panel: #f2ecdf;         /* side panels — a step brighter than the rail */
+  --nr-field: #fffdf6;         /* inputs + table fields — paper white */
+  --nr-page: #fffdf6;          /* the document sheet */
+  --nr-line: rgba(22,20,13,.2);
+  --nr-line-strong: rgba(22,20,13,.44);
   --nr-text: #16140d;
-  --nr-soft: #4a4536;
-  --nr-muted: #756e5b;
-  --nr-quote: #4a4536;
-  --nr-link: #2b5f8a;
-  --nr-code-bg: rgba(22,20,13,.06);
-  --nr-ok: #1f6f4a;
-  --nr-warn: #9a6a12;
-  --nr-page-shadow: 6px 6px 0 rgba(22,20,13,.10);
+  --nr-soft: #45402f;
+  --nr-muted: #6b6450;         /* darker than before so secondary text clears AA */
+  --nr-quote: #45402f;
+  --nr-link: #1f5a86;
+  --nr-code-bg: rgba(22,20,13,.055);
+  --nr-ok: #1c6a45;
+  --nr-warn: #8a5e10;
+  --nr-page-shadow: 5px 5px 0 rgba(22,20,13,.13);
 }
 .newsroom ::selection { background: var(--review); color: #fff; }
 .newsroom .np-scroll::-webkit-scrollbar-thumb { background: var(--nr-line-strong); }

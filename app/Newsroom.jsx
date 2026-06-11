@@ -531,6 +531,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const tableApi = {
     segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.segment(ed.current) : [],
+    // the live editor node — the workspace observes it so the grounding table
+    // imports every prose sentence the moment it lands (survives the restore race)
+    editorEl: () => ed.current,
     rev,
     toProse: () => setView("prose"),
     // scroll the (hidden) editor to a row and select it, then flip to prose
