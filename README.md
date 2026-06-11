@@ -28,7 +28,7 @@ founding admin curates the site and grows the network from there.
 | `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
-| `app/pii.js` | the **pii-v1 pack** — mechanical PII recognizers (regex + checksum + context, **no model**); detects candidate spans and hard-redacts them |
+| `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
 | `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing |
 | `app/versions.jsx` | article version history + word-level diff |
 | `backend/` | n8n publish workflow + thin browser clients |
@@ -202,12 +202,14 @@ on the way there. Upload a document and Citey opens a review (you can defer it,
 but a source can't be archived until you've been through it):
 
 - **He scans it mechanically.** `app/pii.js` is a small, Presidio-shaped
-  `pii-v1` recognizer pack — regexes, checksums (Luhn for cards, the SSN
-  never-issued ranges, IBAN mod-97) and context words — surfacing emails, phones,
-  SSNs, cards, IBANs, IPs, street addresses, dates of birth, government IDs and
-  names. It favours **recall over precision** (missing PII costs more than
-  over-flagging) and, like the rest of Citey, runs with **no model** — every
-  finding carries a `basis` (which recognizer fired, and why).
+  `pii-v2` recognizer pack — regexes, checksums (Luhn for cards, the SSN
+  never-issued ranges, IBAN mod-97) and context words — surfacing emails, phone
+  numbers, SSNs, cards, IBANs, IPs, street addresses, PO boxes, birth dates and
+  government IDs. It is **data-shaped only**: it deliberately does **not** guess
+  person names (without a model that means flagging every proper noun, which
+  buries the real findings) — drag-select a name in review to redact it. Like
+  the rest of Citey it runs with **no model** — every finding carries a `basis`
+  (which recognizer fired, and why).
 - **You decide each span.** Hard-**redact** it, or **keep** it public on purpose
   (affirm). Citey can also redact any selection you make, or let you edit the
   whole document — broad editing, not just toggling his findings.

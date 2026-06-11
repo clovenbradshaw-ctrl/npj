@@ -9,8 +9,10 @@
    flagged span or consciously AFFIRMED it (kept it public on purpose).
 
    Two layers, the same split as the rest of Citey:
-     • the DECISION is mechanical — window.NpjPII (the pii-v1 recognizer pack)
-       surfaces candidate spans and scores them. No language model.
+     • the DECISION is mechanical — window.NpjPII (the pii-v2 recognizer pack)
+       surfaces candidate spans and scores them. No language model. The pack is
+       data-shaped (phones, SSNs, cards, addresses…) and does NOT guess names —
+       redacting a name is a drag-select here, not a recognizer's call.
      • this is the SURFACE — it renders the document, lets Citey edit it broadly
        (redact a flagged span, redact any selection, or free-edit the whole text),
        and writes the review onto the source record.
@@ -175,7 +177,9 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.74)", zIndex: 5200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} className="fade-in">
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,96vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", background: "var(--card)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
+      {/* color is pinned: the modal mounts inside the newsroom, whose dark mode sets a
+          light text color on the whole tree — unreadable on this light card */}
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,96vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", background: "var(--card)", color: "var(--ink)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         {/* header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "2px solid var(--ink)", background: "var(--yellow)" }}>
           <span style={{ fontFamily: "var(--mono, monospace)", fontWeight: 800, fontSize: 26, lineHeight: 1, color: hd.color, textShadow: "0 0 14px " + hd.color + "44" }}>{hd.glyph}</span>
@@ -188,7 +192,7 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
 
         {/* basis line — honest about what Citey is and isn't */}
         <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", padding: "8px 18px 0", lineHeight: 1.5 }}>
-          {PII.BASIS} · mechanical recognizers, no model · recall-favoring — a first pass that surfaces candidates, never a guarantee. Archiving to archive.org is permanent and can't be undone.
+          {PII.BASIS} · mechanical recognizers, no model · data-shaped PII only (phones, SSNs, cards, addresses — it won't guess names; drag-select a name to redact it). A first pass, never a guarantee. Archiving to archive.org is permanent and can't be undone.
         </div>
 
         {/* scrolling content */}

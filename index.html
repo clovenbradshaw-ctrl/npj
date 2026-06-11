@@ -59,9 +59,10 @@
 <!-- source provenance: synthetic dedup (one signature per content, linked across
      projects) + backtracking (source → every article that cites it). No model. -->
 <script src="app/sources.js"></script>
-<!-- pii-v1 pack: mechanical PII recognizers (regex + checksum + context) that
-     surface candidate spans + hard-redact them before a source hits archive.org.
-     No model — each finding carries a `basis`. -->
+<!-- pii-v2 pack: mechanical recognizers (regex + checksum + context) for
+     data-shaped PII — phones, SSNs, cards, addresses, emails (no name-guessing) —
+     that surface candidate spans + hard-redact them before a source hits
+     archive.org. No model — each finding carries a `basis`. -->
 <script src="app/pii.js"></script>
 <!-- Citey — the grounding assistant. State is mechanical (reads the editor's own
      grounding); voice is leashed (templated, no model). Plain scripts, order matters. -->
