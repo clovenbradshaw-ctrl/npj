@@ -1,5 +1,5 @@
 /* ============================================================
-   pii.js — the pii-v1 recognizer pack. Citey's mechanical PII layer. NO MODEL.
+   pii.js — the pii-v2 recognizer pack. Citey's mechanical PII layer. NO MODEL.
 
    Citey's first real job is to surface candidate PII in a document BEFORE it is
    archived to archive.org (permanent, all-or-nothing, undeletable), so the
@@ -13,18 +13,23 @@
    carries a `basis` (which recognizer fired, and why), so a redaction event can
    record WHY a span was flagged: the audit trail the ledger wants.
 
-   Evaluation stance, per Presidio: optimise for RECALL over precision (missing
-   PII costs more than over-flagging). Findings are surfaced generously and scored;
-   the AUTHOR decides each one. No de-identification is perfect — this is a first
-   pass that surfaces candidates, never a guarantee. The maintainers' own caveat
-   is the operative fact for source protection.
+   Evaluation stance: recall over precision WITHIN each lane, but the lanes are
+   strictly DATA-SHAPED — phone numbers, SSNs, credit cards, street addresses,
+   emails, IPs, IBANs, government IDs, birth dates. There is deliberately no
+   person-name guesser: without a model, "person name" degrades to "any Title
+   Case run", which flags every headline, place and organisation in a news
+   document and buries the real findings in noise. Names stay the author's
+   call — the review surface lets them drag-select any span and redact it.
+   Findings are surfaced and scored; the AUTHOR decides each one. No
+   de-identification is perfect — this is a first pass that surfaces
+   candidates, never a guarantee.
 
    Plain script — publishes window.NpjPII. No network, no model, no autonomy.
    ============================================================ */
 (function (root) {
   'use strict';
 
-  var BASIS = 'pii-v1';                       // the pack; recognizers add their own clause
+  var BASIS = 'pii-v2';                       // the pack; recognizers add their own clause
   var MAX_SCAN = 200000;                      // don't choke the main thread on a giant paste
 
   /* ---------------- validators (cheap checksums / format gates) ---------------- */
@@ -54,15 +59,29 @@
     return rem === 1;
   }
 
-  /* ---------------- the pii-v1 pack: data-shaped recognizers ----------------
+  /* ---------------- the pii-v2 pack: data-shaped recognizers ----------------
      Each: { type, label, basis, score, re, valid?, context?, ctxBoost?, ctxGated? }
        • re        — global regex; match.index/[0] give the span + offsets
        • valid     — checksum/format gate; a fail DROPS the candidate (precision)
-       • context   — lemma-ish words near the span that raise confidence (Presidio
+       • context   — WHOLE words near the span that raise confidence (Presidio
                      LemmaContextAwareEnhancer, done mechanically)
        • ctxGated  — only fire when a context word is near (kills generic-number noise)
-     Frozen Presidio defaults are revisable here without touching the engine. */
-  var TITLES = '(?:Mr|Mrs|Ms|Miss|Dr|Prof|Sen|Rep|Gov|Mayor|Officer|Det|Sgt|Capt|Lt|Col|Judge|Justice|Atty|Rev|Fr|Sr|Jr)\\.?';
+     Frozen Presidio defaults are revisable here without touching the engine.
+
+     Deliberately ABSENT: a person-name recognizer. v1 shipped a Title-Case
+     guesser and it flagged every proper noun on the page — headlines, orgs,
+     places — drowning the real findings. Names are an article's normal
+     material; the one source-identifying name is a judgement call the author
+     makes by drag-selecting it in review. */
+  var PHONE_CTX = ['phone', 'call', 'called', 'calls', 'tel', 'telephone', 'mobile', 'cell', 'fax',
+    'text', 'texted', 'reach', 'reached', 'contact', 'dial', 'hotline', 'sms', 'whatsapp', 'voicemail'];
+  var SSN_CTX = ['ssn', 'social security', 'soc sec'];
+  var ADDR_CTX = ['address', 'live', 'lives', 'lived', 'living', 'home', 'house', 'residence', 'resides', 'apartment', 'mail', 'mailing'];
+  var STREET_SUFFIX = '(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter|Circle|Cir|Highway|Hwy|Parkway|Pkwy|Pike|Plaza|Square|Sq|Trail|Trl|Loop|Row|Alley|Aly|Walk|Crossing|Xing)';
+  var STREET_WORD = "(?:\\d{1,4}(?:st|nd|rd|th)|[A-Z][A-Za-z'.\\-]*\\.?)";        // Main / 16th / W.
+  var UNIT_TAIL = '(?:[,\\s]+(?:Apt|Apartment|Suite|Ste|Unit|Bldg|Building|Fl|Floor|Rm|Room|#)\\.?\\s*[A-Za-z0-9\\-]+)?';
+  var CITY_TAIL = "(?:,\\s*[A-Z][A-Za-z'.\\- ]+,?\\s+[A-Z]{2}\\s+\\d{5}(?:-\\d{4})?\\b)?";
+
   var PACK = [
     { type: 'EMAIL_ADDRESS', label: 'Email address', basis: BASIS + ':EmailRecognizer', score: 0.95,
       re: /[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,24}/gi },
@@ -71,12 +90,29 @@
       re: /\b(?:\d[ \-]?){13,19}\b/g, valid: function (s) { var d = digits(s); return d >= 13 && d <= 19 && luhn(s); } },
 
     { type: 'US_SSN', label: 'US Social Security number', basis: BASIS + ':UsSsnRecognizer', score: 0.85,
-      re: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/g, valid: ssnValid, context: ['ssn', 'social security'], ctxBoost: 0.1 },
+      re: /\b\d{3}[-\s]\d{2}[-\s]\d{4}\b/g, valid: ssnValid, context: SSN_CTX, ctxBoost: 0.1 },
 
-    { type: 'PHONE_NUMBER', label: 'Phone number', basis: BASIS + ':PhoneRecognizer', score: 0.55,
-      re: /(?:\+?\d{1,3}[\s.\-]?)?(?:\(\d{2,4}\)|\d{2,4})[\s.\-]\d{2,4}[\s.\-]\d{2,4}(?:[\s.\-]\d{2,4})?/g,
-      valid: function (s) { var d = digits(s); return d >= 7 && d <= 15; },
-      context: ['phone', 'call', 'tel', 'mobile', 'cell', 'fax', 'text', 'reach', 'contact'], ctxBoost: 0.3 },
+    // a bare 9-digit run is usually NOT an SSN — only fire next to the words
+    { type: 'US_SSN', label: 'US Social Security number', basis: BASIS + ':UsSsnRecognizer (bare, context-gated)', score: 0.65,
+      re: /\b\d{9}\b/g, valid: ssnValid, ctxGated: true, context: SSN_CTX, ctxBoost: 0.1 },
+
+    // NANP (US/CA) shape — 3-3-4 with separators is precise enough to fire bare
+    { type: 'PHONE_NUMBER', label: 'Phone number', basis: BASIS + ':PhoneRecognizer (NANP)', score: 0.7,
+      re: /(?:\+?1[\s.\-]?)?(?:\(\d{3}\)\s?|\b\d{3}[\s.\-])\d{3}[\s.\-]\d{4}\b/g,
+      context: PHONE_CTX, ctxBoost: 0.2 },
+
+    // international — the leading + is the signal
+    { type: 'PHONE_NUMBER', label: 'Phone number', basis: BASIS + ':PhoneRecognizer (intl)', score: 0.6,
+      re: /\+\d{1,3}[\s.\-]?\d{1,4}(?:[\s.\-]?\d{2,4}){1,4}\b/g,
+      valid: function (s) { var d = digits(s); return d >= 8 && d <= 15; },
+      context: PHONE_CTX, ctxBoost: 0.2 },
+
+    // any other 7–15-digit run only counts as a phone NEXT TO phone words —
+    // bare digit runs in a news document are votes, sums and dates, not PII
+    { type: 'PHONE_NUMBER', label: 'Phone number', basis: BASIS + ':PhoneRecognizer (context-gated)', score: 0.55,
+      re: /(?:\(\d{2,4}\)\s?|\b\d{2,4}[\s.\-])\d{2,4}(?:[\s.\-]\d{2,4}){0,3}\b|\b\d{7,12}\b/g,
+      valid: function (s) { var d = digits(s); return d >= 7 && d <= 15 && !looksLikeDate(s); },
+      ctxGated: true, context: PHONE_CTX, ctxBoost: 0.15 },
 
     { type: 'IBAN_CODE', label: 'IBAN / bank account', basis: BASIS + ':IbanRecognizer', score: 0.75,
       re: /\b[A-Z]{2}\d{2}[A-Z0-9]{10,30}\b/g, valid: ibanValid },
@@ -89,50 +125,46 @@
       re: /\b[A-Z]{0,2}\d[\dA-Z\-]{5,16}\b/g, valid: function (s) { return digits(s) >= 5; }, ctxGated: true,
       context: ['passport', 'license', 'licence', 'id no', 'id number', 'badge', 'permit', 'visa', 'case no', 'inmate', 'employee id', 'account'] },
 
-    { type: 'DATE_OF_BIRTH', label: 'Date (possible DOB)', basis: BASIS + ':DateRecognizer', score: 0.35,
+    // a date is only PII when it reads as a BIRTH date — gate on the words.
+    // v1 flagged every article date (and "age" substring-matched "Garage").
+    { type: 'DATE_OF_BIRTH', label: 'Date (possible DOB)', basis: BASIS + ':DobRecognizer (context-gated)', score: 0.5,
       re: /\b(?:\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4})\b/gi,
-      context: ['born', 'birth', 'dob', 'd.o.b', 'date of birth', 'age', 'aged'], ctxBoost: 0.4 },
+      ctxGated: true, context: ['born', 'birth', 'birthday', 'dob', 'd.o.b', 'date of birth', 'née', 'nee', 'age', 'aged'], ctxBoost: 0.2 },
 
-    { type: 'STREET_ADDRESS', label: 'Street address', basis: BASIS + ':AddressRecognizer (heuristic)', score: 0.55,
-      re: /\b\d{1,6}\s+(?:[A-Z][A-Za-z'.\-]+\s){1,4}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Lane|Ln|Drive|Dr|Court|Ct|Way|Place|Pl|Terrace|Ter|Circle|Cir|Highway|Hwy|Parkway|Pkwy|Suite|Ste|Apt|Unit)\b\.?/g },
+    { type: 'STREET_ADDRESS', label: 'Street address', basis: BASIS + ':AddressRecognizer (heuristic)', score: 0.6,
+      re: new RegExp('\\b\\d{1,6}\\s+(?:' + STREET_WORD + '\\s+){1,4}' + STREET_SUFFIX
+        + '\\b\\.?(?:\\s+(?:N|S|E|W|NE|NW|SE|SW)\\b\\.?)?' + UNIT_TAIL + CITY_TAIL, 'g'),
+      context: ADDR_CTX, ctxBoost: 0.2 },
 
-    // PERSON — mechanical NER stand-in (capitalised runs + personal titles), the
-    // way citey-assist surfaces entities. Recall-favouring but low-confidence: in
-    // journalism a name is often the point, so the author keeps most and redacts
-    // the source-identifying few. Sentence-start single words are dropped.
-    { type: 'PERSON', label: 'Person name', basis: BASIS + ':NerStandIn (mechanical, no model)', score: 0.4,
-      re: new RegExp('\\b' + TITLES + '\\s+[A-Z][a-z]+(?:\\s+[A-Z][a-z]+){0,2}|\\b[A-Z][a-z]+(?:\\s+[A-Z][a-z]+){1,2}\\b', 'g'),
-      titled: new RegExp('^' + TITLES + '\\s', '') }
+    { type: 'STREET_ADDRESS', label: 'Street address', basis: BASIS + ':AddressRecognizer (PO box)', score: 0.65,
+      re: /\b(?:P\.?\s?O\.?|Post\s+Office)\s*Box\s+\d{1,8}\b/gi }
   ];
 
-  // Words that, standing alone as a Title Case run, are almost never a person.
-  var PERSON_STOP = new Set(('The This That These Those United States America American Monday Tuesday Wednesday Thursday '
-    + 'Friday Saturday Sunday January February March April May June July August September October November December '
-    + 'Street Avenue Road North South East West City County State Department Police Court House Senate Congress '
-    + 'University College Company Inc Corp Mr Mrs Ms Dr President Director Officer').split(/\s+/));
-
+  // Whole-word context matching: "age" must be the word "age", not a substring
+  // of "Garage" or "management" — v1's substring check minted fake confidence.
   function contextHit(text, start, end, words) {
     if (!words || !words.length) return false;
     var win = text.slice(Math.max(0, start - 42), start).toLowerCase()
             + ' ' + text.slice(end, Math.min(text.length, end + 42)).toLowerCase();
-    return words.some(function (w) { return win.indexOf(w) >= 0; });
+    return words.some(function (w) {
+      var i = win.indexOf(w);
+      while (i >= 0) {
+        var pre = i > 0 ? win[i - 1] : '', post = win[i + w.length] || '';
+        if (!/[a-z0-9]/.test(pre) && !/[a-z0-9]/.test(post)) return true;
+        i = win.indexOf(w, i + 1);
+      }
+      return false;
+    });
   }
 
-  function personOk(text, m) {
-    var span = m[0];
-    if (PACK[PACK.length - 1].titled.test(span)) return true;            // titled → a person
-    if (/\s/.test(span.trim())) {                                        // multi-word Title Case
-      var head = span.trim().split(/\s+/)[0];
-      if (PERSON_STOP.has(head)) return false;
-      // a capitalised run that opens a sentence is likely just a sentence start
-      var before = text.slice(Math.max(0, m.index - 2), m.index);
-      if (/[.!?]\s$/.test(before) || m.index === 0) {
-        // still keep if every token is Title Case AND not in the stoplist
-        return span.trim().split(/\s+/).every(function (w) { return !PERSON_STOP.has(w); });
-      }
-      return true;
-    }
-    return false;
+  // Three digit groups that read as a calendar date (2025-06-10, 6/10/2025…) —
+  // used to keep dates out of the context-gated phone lane.
+  function looksLikeDate(s) {
+    var g = String(s).trim().split(/[\s.\/\-]+/);
+    if (g.length !== 3 || !g.every(function (x) { return /^\d+$/.test(x); })) return false;
+    var year = function (i) { return g[i].length === 4 && +g[i] >= 1900 && +g[i] <= 2099; };
+    var dayish = function (i) { return g[i].length <= 2 && +g[i] >= 1 && +g[i] <= 31; };
+    return (year(0) && dayish(1) && dayish(2)) || (dayish(0) && dayish(1) && year(2));
   }
 
   /* ---------------- detect: run the pack, score, resolve overlaps ---------------- */
@@ -147,7 +179,6 @@
         if (!m[0]) { re.lastIndex++; continue; }
         var start = m.index, end = start + m[0].length, value = m[0];
         if (rec.valid && !rec.valid(value)) continue;
-        if (rec.type === 'PERSON' && !personOk(text, m)) continue;
         var ctx = contextHit(text, start, end, rec.context);
         if (rec.ctxGated && !ctx) continue;                              // generic-id noise gate
         var score = rec.score + (ctx ? (rec.ctxBoost || 0.1) : 0);
