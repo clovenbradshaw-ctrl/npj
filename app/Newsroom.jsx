@@ -1392,13 +1392,24 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // so the committed body hotlinks archive.org — never the media store.
     let line = gen.line, froze = null;
     if (window.NpjMedia && window.NpjMedia.freezeArticleMedia) {
+      let freezeErr = null;
       try {
         froze = await window.NpjMedia.freezeArticleMedia(gen.operand.body, { slug, title });
-        if (froze && (froze.frozen || froze.failed)) {
-          line = window.NpjArticles.genesisLine(gen.operand, actor);
-          gen.article = window.NpjArticles.foldLog(line).article;
-        }
-      } catch (e) { /* freeze failed wholesale → commit the media-store URLs as-is */ }
+      } catch (e) { freezeErr = e; }
+      if (freezeErr || (froze && froze.failed)) {
+        const why = freezeErr ? freezeErr.message
+          : (froze.failReasons && froze.failReasons.length ? froze.failReasons.join("; ") : "");
+        const detail = "image freeze failed" + (why ? ": " + why : "");
+        const msg = "Could not move " + (froze ? froze.failed : "an") + " image" + ((froze && froze.failed !== 1) ? "s" : "") +
+          " to archive.org — nothing was committed. " +
+          (why ? why + " " : "") +
+          "Check that the n8n media endpoint is reachable and that IA_S3_ACCESS / IA_S3_SECRET are set, then retry.";
+        return halt(3, detail, msg);
+      }
+      if (froze && froze.frozen) {
+        line = window.NpjArticles.genesisLine(gen.operand, actor);
+        gen.article = window.NpjArticles.foldLog(line).article;
+      }
     }
     published.current = gen.article;
     const token = window.MatrixAuth.token();
