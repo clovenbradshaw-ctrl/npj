@@ -238,6 +238,26 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     return () => { window.removeEventListener("keydown", onKey); Object.keys(t).forEach(k => clearTimeout(t[k])); };
   }, []); // eslint-disable-line
 
+  // ---- keep the table live with the prose ----
+  // Sentences are DERIVED from the editor's contentEditable DOM, which React
+  // can't pass as a prop — so observe the editor node directly and re-segment on
+  // any change. This auto-imports every prose sentence the instant it lands, and
+  // closes the load race where a saved draft's text restores AFTER this view has
+  // already mounted (the table used to sit empty until the next unrelated render).
+  useEffect(() => {
+    const el = api.editorEl && api.editorEl();
+    if (!el) return;
+    bump(); // segment whatever prose is already in the editor at mount
+    if (typeof MutationObserver === "undefined") return;
+    let raf = 0;
+    const obs = new MutationObserver(() => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; bump(); });
+    });
+    obs.observe(el, { childList: true, subtree: true, characterData: true });
+    return () => { obs.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, []); // eslint-disable-line
+
   // ---- mutations (all route through the Newsroom api → same DOM + autosave) ----
   const attachExisting = (row, citeId) => {
     api.attachExisting(row, citeId);
