@@ -2,31 +2,76 @@
    Hooks (useState/useRef/useCallback/useMemo/useEffect) are exposed as globals
    in the host HTML so every babel file can use them bare. */
 
-/* ---------- minimal stroke icons ---------- */
+/* ---------- icons — Phosphor (loaded as a webfont in index.html) ----------
+   Each icon renders an <i class="ph ph-NAME">: its size follows font-size and
+   its color follows currentColor, so every existing `<I.x style={{fontSize}}/>`
+   call site keeps working unchanged. `source` keeps the brand ⊥ ground glyph —
+   it's logic notation (a claim standing on its source), not a stock icon.
+   Pass weight="bold"|"fill" for a heavier cut. */
+function phIcon(name, weight) {
+  const wcls = weight === "bold" ? "ph-bold" : weight === "fill" ? "ph-fill" : "ph";
+  return function PhIcon(p) {
+    p = p || {};
+    const { style, className, ...rest } = p;
+    return <i aria-hidden="true"
+      className={wcls + " ph-" + name + (className ? " " + className : "")}
+      style={{ display: "inline-block", lineHeight: 1, verticalAlign: "-0.125em", ...style }} {...rest} />;
+  };
+}
 const I = {
-  archive: (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><rect x="3" y="4" width="18" height="4"/><path d="M5 8v12h14V8M9 12h6"/></svg>),
-  lock:    (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><rect x="5" y="11" width="14" height="9"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>),
-  check:   (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2.2" {...p}><path d="M5 12l4 4 10-10"/></svg>),
-  x:       (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2.2" {...p}><path d="M6 6l12 12M18 6L6 18"/></svg>),
-  ext:     (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M14 5h5v5M19 5l-9 9M12 5H5v14h14v-7"/></svg>),
-  up:      (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M12 19V6M6 11l6-6 6 6"/></svg>),
-  chat:    (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M4 5h16v11H9l-5 4z"/></svg>),
-  eye:     (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.6"/></svg>),
-  eyeoff:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M4 4l16 16M9.5 5.4A9.7 9.7 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3 3.6M6 7.5C3.5 9.2 2 12 2 12s4 7 10 7c1 0 2-.2 2.9-.5"/></svg>),
-  filter:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M3 5h18l-7 8v5l-4 2v-7z"/></svg>),
-  doc:     (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M6 3h8l4 4v14H6z"/><path d="M14 3v4h4"/></svg>),
-  data:    (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><ellipse cx="12" cy="6" rx="7" ry="2.6"/><path d="M5 6v12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6V6M5 12c0 1.4 3.1 2.6 7 2.6s7-1.2 7-2.6"/></svg>),
-  mic:     (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>),
-  search:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="11" cy="11" r="6"/><path d="M16 16l5 5"/></svg>),
-  plus:    (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2" {...p}><path d="M12 5v14M5 12h14"/></svg>),
-  arrow:   (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M5 12h14M13 6l6 6-6 6"/></svg>),
-  shield:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M12 3l8 3v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/></svg>),
-  clock:   (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>),
-  /* the "bottom" / ground glyph (⊥): a claim standing on its source */
-  source:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2.2" {...p}><path d="M12 4v15M4 19h16"/></svg>),
-  folder:  (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M3 6h6l2 3h10v11H3z"/></svg>),
-  sun:     (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M19.4 4.6l-2.1 2.1M6.7 17.3l-2.1 2.1"/></svg>),
-  moon:    (p) => (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.8" {...p}><path d="M20.4 13.2A8.5 8.5 0 1 1 10.8 3.6a7 7 0 0 0 9.6 9.6z"/></svg>)
+  /* chrome + actions */
+  archive: phIcon("archive-box"),
+  lock:    phIcon("lock-simple"),
+  check:   phIcon("check", "bold"),
+  x:       phIcon("x", "bold"),
+  ext:     phIcon("arrow-square-out"),
+  up:      phIcon("arrow-fat-up", "fill"),
+  chat:    phIcon("chat-circle"),
+  eye:     phIcon("eye"),
+  eyeoff:  phIcon("eye-slash"),
+  filter:  phIcon("funnel"),
+  doc:     phIcon("file-text"),
+  data:    phIcon("database"),
+  mic:     phIcon("microphone"),
+  search:  phIcon("magnifying-glass"),
+  plus:    phIcon("plus", "bold"),
+  arrow:   phIcon("arrow-right"),
+  shield:  phIcon("shield-check"),
+  clock:   phIcon("clock"),
+  folder:  phIcon("folder-simple"),
+  sun:     phIcon("sun"),
+  moon:    phIcon("moon"),
+  link:    phIcon("link-simple"),
+  /* editor toolbar */
+  undo:    phIcon("arrow-counter-clockwise"),
+  redo:    phIcon("arrow-clockwise"),
+  quote:   phIcon("quotes"),
+  listBullets: phIcon("list-bullets"),
+  listNumbers: phIcon("list-numbers"),
+  divider: phIcon("minus"),
+  image:   phIcon("image"),
+  play:    phIcon("play-circle"),
+  dots:    phIcon("dots-three-outline"),
+  code:    phIcon("code"),
+  codeBlock: phIcon("code-block"),
+  alignLeft:   phIcon("text-align-left"),
+  alignCenter: phIcon("text-align-center"),
+  alignRight:  phIcon("text-align-right"),
+  highlighter: phIcon("highlighter"),
+  palette: phIcon("palette"),
+  asterisk: phIcon("asterisk"),
+  poll:    phIcon("chart-bar"),
+  penNib:  phIcon("pen-nib"),
+  tag:     phIcon("tag"),
+  sparkle: phIcon("sparkle"),
+  caretDown: phIcon("caret-down"),
+  caretRight: phIcon("caret-right"),
+  hash:    phIcon("hash"),
+  warning: phIcon("warning"),
+  info:    phIcon("info"),
+  /* the "bottom" / ground glyph (⊥): a claim standing on its source — kept as a
+     hand-drawn mark because it is the product's logic notation, not an icon */
+  source:  (p) => { p = p || {}; const { style, ...rest } = p; return (<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ verticalAlign: "-0.125em", ...style }} {...rest}><path d="M12 4v15M4 19h16"/></svg>); }
 };
 
 const SRC_TYPE = {
@@ -180,12 +225,14 @@ function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", st
     : state === "error" ? "saved in this browser · account backup failed"
     : state === "localonly" ? "saved in this browser only" + (signedIn ? "" : " — sign in to back it up")
     : (signedIn ? "autosaves · this browser + your account" : "autosaves · this browser only");
-  const color = state === "error" ? "#e6b07f" : state === "synced" ? "#9fe0b8" : "#9b9585";
+  // colors track the newsroom theme via its --nr-* vars (the pill lives inside
+  // .newsroom), so the status reads at AA contrast in both light and dark.
+  const color = state === "error" ? "var(--nr-warn, #8a5e10)" : state === "synced" ? "var(--nr-ok, #1c6a45)" : "var(--nr-soft, #45402f)";
   const tip = signedIn
     ? "Everything in this draft — " + what + " — autosaves to this browser as you type, then backs up to your Matrix account (" + (user || "signed in") + ") a moment later. Sign out, wipe the browser or switch devices: the account copy survives."
     : "This draft autosaves to this browser as you type (" + what + ") — but it is NOT backed up to an account. Sign in with Matrix and it will be.";
   return (
-    <span className="np-mono" title={tip} style={{ fontSize: 10.5, color, border: "1px solid rgba(255,255,255,.18)", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
+    <span className="np-mono" title={tip} style={{ fontSize: 10.5, color, border: "1px solid var(--nr-line-strong, rgba(22,20,13,.44))", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
   );
 }
 

@@ -16,9 +16,13 @@ const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
 const DEK_PH = "Subtitle — one line under the headline";
+// The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
+// restore and reader pipeline is unchanged — but they're driven by the explicit
+// Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
+// so the author fills in fields, not loose formatted prose.
 const START_DOC =
   '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
-  '<h1>Untitled</h1>' +
+  '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
 
@@ -42,13 +46,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
   const citeOrderRef = useRef([]);
+  // stable per-sentence identity + provenance (app/sentences.js). Rides the draft
+  // so a sentence's grounding follows it through edits, moves, reloads.
+  const sentenceLedger = useRef(window.NpjSentences ? window.NpjSentences.newLedger() : { v: 1, seq: 0, entries: {} });
   const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
   const [rev, setRev] = useState(0);                // bump to recompute span counts
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [publish, setPublish] = useState(null);
-  const [title, setTitle] = useState("Untitled");
+  const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
+  const [dek, setDek] = useState("");                // explicit Subtitle field (mirrors .nr-dek)
   const [fileSlug, setFileSlug] = useState("");      // custom filename; "" = derived from the title
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
@@ -84,7 +92,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const sourceRecords = {};
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, room });
+    const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -109,6 +118,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (alive && d) {
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
         if (d.citations && window.NpjCitations) window.NpjCitations.hydrate(d.citations); // rehydrate citation records
+        if (d.sentenceLedger && window.NpjSentences) sentenceLedger.current = window.NpjSentences.hydrateLedger(d.sentenceLedger); // stable sentence ids survive reload
         if (ed.current && d.html) {
           ed.current.innerHTML = d.html;
           // older drafts predate the dek — every article gets the field
@@ -134,6 +144,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           // skips spans that already carry data-cite-id), so legacy drafts gain
           // reusable citations the first time they're opened, with no data loss.
           if (window.NpjCitations) window.NpjCitations.migrateRoot(ed.current);
+          // hydrate the explicit Subtitle field from the restored .nr-dek node
+          const dekEl0 = ed.current.querySelector(".nr-dek");
+          if (dekEl0) setDek((dekEl0.textContent || "").trim());
         }
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
@@ -151,6 +164,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
   useEffect(() => { scheduleSave(); }, [title, fileSlug, tags, column, sources, room, scheduleSave]);
+  // entering a grounding view builds/extends the stable-id ledger (track()) — save
+  // so those ids persist even if the author switches views without editing
+  useEffect(() => { if (view !== "prose") scheduleSave(); }, [view, scheduleSave]);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -164,11 +180,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       let id = "s-" + slugify(text);
       if (seen[id]) { seen[id]++; id += "-" + seen[id]; } else seen[id] = 1;
       h.id = id;
-      items.push({ id, text, level: +h.tagName[1] });
+      // the headline is the explicit Title field, not a section jump-link
+      if (h.tagName !== "H1") items.push({ id, text, level: +h.tagName[1] });
     });
     setToc(items);
-    const h1 = ed.current.querySelector("h1");
-    if (h1) setTitle(h1.innerText.trim() || "Untitled");
     // media census: every figure with a filled image slot or an embed.
     // Figures get a stable data-mid so the rail/viewer can jump to them.
     const found = [];
@@ -185,6 +200,31 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setMedia(found);
   }, []);
   useEffect(() => { const t = setTimeout(scanHeadings, 60); return () => clearTimeout(t); }, [scanHeadings]);
+
+  // ---- explicit Title / Subtitle fields ----
+  // The fields are the source of truth; each writes through to the hidden body
+  // <h1> / .nr-dek so the publish gate, reader, markdown export and front page
+  // keep reading exactly what they always have — no pipeline change.
+  const onTitleInput = useCallback((v) => {
+    setTitle(v);
+    const root = ed.current;
+    if (root) {
+      let h1 = root.querySelector("h1");
+      if (!h1) { h1 = document.createElement("h1"); const b = root.querySelector("figure.nr-banner"); if (b) b.after(h1); else root.insertBefore(h1, root.firstChild); }
+      h1.textContent = v;
+    }
+    scheduleSave();
+  }, [scheduleSave]);
+  const onDekInput = useCallback((v) => {
+    setDek(v);
+    const root = ed.current;
+    if (root) {
+      let d = root.querySelector(".nr-dek");
+      if (!d) { d = document.createElement("p"); d.className = "nr-dek"; d.setAttribute("data-ph", DEK_PH); const h1 = root.querySelector("h1"); if (h1) h1.after(d); else root.insertBefore(d, root.firstChild); }
+      if (v) d.textContent = v; else d.innerHTML = "<br/>";
+    }
+    scheduleSave();
+  }, [scheduleSave]);
 
   const scrollToId = (id) => {
     const cont = scroller.current, body = ed.current; if (!cont || !body) return;
@@ -530,7 +570,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return plain ? wrapPlainClaim(range) : (ed.current && ed.current.querySelector('.claim-src[data-cid="' + bindRangeToSource(range, key) + '"]'));
   };
   const tableApi = {
-    segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.segment(ed.current) : [],
+    // track() = segment + reconcile against the persisted ledger, so every row
+    // carries a STABLE sid + provenance that follows the sentence through edits.
+    segment: () => (window.NpjSentences && ed.current) ? window.NpjSentences.track(ed.current, sentenceLedger.current) : [],
     // the live editor node — the workspace observes it so the grounding table
     // imports every prose sentence the moment it lands (survives the restore race)
     editorEl: () => ed.current,
@@ -694,27 +736,28 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   const versions = [{ sha: "draft", ts: new Date().toISOString().slice(0, 10), author: (session && session.user_id) || me, message: "Current working draft", text: ed.current ? (ed.current.innerText || "") : "" }];
 
-  const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>{children}</button>;
+  const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} aria-label={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>{children}</button>;
   const Sep = () => <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />;
   const popStyle = { position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 40, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8 };
   const popItem = { display: "flex", gap: 10, alignItems: "center", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "8px 6px", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, cursor: "pointer", whiteSpace: "nowrap" };
-  const FB = ({ onClick, children, hot, title }) => <button title={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
+  const FB = ({ onClick, children, hot, title }) => <button title={title} aria-label={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
 
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* top bar */}
-      <div style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6 }}>
           <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
         </button>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <button onClick={onDocs || onExit} title="Newsroom home — your document explorer" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+          <button onClick={onDocs || onExit} title="Newsroom home — your document explorer" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
             <I.lock style={{ fontSize: 18, color: "var(--yellow)" }} />
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
-          <span className="np-mono" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted }}>{fileSlug || slugify(title) || "untitled"}/</span>
-          <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
-            what="text, title, tags, column and bound sources" style={{ borderColor: NR.line }} />
+          {/* clipped so a long headline can't widen the bar and shove the controls */}
+          <span className="np-mono" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileSlug || slugify(title) || "untitled"}</span>/
+          </span>
         </div>
         {/* the grounding workspace — four pivoting views of the same draft */}
         <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden" }}>
@@ -725,6 +768,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
+        <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
+          what="text, title, tags, column and bound sources" />
         <span style={{ flex: 1 }} />
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
           {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} {theme === "dark" ? "Light" : "Dark"}
@@ -767,10 +812,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       </div>
 
       {/* formatting toolbar */}
-      <div style={{ borderBottom: "1px solid " + NR.line, padding: "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
-        <TB onClick={() => exec("undo")} title="Undo">↶</TB>
-        <TB onClick={() => exec("redo")} title="Redo">↷</TB>
+        <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
+        <TB onClick={() => exec("redo")} title="Redo"><I.redo /></TB>
         <Sep />
         <TB onClick={() => exec("formatBlock", "<h1>")} title="Title">H1</TB>
         <TB onClick={() => exec("formatBlock", "<h2>")} title="Heading">H2</TB>
@@ -780,10 +825,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <TB onClick={() => exec("bold")} title="Bold"><b>B</b></TB>
         <TB onClick={() => exec("italic")} title="Italic"><i>I</i></TB>
         <TB onClick={() => exec("strikeThrough")} title="Strikethrough"><s>S</s></TB>
-        <TB onClick={() => wrapInline("code")} title="Inline code"><span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{"</>"}</span></TB>
-        <TB onClick={applyHighlight} title="Highlight"><span style={{ background: "var(--yellow)", color: "var(--ink)", padding: "0 4px", fontWeight: 700 }}>A</span></TB>
+        <TB onClick={() => wrapInline("code")} title="Inline code"><I.code /></TB>
+        <TB onClick={applyHighlight} title="Highlight"><I.highlighter /></TB>
         <div style={{ position: "relative", display: "inline-block" }}>
-          <TB onClick={() => setFmtMenu(fmtMenu === "color" ? null : "color")} title="Text color"><span style={{ borderBottom: "3px solid var(--reject)", fontWeight: 700 }}>A</span> ▾</TB>
+          <TB onClick={() => setFmtMenu(fmtMenu === "color" ? null : "color")} title="Text color"><span style={{ borderBottom: "3px solid var(--reject)", fontWeight: 700, lineHeight: 1 }}>A</span> <I.caretDown style={{ fontSize: 9 }} /></TB>
           {fmtMenu === "color" && (
             <div style={{ ...popStyle, width: 168 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Text color</div>
@@ -798,11 +843,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <Sep />
-        <TB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote">“”</TB>
-        <TB onClick={() => exec("insertUnorderedList")} title="Bulleted list">•</TB>
-        <TB onClick={() => exec("insertOrderedList")} title="Numbered list">1.</TB>
+        <TB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote"><I.quote /></TB>
+        <TB onClick={() => exec("insertUnorderedList")} title="Bulleted list"><I.listBullets /></TB>
+        <TB onClick={() => exec("insertOrderedList")} title="Numbered list"><I.listNumbers /></TB>
         <div style={{ position: "relative", display: "inline-block" }}>
-          <TB onClick={() => setFmtMenu(fmtMenu === "align" ? null : "align")} title="Alignment">≡ ▾</TB>
+          <TB onClick={() => setFmtMenu(fmtMenu === "align" ? null : "align")} title="Alignment"><I.alignLeft /> <I.caretDown style={{ fontSize: 9 }} /></TB>
           {fmtMenu === "align" && (
             <div style={{ ...popStyle, width: 150 }}>
               {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"]].map(([cmd, label]) => (
@@ -811,11 +856,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             </div>
           )}
         </div>
-        <TB onClick={() => exec("insertHorizontalRule")} title="Divider">—</TB>
+        <TB onClick={() => exec("insertHorizontalRule")} title="Divider"><I.divider /></TB>
         <Sep />
-        <TB onClick={insertImage} title="Inline image"><I.archive style={{ fontSize: 14, verticalAlign: "-2px" }} /> Image</TB>
+        <TB onClick={insertImage} title="Inline image"><I.image style={{ fontSize: 14 }} /> Image</TB>
         <div style={{ position: "relative", display: "inline-block" }}>
-          <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed video, audio or a link card">▶ Embed</TB>
+          <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed video, audio or a link card"><I.play style={{ fontSize: 14 }} /> Embed</TB>
           {fmtMenu === "embed" && (
             <div style={{ ...popStyle, width: 280 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Embed media</div>
@@ -828,18 +873,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <div style={{ position: "relative", display: "inline-block" }}>
-          <TB onClick={() => setFmtMenu(fmtMenu === "more" ? null : "more")} title="More blocks">⋯ More ▾</TB>
+          <TB onClick={() => setFmtMenu(fmtMenu === "more" ? null : "more")} title="More blocks"><I.dots style={{ fontSize: 14 }} /> More <I.caretDown style={{ fontSize: 9 }} /></TB>
           {fmtMenu === "more" && (
             <div style={{ ...popStyle, left: "auto", right: 0, width: 190 }}>
               {[
-                ["{ }", "Code block", () => { exec("formatBlock", "<pre>"); setFmtMenu(null); }],
-                ["—", "Divider", () => { exec("insertHorizontalRule"); setFmtMenu(null); }],
-                ["*", "Footnote", insertFootnote],
-                ["❝", "Poetry", insertVerse],
-                ["◳", "Poll", insertPoll]
+                [<I.codeBlock />, "Code block", () => { exec("formatBlock", "<pre>"); setFmtMenu(null); }],
+                [<I.divider />, "Divider", () => { exec("insertHorizontalRule"); setFmtMenu(null); }],
+                [<I.asterisk />, "Footnote", insertFootnote],
+                [<I.penNib />, "Poetry", insertVerse],
+                [<I.poll />, "Poll", insertPoll]
               ].map(([g, label, fn]) => (
                 <button key={label} onMouseDown={e => e.preventDefault()} onClick={fn} style={popItem}>
-                  <span className="np-mono" style={{ width: 22, textAlign: "center", flex: "0 0 auto" }}>{g}</span> {label}
+                  <span style={{ width: 22, textAlign: "center", flex: "0 0 auto", display: "inline-flex", justifyContent: "center" }}>{g}</span> {label}
                 </button>
               ))}
             </div>
@@ -876,7 +921,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
                     <img src={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                   </button>
-                : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 15 }}>▶</button>)}
+                : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
             </div>
           </div>
           {/* tags + column */}
@@ -885,7 +930,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__citey && window.__citey.suggest()} title="Citey: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "1px 6px", cursor: "pointer" }}>✦</button></div>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__citey && window.__citey.suggest()} title="Citey: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "2px 6px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}><I.sparkle /></button></div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
               {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
               <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
@@ -899,7 +944,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
         <div className="np-scroll" ref={scroller} style={{ display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
-          <div className={"md-preview nr-page" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
+          <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
+            <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
+            <input id="nr-title-field" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Untitled headline" spellCheck={true}
+              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontFamily: "var(--display)", fontSize: isMobile ? 26 : 32, lineHeight: 1.1, padding: "2px 0 8px", outline: "none" }} />
+            <label htmlFor="nr-dek-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, margin: "14px 0 3px" }}>Subtitle</label>
+            <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
+              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 16 : 19, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
+          </div>
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
@@ -970,9 +1024,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <FB onClick={() => exec("bold")} title="Bold"><b>B</b></FB>
           <FB onClick={() => exec("italic")} title="Italic"><i>I</i></FB>
           <FB onClick={() => exec("formatBlock", "<h2>")} title="Heading">H2</FB>
-          <FB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote">“”</FB>
+          <FB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote"><I.quote style={{ fontSize: 13 }} /></FB>
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
-          <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.ext style={{ fontSize: 13 }} /> Link</FB>
+          <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.link style={{ fontSize: 13 }} /> Link</FB>
           <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
 
           {menu === "link" && (
@@ -1357,6 +1411,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
               </span>
             </Row>
             <Row k="Live at">{articleUrl}</Row>
+            <Row k="Headline">{title || "Untitled"}</Row>
             <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
