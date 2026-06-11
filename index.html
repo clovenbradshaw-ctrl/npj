@@ -44,8 +44,13 @@
 <script src="app/media-store.js"></script>
 <script src="app/drafts.js"></script>
 <script src="app/image-slot.js"></script>
-<!-- the published record: EO event logs in articles/*.jsonl — list, fold, publish, append edits -->
+<!-- the published record: per-document folders of timestamped version files
+     (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
 <script src="app/articles.js"></script>
+<!-- grounding model: reusable citation records (spans of a source) + sentence
+     segmentation for the table view. Plain scripts; require window.NPJ. -->
+<script src="app/citations.js"></script>
+<script src="app/sentences.js"></script>
 <!-- Citey — the grounding assistant. State is mechanical (reads the editor's own
      grounding); voice is leashed (templated, no model). Plain scripts, order matters. -->
 <script src="app/citey-assist.js"></script>
@@ -65,10 +70,11 @@
 <script type="text/babel" src="app/FrontPage.jsx"></script>
 <script type="text/babel" src="app/ArticleRead.jsx"></script>
 <script type="text/babel" src="app/ArticleEdit.jsx"></script>
+<script type="text/babel" src="app/SourcePicker.jsx"></script>
+<script type="text/babel" src="app/GroundingWorkspace.jsx"></script>
 <script type="text/babel" src="app/Newsroom.jsx"></script>
 <script type="text/babel" src="app/Standards.jsx"></script>
 <script type="text/babel" src="app/Submit.jsx"></script>
-<script type="text/babel" src="app/Composer.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
 <script type="text/babel" src="app/Documents.jsx"></script>
 <script type="text/babel" src="app/Citey.jsx"></script>
@@ -150,7 +156,7 @@ function App() {
 
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
   const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
-  // ---- the published record (EO event logs in articles/*.jsonl) ----
+  // ---- the published record (versioned EO event logs under articles/) ----
   // frontRev repaints the front page once the committed line-up loads;
   // articleRev remounts the reader when an article is opened or edited.
   const [frontRev, setFrontRev] = useState(0);
@@ -289,6 +295,9 @@ function App() {
     if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
       window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: "#b23a26" };
     }
+    // land in the workspace — Documents — not on a free-floating writing
+    // surface (the old flow dropped you into an orphan post composer)
+    setRoute("docs"); window.scrollTo(0, 0);
   };
   // Sign out flushes every pending draft to the account FIRST — the Matrix
   // /logout kills the token, so any sync still in its debounce window would
@@ -320,9 +329,9 @@ function App() {
         ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
-      {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} />}
+      {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} />}
-      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenPost={goSubmit} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
+      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />

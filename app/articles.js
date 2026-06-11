@@ -1,20 +1,29 @@
 /* articles.js — the published record as EO event logs.
  *
- * An article is NOT a markdown file: it is an append-only JSONL log of EO
- * events committed to GitHub at articles/<slug>.jsonl. Line 1 is the publish
- * (INS — mint an enduring anchor); every edit after that is one more line
- * (REC — restructure the frame) appended to the SAME file via the publish
- * webhook's `append` mode. Nothing is ever rewritten, so the file itself is
- * the complete, auditable change history of the piece.
+ * An article is NOT a markdown file: it is an append-only log of EO events.
+ * Each document owns a FOLDER — articles/<slug>/ — holding one file per event,
+ * named by a sortable UTC stamp:
+ *
+ *   articles/<slug>/20260610T231501123Z-ins-x7k2.jsonl   ← the publish (INS)
+ *   articles/<slug>/20260611T010203456Z-rec-9bd1.jsonl   ← an edit (REC)
+ *
+ * Every write CREATES a new file; no commit ever updates an existing one. (The
+ * old single-file `append` rode GitHub's update-with-SHA call, which kept
+ * rejecting commits; a create can't conflict.) Reading lists the folder and
+ * folds the files in filename (= time) order, so the folder IS the document's
+ * version history. Uploading the same document again just lands a newer INS
+ * file: the fold restarts from it and every earlier version stays on the
+ * shelf. Legacy single-file logs (articles/<slug>.jsonl) still fold in, first.
  *
  *   {"v":"npj/article-eo/1","op":"INS","target":"article/<slug>","ts","actor",
  *    "operand":{slug,headline,dek,column,tags,authors,assignees,published,body,sources}}
  *   {"v":"npj/article-eo/1","op":"REC","target":"article/<slug>","ts","actor",
  *    "note":"what changed","operand":{ ...only the fields that changed... }}
  *
- * Reading folds the log: INS seeds the state, each REC replaces the fields it
- * carries (sources merge — a later event can add a source without resending
- * them all). Unknown ops (a future EVA deposit, say) are kept in `events` but
+ * Reading folds the log: INS seeds the state (a later INS re-seeds it — a
+ * fresh upload of the same doc), each REC replaces the fields it carries
+ * (sources merge — a later event can add a source without resending them
+ * all). Unknown ops (a future EVA deposit, say) are kept in `events` but
  * don't disturb the fold, so the format can grow without breaking old readers.
  *
  * body[] uses the exact block shapes ArticleRead renders:
@@ -31,8 +40,9 @@
   const DIR = "articles";
   const OWNER_REPO = "clovenbradshaw-ctrl/npj";
   const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
-  const API_LIST = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR + "?ref=main";
-  const IDX_CACHE_KEY = "npj_articles_idx_v2";
+  const API_CONTENTS = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR;
+  const API_TREE = "https://api.github.com/repos/" + OWNER_REPO + "/git/trees/main?recursive=1";
+  const IDX_CACHE_KEY = "npj_articles_idx_v3"; // v3: per-document folders — entries are keyed by slug, not filename
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
 
@@ -44,8 +54,19 @@
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.endpoint) return c.endpoint; } catch (e) {}
     return DEFAULT_ENDPOINT;
   }
+  // legacy single-file log — still read, never written to anymore
   const filenameFor = (slug) => DIR + "/" + slug + ".jsonl";
   const rawUrl = (slug) => RAW_BASE + "/" + filenameFor(slug);
+  // the document's folder of version files
+  const dirFor = (slug) => DIR + "/" + slug;
+  /* One event = one NEW file: <UTC stamp>-<op>-<entropy>.jsonl. The stamp makes
+     lexical order chronological; the random tail means two writers landing in
+     the same millisecond create two files instead of one clobbering the other. */
+  function versionFilenameFor(slug, op) {
+    const stamp = nowIso().replace(/[-:.]/g, ""); // 2026-06-10T23:15:01.123Z → 20260610T231501123Z
+    const tail = ("000" + Math.floor(Math.random() * 1679616).toString(36)).slice(-4);
+    return dirFor(slug) + "/" + stamp + "-" + (String(op).toLowerCase() === "ins" ? "ins" : "rec") + "-" + tail + ".jsonl";
+  }
 
   /* djb2 → 7 hex chars. Not crypto — just a stable, human-quotable version id
      derived from the event line itself, so every reader derives the same one. */
@@ -99,7 +120,10 @@
     const versions = []; // newest first when returned
     events.forEach(({ ev, line }) => {
       const o = ev.operand || {};
-      if (ev.op === "INS" && !state) {
+      if (ev.op === "INS") {
+        // a later INS restarts the record — someone uploaded the same document
+        // again. The new upload is the current version; everything before it
+        // stays in `versions`, so nothing is lost.
         state = {};
         FOLD_FIELDS.forEach(k => { if (o[k] != null) state[k] = o[k]; });
         Object.assign(sources, o.sources || {});
@@ -154,45 +178,108 @@
   function loadIdxCache() { try { return JSON.parse(localStorage.getItem(IDX_CACHE_KEY) || "{}") || {}; } catch (e) { return {}; } }
   function saveIdxCache(c) { try { localStorage.setItem(IDX_CACHE_KEY, JSON.stringify(c)); } catch (e) {} }
 
-  async function fetchLog(slug) {
-    // cb param busts the raw CDN's ~5 min cache so a fresh publish/edit reads back immediately
-    const res = await fetch(rawUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
+  async function fetchRaw(path) {
+    // cb param busts the raw CDN's ~5 min cache (including cached 404s) so a
+    // fresh commit reads back immediately
+    const res = await fetch(RAW_BASE + "/" + path + "?cb=" + Date.now(), { cache: "no-store" });
     if (!res.ok) return null;
     return await res.text();
   }
+  // join event files into one log text; order in = fold order
+  function joinParts(texts) {
+    const parts = (texts || []).filter(t => t != null && String(t).trim());
+    return parts.length ? parts.map(t => String(t).replace(/\n+$/, "")).join("\n") + "\n" : null;
+  }
+
+  /* One git-tree call lists every document at once: the folders of version
+     files (articles/<slug>/<stamp>-<op>.jsonl) and any legacy single-file logs
+     (articles/<slug>.jsonl). One API request no matter how many documents. */
+  const LEGACY_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\.jsonl$/;
+  const VERSION_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\/[^\/]+\.jsonl$/;
+  async function listDocs() {
+    const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error("github " + res.status);
+    const tree = ((await res.json()) || {}).tree || [];
+    const docs = {};
+    const doc = (slug) => docs[slug] || (docs[slug] = { slug, legacy: null, files: [] });
+    tree.forEach(e => {
+      if (!e || e.type !== "blob") return;
+      let m = LEGACY_RE.exec(e.path);
+      if (m) { doc(m[1]).legacy = { path: e.path, sha: e.sha }; return; }
+      m = VERSION_RE.exec(e.path);
+      if (m) doc(m[1]).files.push({ path: e.path, sha: e.sha });
+    });
+    Object.values(docs).forEach(d => d.files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)));
+    return Object.values(docs);
+  }
+
+  // the version files inside ONE document's folder ([] when there's no folder)
+  async function listDocFiles(slug) {
+    const res = await fetch(API_CONTENTS + "/" + slug + "?ref=main", { headers: { Accept: "application/vnd.github+json" } });
+    if (res.status === 404) return [];
+    if (!res.ok) throw new Error("github " + res.status);
+    const list = await res.json();
+    return (Array.isArray(list) ? list : [])
+      .filter(f => f.type === "file" && /\.jsonl$/i.test(f.name))
+      .map(f => ({ path: dirFor(slug) + "/" + f.name, sha: f.sha }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  // a doc's full event text: the legacy log first (it predates the folder),
+  // then each version file in stamp order
+  async function fetchDocText(d) {
+    const paths = (d.legacy ? [d.legacy.path] : []).concat(d.files.map(f => f.path));
+    if (!paths.length) return null;
+    return joinParts(await Promise.all(paths.map(fetchRaw)));
+  }
+
+  // fetch ONE document by slug without the full tree: probe its folder and the
+  // legacy file in parallel → { text, storage: "dir"|"file" } or null
+  async function fetchLog(slug) {
+    const [files, legacyText] = await Promise.all([
+      listDocFiles(slug).catch(() => []),
+      fetchRaw(filenameFor(slug))
+    ]);
+    const versionTexts = await Promise.all(files.map(f => fetchRaw(f.path)));
+    const text = joinParts([legacyText].concat(versionTexts));
+    if (text == null) return null;
+    return { text, storage: files.length ? "dir" : "file" };
+  }
 
   async function listArticles() {
-    let files = [];
+    let docs;
     try {
-      const res = await fetch(API_LIST, { headers: { Accept: "application/vnd.github+json" } });
-      if (res.status === 404) return []; // nothing published yet — the dir doesn't exist
-      if (!res.ok) throw new Error("github " + res.status);
-      files = (await res.json() || []).filter(f => f.type === "file" && /\.jsonl$/i.test(f.name));
+      docs = await listDocs();
     } catch (e) {
       // listing down (rate limit, offline) → serve the cached index so the front page still paints
       const cached = loadIdxCache();
       return Object.values(cached).map(c => c.meta).filter(Boolean).sort(byNewest);
     }
     const cache = loadIdxCache();
-    const metas = await Promise.all(files.map(async f => {
-      const hit = cache[f.name];
-      if (hit && hit.sha === f.sha && hit.meta) return hit.meta;
-      const slug = f.name.replace(/\.jsonl$/i, "");
+    const live = {};
+    const metas = await Promise.all(docs.map(async d => {
+      // the cache key is every blob sha the doc is made of — any new version
+      // file (or a legacy-file change) misses the cache and refolds
+      const key = (d.legacy ? d.legacy.sha : "") + "|" + d.files.map(f => f.sha).join(",");
+      const hit = cache[d.slug];
+      if (hit && hit.key === key && hit.meta) { live[d.slug] = hit; return hit.meta; }
       try {
-        const text = await fetchLog(slug);
+        const text = await fetchDocText(d);
         const { article } = foldLog(text);
         if (!article) return null;
         const meta = {
-          slug: article.slug || slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
+          slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
           column: article.column, tags: article.tags, published: article.published, updated: article.updated,
           authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
-          status: article.status, image: article.image
+          status: article.status, image: article.image,
+          storage: d.files.length ? "dir" : "file",
+          logPath: d.files.length ? dirFor(d.slug) : filenameFor(d.slug)
         };
-        cache[f.name] = { sha: f.sha, meta };
+        live[d.slug] = { key, meta };
         return meta;
       } catch (e) { return null; }
     }));
-    saveIdxCache(cache);
+    saveIdxCache(live); // only live docs — deleted records drop out of the cache
     return metas.filter(Boolean).sort(byNewest);
   }
   function byNewest(a, b) {
@@ -203,7 +290,7 @@
   // Fill window.NPJ.FRONT from the committed record. Returns the metas.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, status: m.status, image: m.image || null });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, updated: m.updated, versions: m.versions, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     return metas;
   }
@@ -211,10 +298,15 @@
   // Fetch + fold one article; its sources join the global ledger so hover
   // cards, the source rail and the methods footer all resolve.
   async function loadArticle(slug) {
-    const text = await fetchLog(slugify(slug) || slug);
-    if (text == null) return null;
-    const { article, sources } = foldLog(text);
-    if (article) Object.keys(sources).forEach(k => { window.NPJ.SOURCES[k] = Object.assign(window.NPJ.SOURCES[k] || {}, sources[k]); });
+    const s = slugify(slug) || slug;
+    const log = await fetchLog(s);
+    if (log == null) return null;
+    const { article, sources } = foldLog(log.text);
+    if (article) {
+      article.storage = log.storage;
+      article.logPath = log.storage === "dir" ? dirFor(article.slug || s) : filenameFor(article.slug || s);
+      Object.keys(sources).forEach(k => { window.NPJ.SOURCES[k] = Object.assign(window.NPJ.SOURCES[k] || {}, sources[k]); });
+    }
     return article;
   }
 
@@ -245,6 +337,19 @@
     let idSeq = 0;
     const newId = () => "cl-" + Date.now().toString(36) + "-" + (++idSeq);
 
+    // Resolve a reusable citation record (window.NPJ.CITATIONS) to its quote.
+    // data-quote stays synced on every span/sup, so this is a fallback: if a
+    // marker lost its inline quote it can still be rebuilt from the registry.
+    // Output token shape is unchanged either way.
+    function quoteFromCiteIds(el, key) {
+      try {
+        const ids = String(el.getAttribute("data-cite-id") || "").split(/\s+/).filter(Boolean);
+        const REG = (window.NPJ && window.NPJ.CITATIONS) || {};
+        for (const id of ids) { const c = REG[id]; if (c && c.srcKey === key && c.quote) return c.quote; }
+      } catch (e) {}
+      return "";
+    }
+
     // the claim is the trailing sentence of what was typed before the marker
     function splitClaim(buf) {
       const re = /[.!?…]["')\]]?\s+(?=\S)/g;
@@ -269,6 +374,14 @@
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
             if (src.length) {
               let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+              // single-source spans carry the quote inline on data-quote; multi-source
+              // spans carry the data-quotes map. Either way, backfill anything still
+              // missing from the citation registry so reuse survives the round trip.
+              const inlineQ = (c.getAttribute("data-quote") || "").trim();
+              if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
+                q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
+                if (!Object.keys(q).length) q = undefined;
+              }
               toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
             } else buf += plain(c);
             return;
@@ -277,7 +390,7 @@
             if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
             const key = c.getAttribute("data-cite"); if (!key) return;
             // the pinned source-span: the exact words in the source backing this claim
-            const quote = (c.getAttribute("data-quote") || "").trim();
+            const quote = (c.getAttribute("data-quote") || "").trim() || quoteFromCiteIds(c, key);
             const prev = toks[toks.length - 1];
             if (!buf.trim() && prev && typeof prev === "object" && prev.c) {
               if (prev.src.indexOf(key) < 0) prev.src.push(key); // text[^a][^b] → one claim, two sources
@@ -475,22 +588,30 @@
     });
     return res;
   }
-  // First commit of a log. Overwrite is intentional: re-publishing a slug
-  // restarts its record (the old log is still in git history).
-  function publishGenesis({ slug, line, token, message }) {
-    return post({ filename: filenameFor(slug), mode: "overwrite", contentRaw: line + "\n", message: message || ("publish: " + slug) }, token);
+  /* Every commit below CREATES a brand-new version file in the document's
+     folder — no write ever targets an existing file, so GitHub's
+     update-with-SHA path (the one that kept rejecting commits) is never hit.
+     `mode:"overwrite"` is kept for webhook compatibility: on a path that
+     doesn't exist it is simply a create. Re-publishing a slug lands a newer
+     INS file and the fold restarts from it; the old versions stay put. */
+  function publishGenesis({ slug, line, token, message, filename }) {
+    // `filename` may be pre-generated by the caller so a retry re-POSTs the
+    // exact same path instead of minting a second version file
+    return post({ filename: filename || versionFilenameFor(slug, "ins"), mode: "overwrite", contentRaw: line + "\n", message: message || ("publish: " + slug) }, token);
   }
-  // One REC line appended to the existing log — the edit-after-publish path.
+  // One REC event in a new version file — the edit-after-publish path.
   async function appendEdit({ slug, operand, actor, note, token, message }) {
     const line = editLine(slug, operand, actor, note);
-    const res = await post({ filename: filenameFor(slug), mode: "append", contentRaw: line + "\n", message: message || ("edit: " + slug) }, token);
-    return { res, line, sha: lineSha(line) };
+    const filename = versionFilenameFor(slug, "rec");
+    const res = await post({ filename, mode: "overwrite", contentRaw: line + "\n", message: message || ("edit: " + slug) }, token);
+    return { res, line, sha: lineSha(line), filename };
   }
-  // Unpublish / republish — append a REC carrying only the status. Nothing is
-  // deleted: the whole log (every prior version) stays in GitHub, and the act
-  // of hiding it is itself recorded as one more event in the record. Authorized
-  // exactly like any other append (the webhook re-verifies the Matrix token);
-  // the UI restricts the action to admins.
+  // Unpublish / republish — one REC version file carrying only the status.
+  // Unpublish just takes the piece off the site: nothing is deleted, the whole
+  // folder (every prior version) stays in GitHub, and the act of hiding it is
+  // itself recorded as one more event in the record. Authorized exactly like
+  // any other edit (the webhook re-verifies the Matrix token); the UI
+  // restricts the action to admins.
   function setArticleStatus({ slug, status, actor, note, token }) {
     const next = status === "unpublished" ? "unpublished" : "published";
     const message = (next === "unpublished" ? "unpublish: " : "republish: ") + slug;
@@ -525,7 +646,7 @@
   }
 
   window.NpjArticles = {
-    SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, publishEndpoint,
+    SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     listArticles, loadFront, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,

@@ -183,7 +183,7 @@ function FrontLineup({ items, onOpen }) {
           </button>
         )}
         {lead.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 19, lineHeight: 1.42, margin: "0 0 14px", maxWidth: "40ch" }}>{lead.dek}</p>}
-        {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}</div>}
+        {lead.published && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 10 }}>{fmtDate(lead.published)}{lead.updated && lead.updated !== lead.published ? " · updated " + shortDate(lead.updated) : ""}</div>}
         {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
       </section>
       <aside style={{ paddingLeft: 24 }}>
@@ -198,7 +198,7 @@ function FrontLineup({ items, onOpen }) {
             <h3 onClick={() => open(s)} className="headline-link" style={{ fontFamily: "var(--display)", fontSize: 22, lineHeight: .98, margin: "0 0 6px", cursor: "pointer" }}>{s.headline}</h3>
             {s.status === "unpublished" && <div style={{ marginBottom: 6 }}><UnpubBadge small /></div>}
             {s.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.35, color: "var(--ink-soft)", margin: "0 0 6px" }}>{s.dek}</p>}
-            {s.published && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 4 }}>{shortDate(s.published)}</div>}
+            {s.published && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginBottom: 4 }}>{shortDate(s.published)}{s.updated && s.updated !== s.published ? " · updated " + shortDate(s.updated) : ""}</div>}
             {(s.tags || []).length > 0 && <TagRow tags={s.tags} small />}
           </article>
         ))}

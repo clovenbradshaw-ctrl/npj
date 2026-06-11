@@ -22,11 +22,13 @@ const EYE_BASE = './assets/citey-eyes/';
 const CITEY_MONO = "var(--mono, 'JetBrains Mono', ui-monospace, monospace)";
 
 /* ---------- cue store: a singleton so the imperative API works pre-mount ---------- */
+const CITEY_HIDE_KEY = 'npj_citey_hidden_v1';
 const CiteyStore = (function () {
   let seq = 0;
   const cues = new Map();              // token -> { state, anchor, msg, sticky }
   let tier = 'smart';
   let gate = { bound: 0, pinned: 0, owned: 0, undeclared: 0 };
+  let hidden = (function () { try { return localStorage.getItem(CITEY_HIDE_KEY) === '1'; } catch (e) { return false; } })();
   const subs = new Set();
   const PRIO = { negation: 6, nequiv: 6, falsum: 5, suspicious: 4, turnstile: 3, flagged: 5, entails: 1, verum: 1, asserted: 1, testimony: 1, voice: 1 };
 
@@ -44,7 +46,7 @@ const CiteyStore = (function () {
     }
     return best;
   }
-  function snapshot() { return { tier, current: top(), gate }; }
+  function snapshot() { return { tier, current: top(), gate, hidden }; }
 
   function cue(state, opts = {}) {
     const token = 'c' + (++seq);
@@ -69,8 +71,11 @@ const CiteyStore = (function () {
   function getTier() { return tier; }
   function setGate(g) { gate = g || gate; notify(); }
   function getGate() { return gate; }
+  // Real, persisted hide — the author can tuck Citey away and he stays away.
+  function setHidden(h) { hidden = !!h; try { localStorage.setItem(CITEY_HIDE_KEY, hidden ? '1' : '0'); } catch (e) {} notify(); }
+  function getHidden() { return hidden; }
 
-  return { subscribe, cue, resolve, clear, clearAll, setTier, getTier, setGate, getGate, snapshot };
+  return { subscribe, cue, resolve, clear, clearAll, setTier, getTier, setGate, getGate, setHidden, getHidden, snapshot };
 })();
 
 // The last claim span the author touched (hover/focus/click) — the target the
@@ -121,7 +126,7 @@ function baselineCue(gate) {
 class CiteyAgent extends React.Component {
   constructor(props) {
     super(props);
-    this.state = { tier: 'smart', current: null, gate: CiteyStore.getGate(), anchorY: null, menu: false, mode: 'actions', tags: [], col: null, focusState: null };
+    this.state = { tier: 'smart', current: null, gate: CiteyStore.getGate(), anchorY: null, menu: false, mode: 'actions', tags: [], col: null, focusState: null, hidden: CiteyStore.getHidden(), walk: null };
     this._gateTimer = null;
   }
 
@@ -129,12 +134,14 @@ class CiteyAgent extends React.Component {
     this.unsub = CiteyStore.subscribe(s => {
       const cur = s.current || baselineCue(s.gate);
       const anchorY = cur && cur.anchor ? this._anchorY(cur.anchor) : null;
-      this.setState({ tier: s.tier, current: cur, gate: s.gate, anchorY });
+      this.setState({ tier: s.tier, current: cur, gate: s.gate, anchorY, hidden: s.hidden });
     });
     this._onEvent = (e) => { const d = e.detail || {}; CiteyStore.cue(d.status || 'falsum', { anchor: this._resolveAnchor(d.anchor), msg: d.msg, sticky: d.sticky }); };
     document.addEventListener('citey:cue', this._onEvent);
     this._onSuggest = () => this._suggest();
     document.addEventListener('citey:suggest', this._onSuggest);
+    this._onWalk = () => this._startWalk();
+    document.addEventListener('citey:walk', this._onWalk);
     this._wireScanner();
     refreshGate();
   }
@@ -142,6 +149,7 @@ class CiteyAgent extends React.Component {
     if (this.unsub) this.unsub();
     document.removeEventListener('citey:cue', this._onEvent);
     document.removeEventListener('citey:suggest', this._onSuggest);
+    document.removeEventListener('citey:walk', this._onWalk);
     if (this._mo) this._mo.disconnect();
     if (this._gateTimer) clearTimeout(this._gateTimer);
   }
@@ -197,10 +205,51 @@ class CiteyAgent extends React.Component {
     this.setState({ menu: true, mode: 'tags', tags: r.tags, col: r.column });
   };
   _addTag = (t) => { if (window.__draftTags && window.__draftTags.add) window.__draftTags.add(t); };
-  _pin = () => { if (lastClaim && window.__npjGround && window.__npjGround.pin) window.__npjGround.pin(lastClaim); this.setState({ menu: false }); };
-  _own = (stance) => { if (lastClaim && window.__npjGround && window.__npjGround.own) window.__npjGround.own(lastClaim, stance); this.setState({ menu: false }); setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0); };
+  _pin = () => { if (lastClaim && window.__npjGround && window.__npjGround.pin) window.__npjGround.pin(lastClaim); this.setState({ menu: false }); this._walkAdvance(); };
+  _own = (stance) => { if (lastClaim && window.__npjGround && window.__npjGround.own) window.__npjGround.own(lastClaim, stance); this.setState({ menu: false }); setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0); this._walkAdvance(); };
   _unown = () => { if (lastClaim && window.__npjGround && window.__npjGround.unown) window.__npjGround.unown(lastClaim); this.setState({ menu: false }); setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0); };
   _setTier = (t) => { CiteyStore.setTier(t); if (lastClaim) evaluateSpan(lastClaim); };
+  _hide = () => CiteyStore.setHidden(true);
+  _show = () => CiteyStore.setHidden(false);
+
+  // ---- "cite everything": walk the ungrounded claims one at a time ----
+  // The queue is the publish gate's own flagged list (DOM order) — the exact
+  // claims that would ship unverified. Pinning / owning one advances to the next.
+  _walkQueue() {
+    try { return (window.CiteyBrain ? window.CiteyBrain.publishGate().flagged : []) || []; } catch (e) { return []; }
+  }
+  _startWalk = () => {
+    const q = this._walkQueue();
+    if (!q.length) { CiteyStore.cue('verum', { msg: 'every claim is grounded — nothing to walk through.' }); return; }
+    if (CiteyStore.getHidden()) CiteyStore.setHidden(false);   // can't walk if Citey's tucked away
+    this.setState({ menu: false, walk: { total: q.length, i: 0 } }, () => this._walkTo(0));
+  };
+  _walkTo = (i) => {
+    const q = this._walkQueue();
+    if (!q.length || i >= q.length) { this._endWalk(true); return; }
+    const item = q[Math.min(i, q.length - 1)];
+    const el = item && item.el;
+    if (el) {
+      lastClaim = el;
+      try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+      evaluateSpan(el);
+    }
+    this.setState({ walk: { total: q.length, i: i }, menu: true, mode: 'actions' });
+  };
+  _walkNext = () => { const w = this.state.walk; if (!w) return; this._walkTo(w.i + 1); };
+  _endWalk = (done) => {
+    this.setState({ walk: null, menu: false });
+    if (done) { refreshGate(); CiteyStore.cue('verum', { msg: 'walked the whole draft — every claim is declared.' }); }
+  };
+  // After a pin/own resolves, advance the walk to whatever still needs work.
+  _walkAdvance() {
+    if (!this.state.walk) return;
+    setTimeout(() => {
+      const q = this._walkQueue();
+      if (!q.length) { this._endWalk(true); return; }
+      this._walkTo(Math.min(this.state.walk.i, q.length - 1));
+    }, 60);
+  }
 
   _focusedState() {
     if (!lastClaim || !window.CiteyBrain) return null;
@@ -211,7 +260,13 @@ class CiteyAgent extends React.Component {
   _renderActions(chip, ctx) {
     const { needsWork, isOwned, isGrounded, gate, tier } = ctx;
     const grounded = (gate.pinned || 0) + (gate.owned || 0);
+    const walk = this.state.walk;
     return React.createElement(React.Fragment, null,
+      walk ? React.createElement('div', { key: 'walk', style: { display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 7px', marginBottom: '2px', background: '#2c2942', border: '1px solid #4a4570', borderRadius: '8px' } },
+        React.createElement('span', { style: { flex: 1, fontFamily: CITEY_MONO, fontSize: '10.5px', color: '#CFC9F2' } }, 'cite everything · ' + Math.min(walk.i + 1, walk.total) + ' of ' + walk.total),
+        React.createElement('button', { onClick: this._walkNext, style: { background: '#7C74DE', color: '#fff', border: 0, borderRadius: '6px', padding: '4px 9px', cursor: 'pointer', fontFamily: CITEY_MONO, fontSize: '10.5px', fontWeight: 700 } }, 'Next ›'),
+        React.createElement('button', { onClick: () => this._endWalk(false), title: 'Stop the walkthrough', style: { background: 'none', border: 0, color: '#A8A294', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: 0 } }, '✕')
+      ) : null,
       React.createElement('div', { key: 'h', style: { fontFamily: CITEY_MONO, fontSize: '10px', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#A8A294', marginBottom: '2px' } },
         needsWork ? 'ground this claim' : isOwned ? 'owned by you' : isGrounded ? 'grounded ✓' : 'this draft'),
       needsWork ? React.createElement('button', { key: 'pin', onClick: this._pin, style: chip() }, '📌  Pin the line in the source') : null,
@@ -222,6 +277,8 @@ class CiteyAgent extends React.Component {
       isOwned ? React.createElement('button', { key: 'un', onClick: this._unown, style: chip() }, '↩  Unmark — back to a claim') : null,
       isGrounded ? React.createElement('button', { key: 're', onClick: this._pin, style: chip() }, '✎  Re-pin the source line') : null,
       React.createElement('button', { key: 'tags', onClick: this._suggest, style: chip({ borderColor: '#4a4733' }) }, '✦  Suggest tags'),
+      (gate.undeclared > 0) ? React.createElement('button', { key: 'walk', onClick: this._startWalk, style: chip({ borderColor: '#7C74DE', background: '#2c2942' }) }, '➜  Cite everything — walk me through ' + gate.undeclared) : null,
+      React.createElement('button', { key: 'hide', onClick: this._hide, style: chip({ borderColor: '#3a3833', color: '#A8A294', fontSize: '10.5px' }) }, '⤫  Hide Citey'),
       React.createElement('div', { key: 'tier', style: { display: 'flex', gap: '6px', marginTop: '3px' } },
         ['smart', 'smarter'].map(t => React.createElement('button', {
           key: t, onClick: () => this._setTier(t),
@@ -255,6 +312,21 @@ class CiteyAgent extends React.Component {
     if (route !== 'submit' && route !== 'newsroom') return null;   // drafting surface only
     const S = window.CITEY_STATES;
     if (!S) return null;
+    const gateH = this.state.gate || {};
+
+    // Hidden: collapse to a small re-show pill (the undeclared count still shows
+    // so the author knows work remains).
+    if (this.state.hidden) {
+      return React.createElement('button', {
+        onClick: this._show, title: 'Show Citey',
+        style: { position: 'fixed', right: '18px', bottom: '18px', zIndex: 5400, display: 'inline-flex', alignItems: 'center', gap: '7px', background: '#1B1A1E', color: '#EDE7DA', border: '1px solid #3a3833', borderRadius: '999px', padding: '7px 12px', cursor: 'pointer', fontFamily: CITEY_MONO, fontSize: '11.5px', boxShadow: '0 8px 22px -10px rgba(20,16,8,.6)' }
+      },
+        React.createElement('span', { style: { fontWeight: 800, color: gateH.undeclared ? '#E08A5A' : '#5FBF93' } }, gateH.undeclared ? '⊥' : '⊤'),
+        'Citey',
+        gateH.undeclared ? React.createElement('span', { style: { minWidth: '17px', height: '17px', padding: '0 4px', borderRadius: '9px', background: '#D8412C', color: '#fff', fontWeight: 700, fontSize: '10px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' } }, gateH.undeclared) : null
+      );
+    }
+
     const cur = this.state.current || baselineCue(this.state.gate);
     const d = S.describe(cur.state);
     const tier = this.state.tier;
@@ -337,7 +409,13 @@ window.__citey = {
   flag: (spans) => { refreshGate(); return (spans || []).map(s => CiteyStore.cue('flagged', { anchor: (s && s.el) || s, sticky: true, msg: 'this would publish unverified — pin a source, or mark it yours.' })); },
   // Tag suggestion — mechanical (citey-assist.js); the mounted sprite renders the chips.
   suggest: () => document.dispatchEvent(new CustomEvent('citey:suggest')),
-  hide: () => CiteyStore.clearAll()
+  // Real, persisted hide/show (the old hide() only cleared cues).
+  hide: () => CiteyStore.setHidden(true),
+  show: () => CiteyStore.setHidden(false),
+  toggle: () => CiteyStore.setHidden(!CiteyStore.getHidden()),
+  hidden: () => CiteyStore.getHidden(),
+  // Start the "cite everything" walkthrough over the publish gate's flagged claims.
+  walkthrough: () => document.dispatchEvent(new CustomEvent('citey:walk'))
 };
 
 if (typeof module !== 'undefined' && module.exports) module.exports = { CiteyAgent, CiteyStore, evaluateSpan };

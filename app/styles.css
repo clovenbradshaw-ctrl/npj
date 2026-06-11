@@ -252,22 +252,25 @@ a { color: inherit; }
   color: var(--nr-text);
 }
 .newsroom.nr-light {
-  --nr-bg: #e7e1cf;
-  --nr-rail: #efe9d8;
-  --nr-panel: #efe9d8;
-  --nr-field: #fffdf6;
-  --nr-page: #fffdf6;
-  --nr-line: rgba(22,20,13,.18);
-  --nr-line-strong: rgba(22,20,13,.4);
+  /* a real depth ramp instead of one flat beige: the canvas recedes so the
+     white document sheet floats, rails/panels step up toward it, and the
+     fields you actually write in read as clean paper */
+  --nr-bg: #ddd5c1;            /* canvas behind the sheet — the deepest tone */
+  --nr-rail: #ece5d3;          /* contents rail + tab/strip chrome */
+  --nr-panel: #f2ecdf;         /* side panels — a step brighter than the rail */
+  --nr-field: #fffdf6;         /* inputs + table fields — paper white */
+  --nr-page: #fffdf6;          /* the document sheet */
+  --nr-line: rgba(22,20,13,.2);
+  --nr-line-strong: rgba(22,20,13,.44);
   --nr-text: #16140d;
-  --nr-soft: #4a4536;
-  --nr-muted: #756e5b;
-  --nr-quote: #4a4536;
-  --nr-link: #2b5f8a;
-  --nr-code-bg: rgba(22,20,13,.06);
-  --nr-ok: #1f6f4a;
-  --nr-warn: #9a6a12;
-  --nr-page-shadow: 6px 6px 0 rgba(22,20,13,.10);
+  --nr-soft: #45402f;
+  --nr-muted: #6b6450;         /* darker than before so secondary text clears AA */
+  --nr-quote: #45402f;
+  --nr-link: #1f5a86;
+  --nr-code-bg: rgba(22,20,13,.055);
+  --nr-ok: #1c6a45;
+  --nr-warn: #8a5e10;
+  --nr-page-shadow: 5px 5px 0 rgba(22,20,13,.13);
 }
 .newsroom ::selection { background: var(--review); color: #fff; }
 .newsroom .np-scroll::-webkit-scrollbar-thumb { background: var(--nr-line-strong); }
@@ -424,3 +427,14 @@ a { color: inherit; }
   .npj-logo { height: 62px !important; }
   .npj-taglines > div { font-size: 16px !important; }
 }
+
+/* ============ grounding workspace (GroundingWorkspace.jsx) ============ */
+/* Citey, drawn: the bent-wire operator's idle motion + the table's row flash */
+@keyframes rowflash { 0%, 28% { background-color: rgba(255,236,1,.22); } 100% { background-color: rgba(255,236,1,0); } }
+@keyframes citey-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+@keyframes citey-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
+@keyframes citey-pop { 0% { transform: scale(.55) rotate(-7deg); } 60% { transform: scale(1.12) rotate(2.5deg); } 100% { transform: scale(1) rotate(0); } }
+@keyframes citey-hop { 0%, 100% { transform: translateY(0) scaleY(1); } 28% { transform: translateY(-13px) scaleY(1.06); } 52% { transform: translateY(0) scaleY(.9); } 74% { transform: translateY(-5px) scaleY(1.02); } }
+@keyframes citey-wander { 0%, 100% { transform: translate(0, 0); } 18% { transform: translate(2.5px, -1px); } 38% { transform: translate(-2px, 1px); } 58% { transform: translate(1px, 2px); } 78% { transform: translate(-1.5px, -1.5px); } }
+@keyframes citey-wave { 0%, 100% { transform: rotate(0deg); } 50% { transform: rotate(-16deg); } }
+@keyframes star-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

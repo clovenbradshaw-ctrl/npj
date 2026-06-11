@@ -1,9 +1,11 @@
 /* NPJ — edit after publish. Opens from the article control bar for the admin
    and the article's assignees. The published piece is NOT a file you rewrite:
-   it's an EO event log (articles/<slug>.jsonl), so saving here appends exactly
-   one REC line — the change, who made it, when, and why — to the same file
-   through the publish webhook's `append` mode. Every version stays readable in
-   the log and in the reader's edit-history overlay.
+   it's an EO event log — a folder of timestamped version files
+   (articles/<slug>/), so saving here commits exactly one REC event — the
+   change, who made it, when, and why — as a brand-new version file. Nothing
+   existing is ever touched (which is why these commits can't be rejected the
+   way the old in-place append was), and every version stays readable in the
+   folder and in the reader's edit-history overlay.
 
    Source-bound claims survive the round trip: the body renders into the
    contenteditable with each claim wrapped as <span class="eo-claim" data-src>,
@@ -133,7 +135,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT THE RECORD</span>
-          <span className="np-mono" style={{ fontSize: 10.5, opacity: .75 }}>appends one REC event to articles/{A.slug}.jsonl</span>
+          <span className="np-mono" style={{ fontSize: 10.5, opacity: .75 }}>commits one REC version file to articles/{A.slug}/</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 18, cursor: "pointer" }}><I.x /></button>
         </div>
@@ -186,7 +188,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button className="btn" onClick={onClose} disabled={busy}>Discard</button>
             <button className="btn btn-primary" onClick={save} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
               {busy ? <span style={{ width: 12, height: 12, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>⊛</span>}
-              {busy ? "Appending to the log…" : "Commit the edit"}
+              {busy ? "Committing the new version…" : "Commit the edit"}
             </button>
           </div>
         </div>

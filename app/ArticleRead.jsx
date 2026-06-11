@@ -386,13 +386,14 @@ function ArticleRead(props) {
         <span style={{ flex: 1 }} />
         <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 8 }}>
           <window.VersionBadge sha={A.base_sha} count={artVersions.length} onClick={() => setShowVersions(true)} />
-          {fmtDate(A.published)} · {A.readMins} min
+          {fmtDate(A.published)}{A.updated && A.updated !== A.published ? " · updated " + fmtDate(A.updated) : ""} · {A.readMins} min
         </span>
       </div>
       <div style={{ paddingTop: 14 }}>
-        {/* share link opens the reader; the wayback action targets the raw
-            EO log — the committed artifact is what gets archived */}
-        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleRawUrl(A.slug)}`} title={A.headline} />
+        {/* share link opens the reader; the wayback action targets the
+            committed EO log — the document's version folder on GitHub (or the
+            raw file, for a legacy single-file log) */}
+        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleLogUrl(A)}`} title={A.headline} />
       </div>
       {headings.length >= 2 && (
         <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
@@ -494,15 +495,6 @@ function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityO
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <button onClick={() => setAudit(!audit)} aria-pressed={audit}
-          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
-          style={{ display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer", padding: "5px 12px",
-            border: "1.5px solid var(--ink)", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".04em",
-            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
-          <I.shield style={{ fontSize: 14, verticalAlign: "-2px" }} /> Auditability
-          <span className="np-mono" style={{ fontSize: 10, fontWeight: 600, padding: "0 5px", borderRadius: 2, border: "1px solid " + (audit ? "var(--yellow)" : "var(--rule-strong)") }}>{audit ? "ON" : "OFF"}</span>
-        </button>
-
         <span style={{ flex: 1 }} />
 
         {canEdit && (
@@ -522,6 +514,13 @@ function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityO
             <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>
         ))}
+
+        <button className="btn btn-sm" onClick={() => setAudit(!audit)} aria-pressed={audit}
+          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7,
+            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
+          <I.shield style={{ fontSize: 14 }} /> Auditability
+        </button>
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
