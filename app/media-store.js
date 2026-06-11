@@ -189,12 +189,14 @@
     return await freeze(srcUrl);
   }
 
-  /* freezeArticleMedia(body, {slug, title}) → Promise<{ frozen, failed, method }>.
+  /* freezeArticleMedia(body, {slug, title}) → Promise<{ frozen, failed, failReasons, method }>.
      Walks the EO article body blocks and moves every img still on the media
-     store onto archive.org, rewriting its src in place. A failure leaves the
-     media-store URL untouched (never a silent drop) and is counted. */
+     store onto archive.org, rewriting its src in place. On failure the block
+     is left untouched and a reason string is pushed to failReasons — the
+     caller must treat failed > 0 as a hard error (Matrix URLs must not land
+     in the committed record). */
   async function freezeArticleMedia(body, opts) {
-    const out = { frozen: 0, failed: 0, method: "upload" };
+    const out = { frozen: 0, failed: 0, failReasons: [], method: "upload" };
     if (!Array.isArray(body)) return out;
     const o = opts || {};
     const idSlug = String(o.slug || "media").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "media";
@@ -202,10 +204,19 @@
     for (const b of body) {
       if (!b || b.type !== "img" || !isStoreUrl(b.src)) continue;
       const matrixUrl = b.src;
-      const arch = await toArchive(b.src, ctx);
-      // keep the live media-store URL as `store` so viewers can try it first and
-      // fall back to the durable archive.org `src`.
-      if (arch) { b.store = matrixUrl; b.src = arch; out.frozen++; } else { out.failed++; }
+      let arch = null, reason = null;
+      try {
+        arch = await toArchive(b.src, ctx);
+        if (!arch) reason = "archive.org upload returned no URL (n8n endpoint unreachable or IA keys missing)";
+      } catch (e) { reason = e.message || "unknown error"; }
+      if (arch) {
+        // keep the live media-store URL as `store` so viewers can try it first
+        // and fall back to the durable archive.org `src`.
+        b.store = matrixUrl; b.src = arch; out.frozen++;
+      } else {
+        out.failed++;
+        if (reason && out.failReasons.indexOf(reason) < 0) out.failReasons.push(reason);
+      }
     }
     return out;
   }
