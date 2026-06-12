@@ -10,12 +10,12 @@
  *     for everything that goes public.
  *
  * Publish has two ways to get an image onto archive.org, tried in order:
- *   1. Download + reupload (preferred): fetch the bytes from the media store
- *      with the author's token and PUT them to archive.org as a real item via
- *      the S3-style API. Works even when the homeserver gates media behind auth,
- *      because WE do the authenticated download. Needs the admin's archive.org
- *      S3 keys (archive.org/account/s3.php), stored locally — set in the admin
- *      panel.
+ *   1. Server-side migration (preferred): hand the media-store mxc + the
+ *      author's Matrix token to the n8n archive endpoint (site/media-archive-npj).
+ *      n8n pulls the bytes from the homeserver — authenticated, so it works even
+ *      when the homeserver gates media behind auth — and PUTs them to archive.org
+ *      as a real item via the S3-style API. The archive.org S3 keys live
+ *      server-side in the n8n environment, never in the browser.
  *   2. Wayback freeze (fallback, no keys): Save Page Now on the media-store URL,
  *      the same path the app already uses to freeze sources. Only reaches the
  *      bytes if the homeserver serves media unauthenticated.
@@ -62,6 +62,14 @@
     if (!m) return mxc;
     const b = base || (sess() && sess().base_url) || "";
     return b + "/_matrix/media/v3/download/" + m[1] + "/" + encodeURIComponent(m[2]);
+  }
+
+  // Reverse of mxcToHttp: a media-store download/thumbnail URL → mxc://server/id.
+  // Lets publish hand the backend the mxc for server-side archival, working back
+  // from the https src that rides the draft.
+  function httpToMxc(url) {
+    const m = String(url || "").match(/\/_matrix\/(?:media\/(?:v3|r0)|client\/v1\/media)\/(?:download|thumbnail)\/([^/]+)\/([^/?#]+)/);
+    return m ? ("mxc://" + m[1] + "/" + decodeURIComponent(m[2])) : null;
   }
 
   /* ---- upload a drop to the media store ----
@@ -130,6 +138,16 @@
     return "https://n8n.intelechia.com/webhook/site/media-npj";
   }
 
+  // Publish-time archive endpoint (site/media-archive-npj): n8n migrates a
+  // media-store mxc onto archive.org server-side. Same host derivation as
+  // mediaEndpoint — it mirrors the publish webhook's host.
+  function archiveEndpoint() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.archiveEndpoint) return c.archiveEndpoint; } catch (e) {}
+    const base = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
+    if (base) return base.replace(/\/[^/]+$/, "/media-archive-npj");
+    return "https://n8n.intelechia.com/webhook/site/media-archive-npj";
+  }
+
   // chunked so a multi-hundred-KB image doesn't blow the call stack on apply().
   async function blobToBase64(blob) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -164,6 +182,41 @@
     return j.url;
   }
 
+  /* migrateToArchive(mxc, {identifier, filename, mimetype, title}) → Promise<archive.org URL>.
+     The publish-time path: hand the media-store mxc + the author's Matrix token
+     to the n8n archive endpoint; n8n pulls the bytes from the homeserver
+     server-side and PUTs them to archive.org, answering { ok, url } (or
+     { ok:false, error }). Rejects loudly so the caller can fall back or warn. */
+  async function migrateToArchive(mxc, opts) {
+    const m = MA();
+    const token = m && m.token && m.token();
+    if (!token) throw new Error("Sign in to upload to archive.org.");
+    // The backend pulls the bytes from the homeserver and PUTs them to
+    // archive.org within the request — that round-trip can take up to a minute,
+    // so give it generous headroom before aborting (vs. the browser default).
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    let res;
+    try {
+      res = await fetch(archiveEndpoint(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({
+          mxc, identifier: opts.identifier, filename: opts.filename,
+          mimetype: opts.mimetype || "image/webp", title: opts.title || ""
+        }),
+        signal: ctrl.signal
+      });
+    } catch (e) {
+      throw new Error(e && e.name === "AbortError"
+        ? "archive.org upload timed out — the media archive service took too long."
+        : "Couldn't reach the media archive service.");
+    } finally { clearTimeout(timer); }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok || !j.url) throw new Error((j && j.error) || ("archive.org migration failed (HTTP " + res.status + ")."));
+    return j.url;
+  }
+
   /* freeze(url) → Promise<archive.org URL | null>. The no-keys fallback: Save
      Page Now + verify (NpjArchiveCDN.ensureSnapshot), then rewrite to the raw
      image (im_) form so an <img> gets the bytes, not the Wayback page. */
@@ -175,15 +228,17 @@
     return (c.waybackRaw && c.waybackRaw(snap)) || snap;
   }
 
-  // one image → archive.org: download the bytes (authed) and push them through
-  // the backend; if that can't be reached, fall back to a Wayback snapshot.
+  // one image → archive.org: hand the media-store mxc to the backend, which
+  // pulls the bytes from the homeserver (authenticated) and PUTs them to
+  // archive.org server-side. If that can't be reached, fall back to a Wayback
+  // snapshot of the media-store URL.
   async function toArchive(srcUrl, ctx) {
     try {
-      const blob = await fetchBytes(srcUrl);
-      if (blob) {
-        const mediaId = (String(srcUrl).split("/download/")[1] || "").split("/").pop() || ("img-" + Date.now());
+      const mxc = httpToMxc(srcUrl);
+      if (mxc) {
+        const mediaId = mxc.split("/").pop() || ("img-" + Date.now());
         const file = (mediaId.replace(/[^A-Za-z0-9._-]/g, "") || ("img-" + Date.now())) + ".webp";
-        return await uploadToArchive(blob, { identifier: ctx.identifier, filename: file, title: ctx.title });
+        return await migrateToArchive(mxc, { identifier: ctx.identifier, filename: file, title: ctx.title });
       }
     } catch (e) { /* fall through to Wayback */ }
     return await freeze(srcUrl);
@@ -222,8 +277,8 @@
   }
 
   window.NpjMedia = {
-    canUpload, isStoreUrl, isPublishable, mxcToHttp, mediaEndpoint,
-    upload, fetchBytes, resolveDisplay, uploadToArchive,
+    canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint,
+    upload, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
     freeze, freezeArticleMedia
   };
 })();
