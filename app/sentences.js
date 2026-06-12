@@ -56,11 +56,14 @@
   function segment(rootEl) {
     if (!rootEl) return [];
     var doc = rootEl.ownerDocument || root.document;
-    var blocks = Array.prototype.slice.call(rootEl.querySelectorAll('p, li, h2, h3'));
+    var blocks = Array.prototype.slice.call(rootEl.querySelectorAll('p, li, h2, h3, blockquote'));
     var rows = [], seen = {};
     blocks.forEach(function (block, bi) {
       if (block.classList && block.classList.contains('nr-dek')) return;          // the dek isn't body prose
       if (block.closest && (block.closest('figure') || block.closest('pre'))) return;
+      // a blockquote that wraps its own block children (pasted <blockquote><p>…)
+      // is just a container — its inner blocks are captured on their own pass
+      if (block.tagName === 'BLOCKQUOTE' && block.querySelector('p, li, h2, h3, blockquote')) return;
       var text = block.textContent || '';
       if (!text.trim()) return;
       splitOffsets(text).forEach(function (p, si) {
