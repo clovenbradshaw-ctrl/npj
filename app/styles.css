@@ -422,8 +422,8 @@ a { color: inherit; }
   .npj-footer-inner { padding: 18px 16px !important; }
 
   /* front page */
-  .npj-cover { grid-template-columns: 1fr !important; gap: 24px !important; }
-  .npj-cover-h { font-size: 52px !important; }
+  .npj-cover { gap: 24px !important; }
+  .npj-cover-h { font-size: 40px !important; }
   .npj-row2 { grid-template-columns: 1fr !important; }
   .npj-row2 > div { border-right: none !important; padding: 20px 0 !important; border-top: 1px solid var(--rule); }
   .npj-more-row { grid-template-columns: 100px 1fr !important; }

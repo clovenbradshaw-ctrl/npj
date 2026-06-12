@@ -376,11 +376,26 @@ function ArticleRead(props) {
   const railGap = 40;
   const stackRail = hasRail && isNarrow;
 
+  // the banner image — lifted into a hero directly under the title/dek. ONLY an
+  // explicit banner is lifted (A.image.banner); a first-inline image picked up
+  // as the front-page thumbnail stays inline in the body (the body map skips
+  // banner blocks, so a lifted banner never doubles up).
+  const heroImg = (A.image && A.image.src && A.image.banner)
+    ? A.image
+    : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
+  const Hero = (heroImg && heroImg.src) ? (
+    <figure style={{ margin: "4px 0 24px" }}>
+      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
+    </figure>
+  ) : null;
+
   const Header = (
     <header style={{ margin: "0 0 26px" }}>
       <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 12 }}>{A.kicker}</div>
       <h1 className="npj-article-h" style={{ fontFamily: "var(--display)", fontSize: 44, lineHeight: 1, letterSpacing: "-.01em", margin: "0 0 20px" }}>{A.headline}</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1.4, color: "var(--ink)", margin: "0 0 20px", fontStyle: "italic" }}>{A.dek}</p>
+      {Hero}
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
         <div style={{ display: "flex", gap: 10 }}>{A.authors.map(a => <Handle key={a} mxid={a} showName />)}</div>
         <span style={{ flex: 1 }} />
@@ -406,20 +421,6 @@ function ArticleRead(props) {
     </header>
   );
 
-  // the banner image — lifted into a hero under the headline. ONLY an explicit
-  // banner is lifted (A.image.banner); a first-inline image picked up as the
-  // front-page thumbnail stays inline in the body (the body map skips banner
-  // blocks, so a lifted banner never doubles up).
-  const heroImg = (A.image && A.image.src && A.image.banner)
-    ? A.image
-    : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
-  const Hero = (heroImg && heroImg.src) ? (
-    <figure style={{ margin: "0 0 28px" }}>
-      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-      {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
-    </figure>
-  ) : null;
-
   const Main = (
     <div style={{ minWidth: 0 }}>
       {A.status === "unpublished" && (
@@ -433,7 +434,6 @@ function ArticleRead(props) {
         <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)", border: "1px solid var(--reject)", padding: "9px 10px", marginBottom: 16, lineHeight: 1.5 }}>{statusErr}</div>
       )}
       {Header}
-      {Hero}
       {Body}
       <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
     </div>

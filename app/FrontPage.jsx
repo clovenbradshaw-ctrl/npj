@@ -208,38 +208,34 @@ function FrontLineup({ items, onOpen }) {
 
   return (
     <>
-      {/* Cover story: image left, text right */}
-      <section className="npj-cover" style={{ display: "grid", gridTemplateColumns: "1fr 1.08fr", gap: 52, alignItems: "start", paddingBottom: 44 }}>
-        <div>
-          {lead.image && lead.image.src && window.MediaImg
-            ? (
-                <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-                  <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} fit={lead.image.fit} crop={lead.image.crop} style={{ width: "100%", height: "auto", display: "block", border: "1.5px solid var(--ink)" }} />
-                </button>
-              )
-            : (
-                <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
-                  <Placeholder label="hero image" h={620} />
-                </button>
-              )
-          }
+      {/* Cover story: title, then the banner directly underneath, then the meta */}
+      <section className="npj-cover" style={{ paddingBottom: 44 }}>
+        <div className="np-mono" style={{ fontWeight: 600, fontSize: 12.5, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--reject)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+          {lead.kicker || "Cover Story"}
+          {lead.status === "unpublished" && <UnpubBadge />}
         </div>
-        <article style={{ paddingTop: 2 }}>
-          <div className="np-mono" style={{ fontWeight: 600, fontSize: 12.5, letterSpacing: ".16em", textTransform: "uppercase", color: "var(--reject)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
-            {lead.kicker || "Cover Story"}
-            {lead.status === "unpublished" && <UnpubBadge />}
+        <button onClick={() => open(lead)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "block", width: "100%" }}>
+          <h1 className="npj-cover-h" style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 47, lineHeight: .94, letterSpacing: ".002em", textTransform: "uppercase", margin: "0 0 16px" }}>{lead.headline}</h1>
+        </button>
+        {lead.dek && <p style={{ fontSize: 24, lineHeight: 1.5, margin: "0 0 22px", maxWidth: "60ch" }}>{lead.dek}</p>}
+        {lead.image && lead.image.src && window.MediaImg
+          ? (
+              <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 18px" }}>
+                <window.MediaImg srcs={[lead.image.store, lead.image.src]} alt={lead.image.caption || lead.headline || ""} fit={lead.image.fit} crop={lead.image.crop} style={{ width: "100%", height: "auto", display: "block", border: "1.5px solid var(--ink)" }} />
+              </button>
+            )
+          : (
+              <button onClick={() => open(lead)} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", margin: "0 0 18px" }}>
+                <Placeholder label="hero image" h={420} />
+              </button>
+            )
+        }
+        {lead.published && (
+          <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink-soft)", marginBottom: 18 }}>
+            {fmtDate(lead.published)}{lead.updated && lead.updated !== lead.published ? " · updated " + shortDate(lead.updated) : ""}
           </div>
-          <button onClick={() => open(lead)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "block", width: "100%" }}>
-            <h1 className="npj-cover-h" style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 94, lineHeight: .94, letterSpacing: ".002em", textTransform: "uppercase", margin: "0 0 22px" }}>{lead.headline}</h1>
-          </button>
-          {lead.published && (
-            <div style={{ fontFamily: "var(--mono)", fontSize: 13, color: "var(--ink-soft)", marginBottom: 18 }}>
-              {fmtDate(lead.published)}{lead.updated && lead.updated !== lead.published ? " · updated " + shortDate(lead.updated) : ""}
-            </div>
-          )}
-          {lead.dek && <p style={{ fontSize: 24, lineHeight: 1.5, margin: "0 0 24px", maxWidth: "60ch" }}>{lead.dek}</p>}
-          {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
-        </article>
+        )}
+        {(lead.tags || []).length > 0 && <TagRow tags={lead.tags} />}
       </section>
 
       {/* Second row — up to 3 cards in a column grid */}
