@@ -1384,7 +1384,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // lands as another version file in the same folder, so the folder is the
     // article's complete change history — and no commit ever has to update an
     // existing file. Authority is re-verified server-side by the webhook.
-    upd(3, { state: "active", detail: flight.mediaToFreeze ? "moving media to archive.org…" : ("→ clovenbradshaw-ctrl/npj · articles/" + slug + "/") });
+    upd(3, { state: "active", detail: flight.mediaToFreeze ? ("moving " + flight.mediaToFreeze + " image" + (flight.mediaToFreeze === 1 ? "" : "s") + " to archive.org — this can take up to a minute each…") : ("→ clovenbradshaw-ctrl/npj · articles/" + slug + "/") });
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     const gen = window.NpjArticles.genesisFromContent(flight.content, { slug, headline: title, actor });
     // move any media-store images onto archive.org (download + reupload, or the

@@ -86,31 +86,52 @@ articles/<slug>/20260611T010203456Z-rec-9bd1.jsonl   ← edit / unpublish / repu
 > webhook (below). Only the resulting archive.org URL rides into the committed
 > JSONL, so the repo stays plaintext + auditable and no base64 is ever committed.
 
-## Media uploads → archive.org (`/webhook/site/media-npj`)
+## Media: draft to the Matrix store, publish to archive.org
 
-The browser can't reliably PUT to archive.org's S3 endpoint (CORS) and shouldn't
-hold the IA keys, so the bytes go through n8n. `app/media-store.js` POSTs
-`{ identifier, filename, mimetype, title, contentBase64 }` with the author's
-Matrix Bearer token; the `Media *` branch verifies the token + role, decodes the
-bytes, PUTs them to `s3.us.archive.org`, and returns `{ ok, url }`.
+Image bytes never ride a GitHub commit, and the archive.org S3 keys never reach
+the browser — so media moves in two steps:
+
+1. **Draft → Matrix media store.** A dropped photo uploads straight to the
+   author's homeserver media repo (`app/media-store.js` → `/_matrix/media/v3/upload`,
+   the author's own session) and the draft references the returned `mxc://…` as an
+   https download URL. No bytes, no base64 in the draft — just a durable URL.
+2. **Publish → archive.org (`/webhook/site/media-archive-npj`).** For every
+   media-store image still in the body, `app/media-store.js` derives the `mxc`
+   from that URL and POSTs `{ mxc, identifier, filename, mimetype, title }` with
+   the author's Matrix Bearer token. The `MArc *` branch verifies the token +
+   role, **pulls the bytes from the homeserver server-side** (authenticated, so it
+   works even when the homeserver gates media behind auth), PUTs them to
+   `s3.us.archive.org`, and returns `{ ok, url }` — the archive.org URL swapped
+   into the committed JSONL. If the endpoint can't be reached the app falls back
+   to a Wayback snapshot; if *that* also fails the publish is blocked (a
+   media-store URL must never land in the committed record).
 
 ```
-Media Webhook → Media Whoami → Media Fetch Roles → Media Authorize → Authorized?
-              → Media Build (base64 → binary) → IA Put (S3) → Media Result → Media OK
+MArc Webhook → MArc Whoami → MArc Fetch Roles → MArc Authorize → Authorized?
+             → MArc Fetch Bytes (Matrix) → MArc Prep → MArc IA Put (S3) → MArc Result → MArc OK
 ```
+
+The server-side pull + S3 PUT is synchronous and **can take up to a minute per
+image**, so the browser waits ~120s before giving up and the publish UI shows a
+"moving N images to archive.org…" step.
 
 Setup in n8n (one-time):
 - Add two **environment variables**: `IA_S3_ACCESS` and `IA_S3_SECRET` (your keys
-  from `archive.org/account/s3.php`). The `IA Put` node sends
-  `authorization: LOW $IA_S3_ACCESS:$IA_S3_SECRET`.
-- Re-import `npj-publish.n8n.json`, re-bind no GitHub cred needed for this branch
-  (it only talks to archive.org), and **activate**.
+  from `archive.org/account/s3.php`). The IA Put node sends
+  `authorization: LOW $IA_S3_ACCESS:$IA_S3_SECRET` — keep the keys in env, **never
+  hard-coded in the node** (a committed workflow JSON is public).
+- Re-import `npj-publish.n8n.json` and **activate**. The media branch needs no
+  GitHub cred (it only talks to the homeserver + archive.org).
 
-> ⚠️ The `IA Put` node uses n8n's HTTP Request binary-body mode
-> (`contentType: binaryData`, field `data`). If your n8n version names that
-> differently, fix it once on that node. The branch is **untested against the
-> live archive.org S3 endpoint from this environment** — confirm a test upload
-> returns `{ ok:true, url }` before relying on it.
+> ⚠️ **The committed `npj-publish.n8n.json` predates this media split** — it still
+> ships a single `media-npj` → archive.org branch. Re-export the workflow from the
+> live instance (or add the `MArc *` / `media-archive-npj` branch) so the committed
+> copy carries the publish-time migration the app now calls.
+
+> ⚠️ The IA Put node uses n8n's HTTP Request binary-body mode
+> (`contentType: binaryData`). If your n8n version names that differently, fix it
+> once on the node, and confirm a test publish returns `{ ok:true, url }` from
+> `media-archive-npj` before relying on it.
 
 n8n workflow (`npj-publish.n8n.json`) — two webhooks that commit to
 `github.com/clovenbradshaw-ctrl/npj` (main). It commits whatever `contentRaw`
