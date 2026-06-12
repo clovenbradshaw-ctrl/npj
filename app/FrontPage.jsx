@@ -215,7 +215,7 @@ function FrontLineup({ items, onOpen }) {
           {lead.status === "unpublished" && <UnpubBadge />}
         </div>
         <button onClick={() => open(lead)} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "block", width: "100%" }}>
-          <h1 className="npj-cover-h" style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 47, lineHeight: .94, letterSpacing: ".002em", textTransform: "uppercase", margin: "0 0 16px" }}>{lead.headline}</h1>
+          <h1 className="npj-cover-h" style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 44, lineHeight: .94, letterSpacing: ".002em", textTransform: "uppercase", margin: "0 0 16px" }}>{lead.headline}</h1>
         </button>
         {lead.dek && <p style={{ fontSize: 24, lineHeight: 1.5, margin: "0 0 22px", maxWidth: "60ch" }}>{lead.dek}</p>}
         {lead.image && lead.image.src && window.MediaImg
