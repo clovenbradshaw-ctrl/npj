@@ -482,10 +482,20 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       </div>
     );
     if (!t.trim()) {
-      // no text on record yet — the reader can't show what it doesn't have
+      // no text on record yet — but if it's a viewable upload (image / PDF), show
+      // the document itself; a PDF's text layer flows back in via onText so the
+      // reader fills in and the words become selectable.
+      const SV = window.NpjSourceView;
+      const hasVisual = SV && SV.hasFile(rec) && (SV.kindOf(rec) === "image" || SV.kindOf(rec) === "pdf");
       return (
         <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 300 : 440, overflowY: "auto" }}>
           {letterhead}
+          {hasVisual && window.SourceViewer && (
+            <div style={{ padding: "10px 12px 0" }}>
+              <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 220 : 340}
+                onText={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
+            </div>
+          )}
           <SeedBox onSeed={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
         </div>
       );

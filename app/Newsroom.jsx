@@ -15,6 +15,14 @@ const NR = {
 const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
+// A source the file explorer/viewer should open: an uploaded document, or any
+// source whose content the app can render inline (image / pdf / text). Web-link
+// snapshots are excluded — they keep their "open ↗".
+function nrIsFileSrc(rec) {
+  const SV = window.NpjSourceView;
+  return !!(SV && rec && (/^doc-/.test(rec.id || "") || SV.isViewable(rec)));
+}
+
 const DEK_PH = "Subtitle — one line under the headline";
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
@@ -64,6 +72,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [toc, setToc] = useState([]);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
   const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
+  const [explorer, setExplorer] = useState(null);   // { key } — the source file explorer, open on a source
   const [showVersions, setShowVersions] = useState(false);
   const [showRooms, setShowRooms] = useState(false);
   const [rooms, setRooms] = useState(null);
@@ -638,6 +647,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!rec || !t) return;
       rec.text = (rec.text ? rec.text + "\n" : "") + t;
       setRev(v => v + 1);
+      scheduleSave();   // pasted / PDF-extracted source text sticks to the draft
     }
   };
   // armed + a fresh selection just landed → bind it to the armed source
@@ -707,14 +717,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   const addFiles = (fileList) => {
     const files = Array.from(fileList || []); if (!files.length) return;
+    const canUp = !!(window.NpjMedia && window.NpjMedia.canUpload && window.NpjMedia.canUpload());
     const made = files.map((f, i) => {
       const key = "doc-" + Date.now().toString(36) + i;
-      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: "uploaded document", title: f.name, original_url: "", archive_url: "", retrieved: new Date().toISOString().slice(0, 10), text: "", binary: !isTextFile(f) };
-      return { key, archived: false, snapshotting: true, file: f };
+      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: "uploaded document", title: f.name, filename: f.name, mime: f.type || "", size: f.size || 0, original_url: "", archive_url: "", file_url: "", retrieved: new Date().toISOString().slice(0, 10), text: "", binary: !isTextFile(f) };
+      // keep the original bytes for THIS session so the file previews instantly
+      // and survives a media-store upload that's still in flight (or failed)
+      if (window.NpjSourceView) window.NpjSourceView.registerBlob(key, f);
+      return { key, archived: false, snapshotting: false, uploading: canUp, file: f };
     });
     setSources(s => [...made, ...s]);
-    // read text out of text-like files so Citey can scan them, then stamp a
-    // pending review and open Citey on the first upload (deferrable via "Later").
+    // store the bytes durably on the media store (same store the article images
+    // ride) so the document survives a reload / device switch and can be VIEWED
+    // for citation later — not just this session. Best-effort: a failure leaves
+    // the session blob in place and the row says "this browser only".
+    if (canUp) made.forEach(async m => {
+      try {
+        const up = await window.NpjMedia.upload(m.file, m.file.name);
+        const rec = window.NPJ.SOURCES[m.key];
+        if (rec && up) { rec.file_url = up.url; rec.mxc = up.mxc; }
+        setSources(s => s.map(x => x.key === m.key ? { ...x, uploading: false } : x));
+        scheduleSave();
+      } catch (e) {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, uploading: false, uploadErr: (e && e.message) || "upload failed" } : x));
+      }
+    });
+    // read text out of text-like files so Citey can scan them and you can cite
+    // them, then stamp a pending PII review and open Citey on the first upload.
     Promise.all(made.map(m => new Promise(resolve => {
       if (!isTextFile(m.file)) return resolve();
       const r = new FileReader();
@@ -723,8 +752,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       try { r.readAsText(m.file); } catch (e) { resolve(); }
     }))).then(() => {
       made.forEach(m => scanSource(m.key));
-      setSources(s => s.map(x => made.find(m => m.key === x.key) ? { ...x, snapshotting: false } : x));
+      setSources(s => [...s]);
       if (made[0]) setRedactTarget(made[0].key);
+      scheduleSave();
     });
   };
 
@@ -1004,7 +1034,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
         {/* sources */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
-          <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}><I.source style={{ fontSize: 14 }} /> Sources · {sources.length}</div>
+          <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
+            <I.source style={{ fontSize: 14 }} /> Sources · {sources.length}
+            <span style={{ flex: 1 }} />
+            {sources.some(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])) && (
+              <button onClick={() => setExplorer({ key: null })} title="Open the file explorer — read every uploaded source" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "3px 9px", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.folder style={{ fontSize: 12 }} /> Browse files</button>
+            )}
+          </div>
           {(() => { const nq = needsQuoteCount(); return nq ? (
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
               ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — Citey can find them.
@@ -1034,11 +1070,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const reviewSt = piiGated(s.key) ? piiReviewState(s.key) : null;
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  {s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
+                  {s.uploading ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> storing file</span>
+                    : s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
                     : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
+                  {nrIsFileSrc(rec) && <span className="np-mono" title={rec.file_url ? "Stored on your account" : "In this browser only — sign-in stores it to your account"} style={{ fontSize: 8.5, color: NR.soft, border: "1px solid " + NR.line, padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{window.NpjSourceView.kindLabel(rec)}{!rec.file_url && !s.uploading ? " · local" : ""}</span>}
+                  {s.uploadErr && <span className="np-mono" title={s.uploadErr} style={{ fontSize: 8.5, color: NR.warn, border: "1px solid " + NR.warn, padding: "0 5px" }}>storage failed</span>}
                   {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Citey reviews this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
                   {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="Citey's PII review is done — cleared to archive">✓ PII reviewed</span>}
                   <span style={{ flex: 1 }} />
@@ -1050,6 +1089,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
+                  {nrIsFileSrc(rec) && <button onClick={() => setExplorer({ key: s.key })} title="Open and read this file" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.eye style={{ fontSize: 12 }} /> View</button>}
                   {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Citey reviews this for PII first, then archives" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review &amp; archive" : "Archive"}</button>}
                 </div>
               </div>
@@ -1160,6 +1200,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
+      {explorer && window.SourceExplorer && (
+        <window.SourceExplorer
+          title="Source files — this article"
+          initialKey={explorer.key}
+          items={sources.filter(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])).map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
+          onClose={() => { setExplorer(null); setSources(x => [...x]); }} />
+      )}
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
       {redactTarget && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={redactTarget}
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}

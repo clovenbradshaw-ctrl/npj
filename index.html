@@ -47,6 +47,9 @@
 <script src="app/matrix-auth.js"></script>
 <!-- media store: uploads image-slot drops to the Matrix homeserver while drafting, frozen to archive.org at publish -->
 <script src="app/media-store.js"></script>
+<!-- source view: makes an uploaded source viewable + citable (kind detection,
+     durable display URLs via the media store, lazy pdf.js text extraction) -->
+<script src="app/source-view.js"></script>
 <script src="app/drafts.js"></script>
 <script src="app/image-slot.js"></script>
 <!-- the published record: per-document folders of timestamped version files
@@ -77,6 +80,10 @@
 <script type="text/babel" src="tweaks-panel.jsx"></script>
 <script type="text/babel" src="app/layout.jsx"></script>
 <script type="text/babel" src="app/shared.jsx"></script>
+<!-- source viewer + file explorer: render an uploaded source's real content
+     (image / pdf / text), and a two-pane explorer to browse every file -->
+<script type="text/babel" src="app/SourceViewer.jsx"></script>
+<script type="text/babel" src="app/SourceExplorer.jsx"></script>
 <script type="text/babel" src="app/versions.jsx"></script>
 <script type="text/babel" src="app/Entities.jsx"></script>
 <script type="text/babel" src="app/SuggestionRail.jsx"></script>
@@ -372,7 +379,7 @@ function App() {
       </TweaksPanel>
 
       <AdminEditor />
-      <CiteyAgent route={route} editorSelector=".md-preview" />
+      <CiteyAgent route={route} signedIn={!!session} editorSelector=".md-preview" />
     </window.LayoutCtx.Provider>
   );
 }

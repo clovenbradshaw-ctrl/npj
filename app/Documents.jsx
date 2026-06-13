@@ -132,7 +132,9 @@ function NewProjectControl({ onCreated }) {
    it. A row that also lives in other projects flags the synthetic cross-project
    link. NpjSources.draftGroups did the grouping over every draft; we filter to
    the ones this project touches so the cross-project spans survive. */
-function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle }) {
+function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle, onOpenFile }) {
+  const SV = window.NpjSourceView;
+  const isFile = (rec) => !!SV && (/^doc-/.test((rec && rec.id) || "") || SV.isViewable(rec) || (SV.hasFile(rec) && SV.kindOf(rec) !== "unknown"));
   const mine = (groups || []).filter(g => g.carriers.some(c => c.project && c.project.roomId === roomId));
   if (!mine.length) return (
     <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>No sources yet — bind one inside an article and it's shared with every article in this project.</div>
@@ -156,6 +158,7 @@ function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle }) {
               <span className="np-mono" style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px solid var(--rule)", padding: "0 5px", color: k.archived ? "var(--verified)" : "var(--ink-soft)" }}>{k.archived ? "archived" : k.label}</span>
               {g.duplicated && <span className="np-mono" title={"Identical content uploaded " + g.uploads + " times — linked, not duplicated"} style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px dashed var(--review)", color: "var(--review)", padding: "0 5px" }}>×{g.uploads} linked</span>}
               <span style={{ flex: 1 }} />
+              {isFile(g.rec) && onOpenFile && <button onClick={() => onOpenFile(g.rec.id || (g.keys && g.keys[0]) || g.signature)} title="Open and read this file" className="np-mono" style={{ fontSize: 10, color: "var(--data)", background: "none", border: 0, padding: 0, cursor: "pointer", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 3, fontFamily: "inherit" }}><I.eye style={{ fontSize: 12 }} /> view</button>}
               {url && <a href={url} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2 }}>open ↗</a>}
             </div>
             <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 5, display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
@@ -189,6 +192,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
   const [statusBusy, setStatusBusy] = useState(null); // slug with an unpublish/republish in flight
   const [statusErr, setStatusErr] = useState(null);
   const [q, setQ] = useState("");
+  const [explorer, setExplorer] = useState(null);   // { items, initialKey } — the source file explorer
   const { isAdmin } = React.useContext(window.LayoutCtx);
   // unpublished pieces stay listed for admins (badged, still openable) but
   // drop off the list for everyone else
@@ -309,6 +313,22 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
   // project's shelf can also see the cross-project links (NpjSources.draftGroups).
   const allGroups = (window.NpjSources && drafts) ? window.NpjSources.draftGroups(drafts) : [];
 
+  // The file explorer's contents: every source that's an actual file (uploaded
+  // doc, image, pdf, text), deduped + backtracked to the articles that cite it.
+  // Web-link snapshots stay on their "open ↗" — this is for files you can read.
+  const SV = window.NpjSourceView;
+  const fileGroups = allGroups.filter(g => SV && g.rec && (/^doc-/.test(g.rec.id || "") || SV.isViewable(g.rec) || (SV.hasFile(g.rec) && SV.kindOf(g.rec) !== "unknown")));
+  const explorerItems = fileGroups.map(g => ({
+    key: g.rec.id || (g.keys && g.keys[0]) || g.signature,
+    rec: g.rec,
+    group: (g.projects && g.projects[0]) ? (titleByRoom(g.projects[0].roomId) || g.projects[0].title || "Project") : "Not in a project",
+    carriers: (g.carriers || []).map(c => ({
+      title: c.title,
+      onOpen: () => { setExplorer(null); if (c.kind === "published" && c.slug && onOpenArticle) onOpenArticle(c.slug); else if (c.kind === "draft") onOpen(String(c.id).replace(/^draft:/, "")); }
+    }))
+  }));
+  const openFile = (key) => setExplorer({ items: explorerItems, initialKey: key });
+
   // optimistic UI: a just-sent invite shows pending immediately; a new project
   // appears without waiting on the next homeserver sync
   const addPendingMember = (roomId, mxid) => setMembers(m => {
@@ -404,7 +424,14 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "flex", alignItems: "center", gap: 7, margin: 0 }}>
                 <I.folder style={{ fontSize: 14 }} /> Projects {rooms ? "· " + projects.length : ""}
               </div>
-              <NewProjectControl onCreated={addProject} />
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {explorerItems.length > 0 && (
+                  <button className="btn btn-sm" onClick={() => openFile(explorerItems[0].key)} title="Open the file explorer — read every uploaded source" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                    <I.eye style={{ fontSize: 12 }} /> Browse files · {explorerItems.length}
+                  </button>
+                )}
+                <NewProjectControl onCreated={addProject} />
+              </div>
             </div>
             <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", margin: "0 0 10px", lineHeight: 1.5 }}>A project buckets its <strong>articles</strong> and the <strong>sources</strong> that back them under one set of invitees — everyone invited can open and edit every article and source in it. Recovered from Matrix, not this browser — wipe or switch devices and they're still here after you sign in.</div>
             {(!rooms || !drafts) && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center", marginBottom: 10 }}><DocSpinner /> recovering your workspace (this browser + your Matrix account)…</div>}
@@ -446,7 +473,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                   {!query && (
                     <React.Fragment>
                       <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10, margin: "13px 0 6px", display: "flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 12 }} /> Sources · available to every article here</div>
-                      <ProjectSources groups={allGroups} roomId={p.roomId} titleOf={titleByRoom} onOpen={onOpen} onOpenArticle={onOpenArticle} />
+                      <ProjectSources groups={allGroups} roomId={p.roomId} titleOf={titleByRoom} onOpen={onOpen} onOpenArticle={onOpenArticle} onOpenFile={openFile} />
                     </React.Fragment>
                   )}
                 </div>
@@ -526,6 +553,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
               </React.Fragment>
             )}
           </React.Fragment>
+        )}
+        {explorer && window.SourceExplorer && (
+          <window.SourceExplorer items={explorer.items} initialKey={explorer.initialKey}
+            title="Source files" onClose={() => setExplorer(null)} />
         )}
       </main>
     </div>
