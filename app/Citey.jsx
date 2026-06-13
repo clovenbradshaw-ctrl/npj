@@ -309,10 +309,21 @@ class CiteyAgent extends React.Component {
 
   render() {
     const route = this.props.route;
-    if (route !== 'submit' && route !== 'newsroom') return null;   // drafting surface only
+    // Citey lives ONLY in the editor — a real drafting surface. Never on the
+    // public site, the sign-in page, or the document explorer.
+    if (route !== 'newsroom') return null;
+    // …and only for a signed-in author. A guest has no claims to ground and no
+    // account to save grounding to, so Citey never appears for them.
+    if (!this.props.signedIn) return null;
     const S = window.CITEY_STATES;
     if (!S) return null;
     const gateH = this.state.gate || {};
+    // …and only when there is REAL WORK to do: at least one claim is bound to a
+    // source (the publish gate counts them), or a walkthrough is in flight. An
+    // empty draft summons nothing — Citey turns up the moment the author binds
+    // their first claim, and the persisted "hide" still wins over all of this.
+    const hasWork = (gateH.bound || 0) > 0 || !!this.state.walk;
+    if (!hasWork) return null;
 
     // Hidden: collapse to a small re-show pill (the undeclared count still shows
     // so the author knows work remains).

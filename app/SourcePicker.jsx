@@ -1,11 +1,17 @@
 /* ============================================================
-   SourcePicker.jsx — render a source and SELECT the words that back a claim.
+   SourcePicker.jsx — SEE a source and SELECT the words that back a claim.
 
-   The old pin flow was a blank textarea. This shows the source text itself,
-   pre-highlights Citey's best mechanical match (citey-assist.rankSpans, no
-   model), and lets the author drag-select the exact span to mint the citation —
-   returning the quote AND its char offsets (loc) so the record knows where in
-   the source it came from. Falls back to a paste box when no text is on record.
+   The old pin flow was a blank textarea. This shows the source itself and lets
+   the author drag-select the exact span to mint the citation — returning the
+   quote AND its char offsets (loc) so the record knows where in the source it
+   came from. Citey pre-highlights its best mechanical match (citey-assist, no
+   model).
+
+   It now also shows the FILE: an uploaded image or PDF renders inline via
+   <SourceViewer>, so you cite a document you can actually see. For a PDF the
+   viewer pulls the text layer out, which flows into the same select-to-cite
+   reader below — so PDFs are citable, not just viewable. Falls back to a paste
+   box when there's no text and no viewable file.
 
    Mounts: <SourcePicker srcKey claimText onPick={(quote, loc) => …} />
    Publishes window.SourcePicker.
@@ -15,6 +21,8 @@ function SourcePicker({ srcKey, claimText, onPick }) {
   const [text, setText] = React.useState(String(rec.text || ""));
   const [paste, setPaste] = React.useState("");
   const ref = React.useRef(null);
+  const SV = window.NpjSourceView;
+  const visual = !!(SV && SV.hasFile(rec) && (SV.kindOf(rec) === "image" || SV.kindOf(rec) === "pdf"));
 
   React.useEffect(() => { setText(String(((window.NPJ.SOURCES || {})[srcKey] || {}).text || "")); }, [srcKey]);
 
@@ -44,35 +52,47 @@ function SourcePicker({ srcKey, claimText, onPick }) {
   };
 
   const Y = "var(--yellow)";
+
+  // the document itself — an image inline, or the PDF (whose text layer is pulled
+  // so the select-to-cite reader below fills in once it's read)
+  const viewerEl = (visual && window.SourceViewer) ? React.createElement(window.SourceViewer, {
+    key: "sv", srcKey: srcKey, rec: rec, height: 220,
+    onText: (t) => { if (!t) return; const live = window.NPJ.SOURCES[srcKey]; if (live && !String(live.text || "").trim()) live.text = t; setText(prev => (prev && prev.trim()) ? prev : t); }
+  }) : null;
+
+  let inner;
   if (!text.trim()) {
-    return React.createElement("div", { style: { marginTop: 8 } },
-      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: "rgba(255,255,255,.6)", marginBottom: 4 } }, "No source text on record yet — paste a passage and Citey will rank it."),
+    inner = React.createElement("div", { key: "in" },
+      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: "rgba(255,255,255,.6)", marginBottom: 4, marginTop: viewerEl ? 8 : 0 } },
+        visual ? "Cite from the document above — type or paste the exact words below (a PDF's text loads in automatically)." : "No source text on record yet — paste a passage and Citey will rank it."),
       React.createElement("textarea", { rows: 3, value: paste, onChange: e => setPaste(e.target.value), placeholder: "Paste the source passage here…",
         style: { width: "100%", resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" } }),
-      React.createElement("button", { onClick: seed, className: "np-cond", style: { marginTop: 5, border: "1px solid " + Y, background: Y, color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" } }, "Load &amp; rank"));
+      React.createElement("button", { onClick: seed, className: "np-cond", style: { marginTop: 5, border: "1px solid " + Y, background: Y, color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" } }, "Load & rank"));
+  } else {
+    // body with the best candidate pre-highlighted
+    let body;
+    if (top && top.loc) {
+      const { start, end } = top.loc;
+      body = [
+        React.createElement("span", { key: "a" }, text.slice(0, start)),
+        React.createElement("mark", { key: "b", style: { background: "rgba(255,236,1,.5)", color: "var(--ink)", borderRadius: 2 } }, text.slice(start, end)),
+        React.createElement("span", { key: "c" }, text.slice(end))
+      ];
+    } else body = text;
+
+    inner = React.createElement("div", { key: "in" },
+      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: Y, margin: (viewerEl ? "8px 0 4px" : "0 0 4px") } },
+        "The source — highlight the words that back your claim" + (top ? " (Citey's best match is shaded)" : "")),
+      React.createElement("div", { ref: ref, onMouseUp: onMouseUp,
+        style: { maxHeight: 150, overflowY: "auto", whiteSpace: "pre-wrap", background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.25)", padding: "8px 9px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.5, userSelect: "text", cursor: "text" } }, body),
+      hits.length > 0 && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
+        React.createElement("div", { className: "np-mono", style: { fontSize: 9, color: "rgba(255,255,255,.55)" } }, "or click a ranked match:"),
+        hits.slice(0, 3).map((h, j) => React.createElement("button", {
+          key: j, onClick: () => onPick(h.s, h.loc || null), title: "Pin this span",
+          style: { textAlign: "left", border: "1px solid rgba(255,255,255,.22)", background: "rgba(255,255,255,.06)", color: "var(--paper)", padding: "5px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12, lineHeight: 1.35 }
+        }, React.createElement("span", { style: { borderLeft: "3px solid " + Y, paddingLeft: 7, display: "block" } }, "“" + (h.s.length > 160 ? h.s.slice(0, 160) + "…" : h.s) + "”")))));
   }
 
-  // body with the best candidate pre-highlighted
-  let body;
-  if (top && top.loc) {
-    const { start, end } = top.loc;
-    body = [
-      React.createElement("span", { key: "a" }, text.slice(0, start)),
-      React.createElement("mark", { key: "b", style: { background: "rgba(255,236,1,.5)", color: "var(--ink)", borderRadius: 2 } }, text.slice(start, end)),
-      React.createElement("span", { key: "c" }, text.slice(end))
-    ];
-  } else body = text;
-
-  return React.createElement("div", { style: { marginTop: 8 } },
-    React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: Y, marginBottom: 4 } },
-      "The source — highlight the words that back your claim" + (top ? " (Citey's best match is shaded)" : "")),
-    React.createElement("div", { ref: ref, onMouseUp: onMouseUp,
-      style: { maxHeight: 150, overflowY: "auto", whiteSpace: "pre-wrap", background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.25)", padding: "8px 9px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.5, userSelect: "text", cursor: "text" } }, body),
-    hits.length > 0 && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
-      React.createElement("div", { className: "np-mono", style: { fontSize: 9, color: "rgba(255,255,255,.55)" } }, "or click a ranked match:"),
-      hits.slice(0, 3).map((h, j) => React.createElement("button", {
-        key: j, onClick: () => onPick(h.s, h.loc || null), title: "Pin this span",
-        style: { textAlign: "left", border: "1px solid rgba(255,255,255,.22)", background: "rgba(255,255,255,.06)", color: "var(--paper)", padding: "5px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12, lineHeight: 1.35 }
-      }, React.createElement("span", { style: { borderLeft: "3px solid " + Y, paddingLeft: 7, display: "block" } }, "“" + (h.s.length > 160 ? h.s.slice(0, 160) + "…" : h.s) + "”")))));
+  return React.createElement("div", { style: { marginTop: 8 } }, viewerEl, inner);
 }
 window.SourcePicker = SourcePicker;
