@@ -35,6 +35,26 @@
     return out.filter(function (s) { return s.text.trim(); });
   }
 
+  // Character spans (in block.textContent terms) of each line a hard <br> ends.
+  // A <br> is 0-width in textContent, so it only marks a boundary; the offsets
+  // line up with rangeForBlock's text-node walk. Consecutive breaks yield empty
+  // spans the caller skips; a block with no <br> yields one span over the whole.
+  function lineSpans(block, total) {
+    var breaks = [], pos = 0;
+    (function walk(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) pos += c.nodeValue.length;
+        else if (c.nodeType === 1) {
+          if (c.tagName === 'BR') breaks.push(pos);
+          else walk(c);
+        }
+      }
+    })(block);
+    var bounds = [0].concat(breaks, [total]), out = [];
+    for (var i = 0; i + 1 < bounds.length; i++) out.push({ start: bounds[i], end: bounds[i + 1] });
+    return out;
+  }
+
   // Build a Range spanning [start,end] character offsets over a block's text,
   // walking its text nodes so claim spans inside are respected.
   function rangeForBlock(block, start, end, doc) {
@@ -53,43 +73,56 @@
   }
 
   // Walk the editor's block elements and return one record per sentence.
+  // Blocks: p / li / h2 / h3 / blockquote AND div — a contentEditable emits a
+  // <div> per Enter-separated paragraph (no defaultParagraphSeparator is set), so
+  // typed prose lives in <div>s. These are exactly the blocks the publish walker
+  // (articles.js htmlToBlocks) treats as prose, so the table sees the same prose
+  // it will ship. A hard <br> inside a block ends a line — and a sentence — even
+  // with no trailing space, mirroring the {t:'br'} tokens in the published body.
   function segment(rootEl) {
     if (!rootEl) return [];
     var doc = rootEl.ownerDocument || root.document;
-    var blocks = Array.prototype.slice.call(rootEl.querySelectorAll('p, li, h2, h3, blockquote'));
+    var blocks = Array.prototype.slice.call(rootEl.querySelectorAll('p, li, h2, h3, blockquote, div'));
     var rows = [], seen = {};
     blocks.forEach(function (block, bi) {
       if (block.classList && block.classList.contains('nr-dek')) return;          // the dek isn't body prose
-      if (block.closest && (block.closest('figure') || block.closest('pre'))) return;
-      // a blockquote that wraps its own block children (pasted <blockquote><p>…)
-      // is just a container — its inner blocks are captured on their own pass
-      if (block.tagName === 'BLOCKQUOTE' && block.querySelector('p, li, h2, h3, blockquote')) return;
+      if (block.closest && (block.closest('figure') || block.closest('pre') || block.closest('.cmp-widget'))) return;
+      // a blockquote/div that wraps its own block children (pasted <blockquote><p>…,
+      // or a wrapper <div> around real blocks) is just a container — its inner
+      // blocks are captured on their own pass; only leaf prose blocks become rows
+      if ((block.tagName === 'BLOCKQUOTE' || block.tagName === 'DIV') &&
+          block.querySelector('p, li, h2, h3, blockquote, div, ul, ol, pre, figure, table')) return;
       var text = block.textContent || '';
       if (!text.trim()) return;
-      splitOffsets(text).forEach(function (p, si) {
-        var range = rangeForBlock(block, p.start, p.end, doc);
-        var claimSpans = [], disp = p.text;
-        if (range) {
-          Array.prototype.slice.call(block.querySelectorAll('.claim-src')).forEach(function (el) {
-            try { if (range.intersectsNode(el)) claimSpans.push(el); } catch (e) {}
+      var si = 0;
+      lineSpans(block, text.length).forEach(function (ln) {
+        if (!text.slice(ln.start, ln.end).trim()) return;                          // empty line (e.g. <br><br>)
+        splitOffsets(text.slice(ln.start, ln.end)).forEach(function (p) {
+          var start = ln.start + p.start, end = ln.start + p.end;
+          var range = rangeForBlock(block, start, end, doc);
+          var claimSpans = [], disp = p.text;
+          if (range) {
+            Array.prototype.slice.call(block.querySelectorAll('.claim-src')).forEach(function (el) {
+              try { if (range.intersectsNode(el)) claimSpans.push(el); } catch (e) {}
+            });
+            // display text without the citation-number markers (sup.md-cite) so the
+            // table shows clean prose; the id hashes the clean text so pinning a
+            // citation (which adds a marker) doesn't change a sentence's identity
+            try {
+              var tmp = doc.createElement('div'); tmp.appendChild(range.cloneContents());
+              Array.prototype.slice.call(tmp.querySelectorAll('sup.md-cite')).forEach(function (s) { s.remove(); });
+              disp = (tmp.textContent || '').trim() || p.text;
+            } catch (e) {}
+          }
+          var nm = norm(disp);
+          var hsh = djb2(nm);
+          var sid = 'se-' + hsh;                      // provisional, content-derived
+          if (seen[sid]) { seen[sid]++; sid = sid + '-' + seen[sid]; } else seen[sid] = 1;
+          rows.push({
+            sid: sid, hash: hsh, norm: nm, blockIndex: bi, sentenceIndex: si++,
+            text: disp.trim(), block: block, start: start, end: end,
+            claimSpans: claimSpans
           });
-          // display text without the citation-number markers (sup.md-cite) so the
-          // table shows clean prose; the id hashes the clean text so pinning a
-          // citation (which adds a marker) doesn't change a sentence's identity
-          try {
-            var tmp = doc.createElement('div'); tmp.appendChild(range.cloneContents());
-            Array.prototype.slice.call(tmp.querySelectorAll('sup.md-cite')).forEach(function (s) { s.remove(); });
-            disp = (tmp.textContent || '').trim() || p.text;
-          } catch (e) {}
-        }
-        var nm = norm(disp);
-        var hsh = djb2(nm);
-        var sid = 'se-' + hsh;                      // provisional, content-derived
-        if (seen[sid]) { seen[sid]++; sid = sid + '-' + seen[sid]; } else seen[sid] = 1;
-        rows.push({
-          sid: sid, hash: hsh, norm: nm, blockIndex: bi, sentenceIndex: si,
-          text: disp.trim(), block: block, start: p.start, end: p.end,
-          claimSpans: claimSpans
         });
       });
     });
