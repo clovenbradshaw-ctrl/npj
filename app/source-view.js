@@ -186,6 +186,42 @@
     catch (e) { _pdfText[key] = { state: 'error', error: (e && e.message) || 'extraction failed' }; throw e; }
   }
 
+  // Decode a blob as UTF-8 text (Blob.text where available, else FileReader).
+  async function decodeText(blob) {
+    if (!blob) return '';
+    try { if (blob.text) return await blob.text(); } catch (e) {}
+    return await new Promise(function (res) {
+      var r = new FileReader();
+      r.onload = function () { res(String(r.result || '')); };
+      r.onerror = function () { res(''); };
+      try { r.readAsText(blob); } catch (e) { res(''); }
+    });
+  }
+
+  // key -> { state, text } for decoded text files (PDFs cache in _pdfText)
+  var _txt = {};
+
+  // Make sure a source has readable TEXT — decoding a stored text file, or
+  // extracting a PDF's text layer. Returns the text (does NOT mutate the record;
+  // the caller seeds it so persistence + PII scanning stay in the host's hands).
+  // This is what lets an uploaded .txt / .md / .csv (or a re-opened draft whose
+  // text wasn't captured) show its content instead of a "paste the text" box.
+  async function ensureText(rec) {
+    if (String(rec && rec.text || '').trim()) return rec.text;
+    var k = kindOf(rec);
+    if (k === 'pdf') return await extractPdfText(rec);
+    if (k === 'text') {
+      var key = recKey(rec);
+      if (_txt[key] && _txt[key].state === 'done') return _txt[key].text;
+      var blob = await bytesFor(rec);
+      if (!blob) return '';
+      var t = await decodeText(blob);
+      _txt[key] = { state: 'done', text: t };
+      return t;
+    }
+    return '';
+  }
+
   /* ---------------- misc ---------------- */
   function humanSize(n) {
     n = Number(n) || 0;
@@ -213,6 +249,7 @@
     kindOf: kindOf, kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
+    ensureText: ensureText, decodeText: decodeText,
     humanSize: humanSize, download: download
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = root.NpjSourceView;

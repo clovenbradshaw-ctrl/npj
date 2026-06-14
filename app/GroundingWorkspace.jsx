@@ -181,6 +181,19 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
 
   // keep selections valid as the draft and source list move underneath us
   useEffect(() => { if (panel === view) setPanel(defaultPanelFor(view)); }, [view]); // eslint-disable-line
+
+  // Read a stored text file's words onto the record so the reader can show + cite
+  // them — without this an uploaded .txt opens to a "paste the text" box even
+  // though the file is in hand. (PDFs are pulled by the inline SourceViewer.)
+  useEffect(() => {
+    const SV = window.NpjSourceView;
+    if (!SV || !selSrc || !SV.ensureText) return;
+    const rec = api.sourceRec(selSrc);
+    if (!rec || String(rec.text || "").trim() || SV.kindOf(rec) !== "text" || !SV.hasFile(rec)) return;
+    let alive = true;
+    SV.ensureText(rec).then(t => { if (alive && t && t.trim()) { api.seedSourceText(selSrc, t); bump(); } }).catch(() => {});
+    return () => { alive = false; };
+  }, [selSrc]); // eslint-disable-line
   if (srcList.length && (!selSrc || !srcList.find(s => s.key === selSrc))) setSelSrc(srcList[0].key);
   const selRow = (selSid && bySid[selSid]) ? bySid[selSid] : null;
 

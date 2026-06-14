@@ -26,6 +26,17 @@ function SourcePicker({ srcKey, claimText, onPick }) {
 
   React.useEffect(() => { setText(String(((window.NPJ.SOURCES || {})[srcKey] || {}).text || "")); }, [srcKey]);
 
+  // an uploaded text file with no text on record yet → read its bytes back so the
+  // reader shows the words instead of a paste box (PDFs load via the viewer above)
+  React.useEffect(() => {
+    const SV = window.NpjSourceView;
+    const live = (window.NPJ.SOURCES || {})[srcKey] || {};
+    if (!SV || !SV.ensureText || String(live.text || "").trim() || SV.kindOf(live) !== "text" || !SV.hasFile(live)) return;
+    let alive = true;
+    SV.ensureText(live).then(t => { if (alive && t && t.trim()) { live.text = t; setText(t); } }).catch(() => {});
+    return () => { alive = false; };
+  }, [srcKey]);
+
   const hits = React.useMemo(() => {
     if (!text.trim() || !window.CiteyAssist) return [];
     try { return window.CiteyAssist.rankSpans(claimText, text) || []; } catch (e) { return []; }

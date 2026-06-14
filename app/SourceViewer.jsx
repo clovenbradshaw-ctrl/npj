@@ -33,6 +33,8 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
   const [resolving, setResolving] = useState(true);
   const [err, setErr] = useState(null);
   const [pdf, setPdf] = useState(null);   // { state, error } for extraction
+  const [txt, setTxt] = useState(String(rec.text || ""));  // decoded text-file body
+  const [txtLoading, setTxtLoading] = useState(false);
 
   // resolve a renderable URL (blob → resolved media-store → archive/original)
   useEffect(() => {
@@ -44,6 +46,20 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
       .catch(() => { if (alive) { setResolving(false); setErr("Couldn't load this file."); } });
     return () => { alive = false; };
   }, [key, rec && rec.file_url, rec && rec.archive_url]); // eslint-disable-line
+
+  // Text files: show the words. If they're already on record use them; otherwise
+  // decode the stored bytes (and hand them back via onText so the host can seed).
+  useEffect(() => {
+    if (kind !== "text") return;
+    const onRec = String(rec.text || "");
+    if (onRec.trim()) { setTxt(onRec); return; }
+    if (!SV || !SV.hasFile(rec) || !SV.ensureText) { setTxt(""); return; }
+    let alive = true; setTxtLoading(true);
+    SV.ensureText(rec)
+      .then(t => { if (!alive) return; setTxt(t || ""); setTxtLoading(false); if (t && onText) onText(t); })
+      .catch(() => { if (alive) setTxtLoading(false); });
+    return () => { alive = false; };
+  }, [key, kind]); // eslint-disable-line
 
   // PDFs: pull the text layer so the file becomes citable, not just viewable.
   useEffect(() => {
@@ -117,15 +133,15 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
   }
 
   if (kind === "text") {
-    const t = String(rec.text || "");
-    if (!t.trim()) return (
+    if (txtLoading && !txt.trim()) return <div className="np-mono" style={{ padding: "26px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 11.5 }}><Spin /> reading the document…</div>;
+    if (!txt.trim()) return (
       <div style={{ border: "1px dashed var(--rule-strong)", background: "var(--paper)", color: "var(--ink-soft)", padding: "16px", textAlign: "center" }}>
-        <div className="np-mono" style={{ fontSize: 11, lineHeight: 1.5 }}>The file is stored, but no text was read out of it yet.{linkRow}</div>
+        <div className="np-mono" style={{ fontSize: 11, lineHeight: 1.5 }}>The file is stored, but no readable text could be pulled from it.{linkRow}</div>
       </div>
     );
     return (
       <div>
-        <div className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }}>{t}</div>
+        <div className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }}>{txt}</div>
         {linkRow}
       </div>
     );
