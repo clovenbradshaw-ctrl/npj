@@ -22,7 +22,8 @@ function SourcePicker({ srcKey, claimText, onPick }) {
   const [paste, setPaste] = React.useState("");
   const ref = React.useRef(null);
   const SV = window.NpjSourceView;
-  const visual = !!(SV && SV.hasFile(rec) && (SV.kindOf(rec) === "image" || SV.kindOf(rec) === "pdf"));
+  const kind = SV ? SV.kindOf(rec) : "text";
+  const visual = !!(SV && SV.hasFile(rec) && kind === "image");   // images render inline; PDFs use the page renderer below
 
   React.useEffect(() => { setText(String(((window.NPJ.SOURCES || {})[srcKey] || {}).text || "")); }, [srcKey]);
 
@@ -64,18 +65,23 @@ function SourcePicker({ srcKey, claimText, onPick }) {
 
   const Y = "var(--yellow)";
 
-  // the document itself — an image inline, or the PDF (whose text layer is pulled
-  // so the select-to-cite reader below fills in once it's read)
+  // PDF: the real document with a selectable text layer — drag-select the words
+  // on the page and that exact text becomes the pinned quote.
+  if (kind === "pdf" && SV && SV.hasFile(rec) && window.PdfView) {
+    return React.createElement("div", { style: { marginTop: 8 } },
+      React.createElement(window.PdfView, { rec: rec, height: 300, onSelectText: (q) => onPick(q, null) }));
+  }
+
+  // the document itself — an image inline (cite by transcribing the words)
   const viewerEl = (visual && window.SourceViewer) ? React.createElement(window.SourceViewer, {
-    key: "sv", srcKey: srcKey, rec: rec, height: 220,
-    onText: (t) => { if (!t) return; const live = window.NPJ.SOURCES[srcKey]; if (live && !String(live.text || "").trim()) live.text = t; setText(prev => (prev && prev.trim()) ? prev : t); }
+    key: "sv", srcKey: srcKey, rec: rec, height: 220
   }) : null;
 
   let inner;
   if (!text.trim()) {
     inner = React.createElement("div", { key: "in" },
       React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: "rgba(255,255,255,.6)", marginBottom: 4, marginTop: viewerEl ? 8 : 0 } },
-        visual ? "Cite from the document above — type or paste the exact words below (a PDF's text loads in automatically)." : "No source text on record yet — paste a passage and Citey will rank it."),
+        visual ? "Cite from the image above — type or paste the exact words below." : "No source text on record yet — paste a passage and Citey will rank it."),
       React.createElement("textarea", { rows: 3, value: paste, onChange: e => setPaste(e.target.value), placeholder: "Paste the source passage here…",
         style: { width: "100%", resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" } }),
       React.createElement("button", { onClick: seed, className: "np-cond", style: { marginTop: 5, border: "1px solid " + Y, background: Y, color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" } }, "Load & rank"));
