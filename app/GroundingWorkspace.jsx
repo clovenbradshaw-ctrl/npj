@@ -400,6 +400,19 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       return { spans };
     });
   };
+  // PDF selection → a staged span. PDFs carry no flat-text offsets, so the span
+  // is quote-only (loc null); the verbatim words are what get cited.
+  const stagePdfQuote = (quote) => {
+    if (!modal) return;
+    const q = String(quote || "").replace(/\s+/g, " ").trim();
+    if (q.length < 3) return;
+    setPending(p => {
+      const spans = (p && p.spans) ? p.spans.slice() : [];
+      if (spans.some(s => s.quote === q)) return { spans };
+      spans.push({ quote: q, loc: null });
+      return { spans };
+    });
+  };
   const confirmPin = () => {
     const p = pending, m = modal;
     if (!p || !p.spans || !p.spans.length || !m) return;
@@ -494,20 +507,30 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: compact ? 14.5 : 16.5, lineHeight: 1.15, color: "#16140d" }}>{rec.title || selSrc}</div>
       </div>
     );
+    const SV = window.NpjSourceView;
+    const fileKind = SV ? SV.kindOf(rec) : "text";
+    // A PDF is shown as the REAL document — rendered pages with a selectable text
+    // layer — never flattened into a wall of text. Drag-selecting words on the
+    // page stages them as the citation span (quote, verbatim).
+    if (SV && SV.hasFile(rec) && fileKind === "pdf" && window.SourceViewer) {
+      return (
+        <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 380 : 580, overflowY: "auto" }}>
+          {letterhead}
+          <div style={{ padding: "8px 8px 10px" }}>
+            <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 320 : 500} onSelectText={armed ? stagePdfQuote : null} />
+          </div>
+        </div>
+      );
+    }
     if (!t.trim()) {
-      // no text on record yet — but if it's a viewable upload (image / PDF), show
-      // the document itself; a PDF's text layer flows back in via onText so the
-      // reader fills in and the words become selectable.
-      const SV = window.NpjSourceView;
-      const hasVisual = SV && SV.hasFile(rec) && (SV.kindOf(rec) === "image" || SV.kindOf(rec) === "pdf");
+      // an image you can transcribe to cite, or a text source we don't have the
+      // words for yet — show the picture (if any) above a paste box.
+      const hasImage = SV && SV.hasFile(rec) && fileKind === "image";
       return (
         <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 300 : 440, overflowY: "auto" }}>
           {letterhead}
-          {hasVisual && window.SourceViewer && (
-            <div style={{ padding: "10px 12px 0" }}>
-              <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 220 : 340}
-                onText={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
-            </div>
+          {hasImage && window.SourceViewer && (
+            <div style={{ padding: "10px 12px 0" }}><window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 220 : 340} /></div>
           )}
           <SeedBox onSeed={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
         </div>
@@ -620,7 +643,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         {pendSpans.map((p, i) => (
           <span key={"p" + i} className="np-mono" style={{ fontSize: 10, color: NR.text, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {(pendSpans.length > 1 ? "Part " + (i + 1) + " · " : "") + "“" + clip(p.quote, 62) + "” · chars " + p.loc.start + "–" + p.loc.end}
+              {(pendSpans.length > 1 ? "Part " + (i + 1) + " · " : "") + "“" + clip(p.quote, 62) + "”" + (p.loc ? " · chars " + p.loc.start + "–" + p.loc.end : "")}
             </span>
             <button onClick={() => setPending(x => { const sp = ((x && x.spans) || []).filter((_, j) => j !== i); return sp.length ? { spans: sp } : null; })}
               title="Remove this part" style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>

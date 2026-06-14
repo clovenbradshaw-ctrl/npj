@@ -6,10 +6,12 @@
    document you couldn't see. This renders the real thing by kind:
 
      • image  → the picture, contained, on a neutral mat.
-     • pdf    → the document in an <iframe> (the browser's native PDF view) AND,
-                when a citation surface asks (onText), pdf.js pulls its text layer
-                out so the existing select-to-cite reader works on PDFs too.
-     • text   → the words (read-only), for the explorer's preview pane.
+     • pdf    → the REAL document via <PdfView>: pages rendered to canvas with a
+                selectable text layer on top, so it reads like the original and a
+                drag-selection is captured verbatim (onSelectText) — never
+                flattened into a wall of text. Falls back to a native <iframe>
+                only if the canvas renderer is unavailable.
+     • text   → the words (read-only); decodes the stored file if needed.
      • other  → an honest "no in-browser preview" with Open / Download.
 
    URLs resolve through NpjSourceView.displayUrl, so an auth-gated homeserver's
@@ -22,7 +24,7 @@
    after a PDF's text is extracted (the host decides whether to seed rec.text).
    Publishes window.SourceViewer.
    ============================================================ */
-function SourceViewer({ srcKey, rec, height, onText, frameless }) {
+function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless }) {
   const SV = window.NpjSourceView;
   rec = rec || (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || {};
   const key = (rec && (rec.id || rec.key)) || srcKey || "";
@@ -32,7 +34,6 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
   const [url, setUrl] = useState(null);
   const [resolving, setResolving] = useState(true);
   const [err, setErr] = useState(null);
-  const [pdf, setPdf] = useState(null);   // { state, error } for extraction
   const [txt, setTxt] = useState(String(rec.text || ""));  // decoded text-file body
   const [txtLoading, setTxtLoading] = useState(false);
 
@@ -61,17 +62,6 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
     return () => { alive = false; };
   }, [key, kind]); // eslint-disable-line
 
-  // PDFs: pull the text layer so the file becomes citable, not just viewable.
-  useEffect(() => {
-    if (kind !== "pdf" || !SV || !onText) return;
-    let alive = true;
-    setPdf({ state: "extracting" });
-    SV.extractPdfText(rec)
-      .then(t => { if (!alive) return; setPdf({ state: "done", empty: !String(t || "").trim() }); if (t) onText(t); })
-      .catch(e => { if (alive) setPdf({ state: "error", error: (e && e.message) || "couldn't read the text" }); });
-    return () => { alive = false; };
-  }, [key, kind]); // eslint-disable-line
-
   const Spin = () => <span style={{ width: 13, height: 13, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-2px" }} />;
   const mat = { background: "repeating-conic-gradient(#e9e4d6 0% 25%, #f3eee1 0% 50%) 50% / 18px 18px", border: frameless ? 0 : "1px solid var(--rule)" };
 
@@ -97,6 +87,17 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
     );
   }
 
+  // PDF: render the real pages via its own loader — don't gate on the link
+  // resolve (that's a separate fetch only used for the Open/Download row).
+  if (kind === "pdf" && window.PdfView) {
+    return (
+      <div>
+        <window.PdfView rec={rec} height={H} onSelectText={onSelectText} />
+        {url && linkRow}
+      </div>
+    );
+  }
+
   if (resolving) return <div className="np-mono" style={{ padding: "26px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 11.5 }}><Spin /> loading the document…</div>;
   if (err && kind !== "text") return (
     <div style={{ border: "1px solid var(--reject)", background: "var(--paper)", color: "var(--reject)", padding: "14px 16px", fontFamily: "var(--mono)", fontSize: 11.5, lineHeight: 1.5 }}>
@@ -116,17 +117,11 @@ function SourceViewer({ srcKey, rec, height, onText, frameless }) {
   }
 
   if (kind === "pdf") {
+    // fallback when the canvas renderer isn't available: the browser's native PDF
+    if (!url) return <div className="np-mono" style={{ padding: "26px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 11.5 }}><Spin /> loading the document…</div>;
     return (
       <div>
         <iframe src={url} title={rec.title || "PDF source"} style={{ width: "100%", height: H, border: frameless ? 0 : "1px solid var(--rule)", background: "var(--paper)" }} />
-        {onText && pdf && (
-          <div className="np-mono" style={{ fontSize: 10, color: pdf.state === "error" ? "var(--reject)" : "var(--ink-soft)", marginTop: 5, display: "flex", alignItems: "center", gap: 6, lineHeight: 1.5 }}>
-            {pdf.state === "extracting" && <><Spin /> reading the text so you can cite it…</>}
-            {pdf.state === "done" && !pdf.empty && <>✓ text ready — switch to the reader to select the words you're citing</>}
-            {pdf.state === "done" && pdf.empty && <>⚠ no selectable text (a scan?) — view it here; type the quote to cite</>}
-            {pdf.state === "error" && <>couldn't read the text ({pdf.error}) — view it above, or type the quote to cite</>}
-          </div>
-        )}
         {linkRow}
       </div>
     );
