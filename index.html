@@ -347,7 +347,13 @@ function App() {
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
           me={me} onHome={goHome} onNewsroom={goNewsroom}
-          onEdited={(a) => { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); window.NpjArticles.loadFront().then(() => setFrontRev(r => r + 1)).catch(() => {}); }} />
+          onEdited={(a) => {
+            window.NPJ.ARTICLE = a; setArticleRev(r => r + 1);
+            // reflect the edit (incl. an unpublish/republish) on the front page
+            // right away, even if the git-tree listing hasn't caught up yet
+            const reflect = () => { window.NpjArticles.patchFrontStatus(a.slug, a.status); setFrontRev(r => r + 1); };
+            window.NpjArticles.loadFront().then(reflect).catch(reflect);
+          }} />
       )}
       {route === "newsroom" && (isEditorRole
         ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />

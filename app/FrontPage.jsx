@@ -124,7 +124,11 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   const all = [];
   if (F.lead) all.push({ ...F.lead, _lead: true, tags: F.lead.tags || [] });
   (F.secondary || []).forEach(s => all.push({ ...s, tags: s.tags || [] }));
-  const visible = all.filter(a => isAdmin || a.status !== "unpublished");
+  // Unpublish is the site's soft-delete: an unpublished piece comes off the
+  // front page for EVERYONE, admins included — nothing is deleted, and it's
+  // listed + republishable from Documents. (Admins still reach it by direct
+  // link / from Documents, where the reader shows the Unpublished banner.)
+  const visible = all.filter(a => a.status !== "unpublished");
   const shown = col ? visible.filter(a => (a.tags || []).includes(col)) : visible;
 
   return (

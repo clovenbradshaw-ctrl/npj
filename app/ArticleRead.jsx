@@ -146,8 +146,28 @@ function CropFrame({ src, alt, style, fit, crop, onError }) {
   );
 }
 
+// Ordered URLs to try for a published image. archive.org is the canonical home
+// for published media, so any archive.org URL is tried first; if the reader's
+// network can't reach archive.org, the SAME url via the proxy is the next try
+// (NpjArchiveCDN.proxied). A non-archive URL — the live Matrix media-store copy —
+// comes last, as a best-effort fallback only. De-duped, order preserved.
+function imageCandidates(srcs) {
+  const cdn = window.NpjArchiveCDN;
+  const raw = (srcs || []).filter(Boolean);
+  const archive = [], rest = [];
+  raw.forEach(u => { (cdn && cdn.isMediaUrl && cdn.isMediaUrl(u)) ? archive.push(u) : rest.push(u); });
+  const out = [];
+  archive.forEach(u => {
+    out.push(u);
+    const p = cdn && cdn.proxied && cdn.proxied(u);
+    if (p && p !== u) out.push(p);
+  });
+  rest.forEach(u => out.push(u));
+  return out.filter((u, i) => u && out.indexOf(u) === i);
+}
+
 function MediaImg({ srcs, alt, style, fit, crop }) {
-  const list = (srcs || []).filter(Boolean);
+  const list = imageCandidates(srcs);
   const [i, setI] = useState(0);
   const [resolved, setResolved] = useState(null);
   const idx = Math.min(i, Math.max(0, list.length - 1));

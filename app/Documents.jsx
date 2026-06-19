@@ -214,7 +214,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
         setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
           ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "dir", logPath: "articles/" + m.slug }
           : x) } : p);
-        window.NpjArticles.loadFront().catch(() => {}); // the front page reflects it on next visit
+        // refresh the front index, then force this slug's new status in (the
+        // git-tree listing can lag a fresh commit) so home hides/shows it at once
+        const reflect = () => window.NpjArticles.patchFrontStatus(m.slug, next);
+        window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }
     } catch (e) {
       setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
@@ -289,6 +292,14 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
   };
 
   const newDoc = () => onOpen("d" + Date.now().toString(36));
+  // New article that already belongs to a project: pre-seed the draft with the
+  // project's room so the Newsroom opens it inside the project (and every save
+  // keeps it there), then open it. Same id scheme as newDoc.
+  const newDocInProject = (p) => {
+    const id = "d" + Date.now().toString(36);
+    try { window.NpjDrafts.save(id, { room: { roomId: p.roomId, title: p.title || "Untitled project" }, title: "" }); } catch (e) {}
+    onOpen(id);
+  };
 
   const query = q.trim().toLowerCase();
   const match = (d) => !query || ((d.title || "") + " " + (d.column || "") + " " + (d.tags || []).join(" ")).toLowerCase().includes(query);
@@ -463,8 +474,22 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                   </div>
 
                   {/* articles in the project */}
-                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10, margin: "13px 0 6px", display: "flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 12 }} /> Articles</div>
-                  {docs.length === 0 && <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>{query ? "no articles match the search" : "no articles in this project yet"}</div>}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "13px 0 6px", flexWrap: "wrap" }}>
+                    <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 10, display: "flex", alignItems: "center", gap: 6, margin: 0 }}><I.doc style={{ fontSize: 12 }} /> Articles</div>
+                    <button className="btn btn-sm btn-primary" onClick={() => newDocInProject(p)} title={"Start a new article in “" + (p.title || "this project") + "” — everyone invited can edit it"} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      <I.plus style={{ fontSize: 12 }} /> New article
+                    </button>
+                  </div>
+                  {docs.length === 0 && (
+                    query
+                      ? <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>no articles match the search</div>
+                      : (
+                        <button onClick={() => newDocInProject(p)} style={{ display: "block", width: "100%", textAlign: "left", border: "1.5px dashed var(--rule-strong)", background: "transparent", padding: "12px 14px", cursor: "pointer" }}>
+                          <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14 }}>No articles yet — start the first one.</span>
+                          <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", display: "block", marginTop: 3 }}>It opens in the editor already inside this project.</span>
+                        </button>
+                      )
+                  )}
                   {docs.map(d => draftRow(d, true))}
 
                   {/* sources shared across every article in the project, deduped +
