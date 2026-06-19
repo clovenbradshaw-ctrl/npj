@@ -9,17 +9,23 @@
  *     committed article hotlinks the archive.org copy. So archive.org is the CMS
  *     for everything that goes public.
  *
- * Publish has two ways to get an image onto archive.org, tried in order:
+ * Publish has three ways to get an image onto archive.org, tried in order:
  *   1. Server-side migration (preferred): hand the media-store mxc + the
  *      author's Matrix token to the n8n archive endpoint (site/media-archive-npj).
  *      n8n pulls the bytes from the homeserver — authenticated, so it works even
  *      when the homeserver gates media behind auth — and PUTs them to archive.org
- *      as a real item via the S3-style API. The archive.org S3 keys live
- *      server-side in the n8n environment, never in the browser.
- *   2. Wayback freeze (fallback, no keys): Save Page Now on the media-store URL,
+ *      as a real item via the S3-style API. Optional: that webhook may not be
+ *      deployed, in which case this step is skipped.
+ *   2. Download + reupload (site/media-npj): fetch the media-store bytes with the
+ *      author's session (works on auth-gated homeservers) and POST them to the
+ *      media endpoint, which PUTs to archive.org. This endpoint ships with
+ *      publish, and works even when the AUTHOR's network can't reach archive.org
+ *      (n8n does the PUT). The archive.org S3 keys live server-side, never in the
+ *      browser.
+ *   3. Wayback freeze (fallback, no keys): Save Page Now on the media-store URL,
  *      the same path the app already uses to freeze sources. Only reaches the
  *      bytes if the homeserver serves media unauthenticated.
- * If neither confirms, the image keeps its media-store URL (never a silent drop)
+ * If none confirms, the image keeps its media-store URL (never a silent drop)
  * and the publisher is told.
  *
  * The Matrix upload uses the author's existing session (window.MatrixAuth); the
@@ -228,19 +234,36 @@
     return (c.waybackRaw && c.waybackRaw(snap)) || snap;
   }
 
-  // one image → archive.org: hand the media-store mxc to the backend, which
-  // pulls the bytes from the homeserver (authenticated) and PUTs them to
-  // archive.org server-side. If that can't be reached, fall back to a Wayback
-  // snapshot of the media-store URL.
+  const EXT_BY_MIME = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif", "image/avif": "avif" };
+
+  // one image → archive.org, tried in order:
+  //   1. server-side mxc migration (site/media-archive-npj): the backend pulls
+  //      the bytes from the homeserver and PUTs them to archive.org — no byte
+  //      download in the browser. Best, but optional: that webhook may not be
+  //      deployed.
+  //   2. download + reupload the bytes (site/media-npj): fetch the media-store
+  //      bytes with the author's session (works even on auth-gated homeservers)
+  //      and POST them to the media endpoint that PUTs to archive.org. This is
+  //      the endpoint that always ships with publish, and it works even when the
+  //      author's own network can't reach archive.org (n8n does the PUT).
+  //   3. keyless Wayback snapshot of the media-store URL.
   async function toArchive(srcUrl, ctx) {
+    const mxc = httpToMxc(srcUrl);
+    const base = (((mxc && mxc.split("/").pop()) || ("img-" + Date.now())).replace(/[^A-Za-z0-9._-]/g, "")) || ("img-" + Date.now());
+    // 1. server-side migration (no byte download)
+    if (mxc) {
+      try { return await migrateToArchive(mxc, { identifier: ctx.identifier, filename: base + ".webp", title: ctx.title }); }
+      catch (e) { /* endpoint absent/unreachable — fall through */ }
+    }
+    // 2. download (authenticated) + reupload the bytes via the deployed endpoint
     try {
-      const mxc = httpToMxc(srcUrl);
-      if (mxc) {
-        const mediaId = mxc.split("/").pop() || ("img-" + Date.now());
-        const file = (mediaId.replace(/[^A-Za-z0-9._-]/g, "") || ("img-" + Date.now())) + ".webp";
-        return await migrateToArchive(mxc, { identifier: ctx.identifier, filename: file, title: ctx.title });
+      const blob = await fetchBytes(srcUrl);
+      if (blob) {
+        const ext = EXT_BY_MIME[String(blob.type || "").toLowerCase()] || "webp";
+        return await uploadToArchive(blob, { identifier: ctx.identifier, filename: base + "." + ext, title: ctx.title });
       }
     } catch (e) { /* fall through to Wayback */ }
+    // 3. keyless Wayback snapshot
     return await freeze(srcUrl);
   }
 
