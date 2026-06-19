@@ -147,26 +147,26 @@ function CropFrame({ src, alt, style, fit, crop, onError }) {
 }
 
 // Ordered URLs to try for a published image. archive.org is the canonical home
-// for published media. By default each archive.org URL is loaded THROUGH the
-// proxy first, with the direct archive.org URL as a backstop — so images show
-// even on a network that blocks archive.org (e.g. behind a VPN), with no
-// failed-request flash. (proxyImagesPrimary=false flips to direct-first, proxy
-// only on error.) A non-archive URL — the live Matrix media-store copy — comes
-// last, as a best-effort fallback only. De-duped, order preserved.
+// for published media, and every public page loads it THROUGH the proxy first,
+// so images render even on a network that can't reach archive.org directly
+// (e.g. behind a VPN that blocks it). The direct archive.org URL is the only
+// fallback. The Matrix media-store URL is auth-gated and pins the author's
+// homeserver, so it is NEVER requested on a public page — it rides along only
+// as a last resort for an image that somehow has no archive.org copy at all
+// (publish normally guarantees one), so the slot isn't left blank. De-duped,
+// order preserved.
 function imageCandidates(srcs) {
   const cdn = window.NpjArchiveCDN;
   const raw = (srcs || []).filter(Boolean);
   const archive = [], rest = [];
   raw.forEach(u => { (cdn && cdn.isMediaUrl && cdn.isMediaUrl(u)) ? archive.push(u) : rest.push(u); });
-  const proxyFirst = !!(cdn && cdn.proxyImagesPrimary && cdn.proxyImagesPrimary());
   const out = [];
   archive.forEach(u => {
     const p = cdn && cdn.proxied && cdn.proxied(u);
-    if (proxyFirst && p && p !== u) out.push(p); // proxy first…
-    out.push(u);                                  // …then the direct archive.org URL
-    if (!proxyFirst && p && p !== u) out.push(p);  // (or proxy only as the on-error fallback)
+    if (p && p !== u) out.push(p); // proxy first — reaches archive.org for the reader
+    out.push(u);                   // direct archive.org — the fallback
   });
-  rest.forEach(u => out.push(u));
+  if (!out.length) rest.forEach(u => out.push(u)); // no archive.org copy → media-store, last resort
   return out.filter((u, i) => u && out.indexOf(u) === i);
 }
 
