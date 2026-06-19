@@ -1,0 +1,122 @@
+{
+  "name": "NPJ image proxy (archive.org, binary-safe)",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "img",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "npj-img-webhook",
+      "name": "Image Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-320, 0],
+      "webhookId": "npj-image-proxy",
+      "notes": "GET /webhook/img?url=<archive.org image URL>. The NPJ reader falls back to this only when a published <img> can't load archive.org directly (NpjArchiveCDN.proxied). Unlike the /webhook/feed RSS proxy this returns the RAW bytes, so binary images aren't corrupted."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "loose" },
+          "conditions": [
+            {
+              "id": "url-archive-org",
+              "leftValue": "={{ $json.query.url }}",
+              "rightValue": "^https://([a-z0-9-]+\\.)*archive\\.org/",
+              "operator": { "type": "string", "operation": "regex" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "npj-img-validate",
+      "name": "Validate archive.org URL",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [-96, 0],
+      "notes": "Scope the proxy to archive.org hosts so it can't be used as an open proxy for arbitrary URLs."
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.query.url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "User-Agent", "value": "Mozilla/5.0 (compatible; npj-image-proxy/1.0)" },
+            { "name": "Accept", "value": "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8,*/*;q=0.5" }
+          ]
+        },
+        "options": {
+          "redirect": { "redirect": { "maxRedirects": 5 } },
+          "response": { "response": { "neverError": true, "responseFormat": "file" } },
+          "timeout": 20000
+        }
+      },
+      "id": "npj-img-fetch",
+      "name": "Fetch Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [160, -96]
+    },
+    {
+      "parameters": {
+        "respondWith": "binary",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Access-Control-Allow-Methods", "value": "GET, OPTIONS" },
+              { "name": "Access-Control-Allow-Headers", "value": "Content-Type, Accept" },
+              { "name": "Cache-Control", "value": "public, max-age=86400" },
+              { "name": "X-npj-img-proxy", "value": "1" }
+            ]
+          }
+        }
+      },
+      "id": "npj-img-respond",
+      "name": "Respond Image",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [400, -96],
+      "notes": "respondWith:binary serves the fetched bytes with their real Content-Type (the file node carries the upstream mime). No text re-encode, so the image isn't corrupted."
+    },
+    {
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "missing or invalid ?url= parameter — must be an https://archive.org/ URL",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              { "name": "Access-Control-Allow-Origin", "value": "*" },
+              { "name": "Content-Type", "value": "text/plain; charset=utf-8" }
+            ]
+          }
+        }
+      },
+      "id": "npj-img-badreq",
+      "name": "Respond Bad Request",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [160, 128]
+    }
+  ],
+  "connections": {
+    "Image Webhook": { "main": [[{ "node": "Validate archive.org URL", "type": "main", "index": 0 }]] },
+    "Validate archive.org URL": {
+      "main": [
+        [{ "node": "Fetch Image", "type": "main", "index": 0 }],
+        [{ "node": "Respond Bad Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Image": { "main": [[{ "node": "Respond Image", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": {
+    "instanceId": "5c737be3fd9beebae6ccb42a087a71b95589b90d613100d5ba10c73188a40d22"
+  }
+}
