@@ -18,6 +18,32 @@
 
   function isMediaUrl(u) { return HOST.test(String(u || "").trim()); }
 
+  /* ---- proxy fallback for when archive.org itself is unreachable ----
+     A published <img> hotlinks archive.org directly (no CORS needed), but when
+     the reader's network can't reach archive.org at all — it's blocked, rate-
+     limited, or down — even a plain <img> GET fails. proxied(url) wraps any URL
+     as a ?url= request to a same-host proxy that re-fetches the bytes
+     server-side; the reader falls back to it when the direct archive.org load
+     errors (see MediaImg in ArticleRead.jsx). Configurable via
+     npj_publish_cfg_v1.proxyEndpoint; otherwise derived from the publish host
+     (.../webhook/feed), then a hard default. The proxy must answer with the raw
+     image bytes — a text/xml proxy corrupts binary images. */
+  function proxyBase() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.proxyEndpoint) return String(c.proxyEndpoint); } catch (e) {}
+    const pub = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
+    const m = pub.match(/^(https?:\/\/[^/]+\/webhook)\//i);
+    if (m) return m[1] + "/feed";
+    return "https://n8n.intelechia.com/webhook/feed";
+  }
+  function proxied(url) {
+    const u = String(url || "").trim();
+    if (!u) return null;
+    const base = proxyBase();
+    if (!base) return null;
+    if (u.indexOf(base) === 0) return u; // already proxied — never double-wrap
+    return base + (base.indexOf("?") < 0 ? "?" : "&") + "url=" + encodeURIComponent(u);
+  }
+
   // wayback capture → the same capture with the im_ flag, which serves the
   // raw image bytes instead of the toolbar-wrapped page
   function waybackRaw(u) {
@@ -98,5 +124,5 @@
     return null; // honestly unconfirmed — SPN can take a while; a later check may find it
   }
 
-  window.NpjArchiveCDN = { isMediaUrl, resolve, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
+  window.NpjArchiveCDN = { isMediaUrl, resolve, proxied, proxyBase, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
 })();

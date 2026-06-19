@@ -812,8 +812,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* top bar */}
-      <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center",
+        ...(isMobile
+          ? { display: "flex", flexWrap: "wrap", gap: 14 }
+          : { display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", columnGap: 14 }) }}>
+        {/* LEFT zone: exit + wordmark + document name. The view tabs live in the
+            centered middle column, so a longer document name truncates HERE
+            instead of shoving the tabs sideways. */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+        <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
           <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
@@ -826,8 +833,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileSlug || slugify(title) || "untitled"}</span>/
           </span>
         </div>
-        {/* the grounding workspace — four pivoting views of the same draft */}
-        <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden" }}>
+        </div>{/* end LEFT zone */}
+        {/* CENTER zone: the four pivoting views — centered in the bar and fixed
+            in place, so they never shift when the document name changes. */}
+        <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
           {[["prose", "Prose", "The prose editor"],
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
@@ -835,9 +844,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
+        {/* RIGHT zone: autosave status + tools + publish */}
+        <div style={{ display: "flex", alignItems: "center", gap: 14, justifySelf: "end", flexWrap: "wrap", minWidth: 0 }}>
         <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
           what="text, title, tags, column and bound sources" />
-        <span style={{ flex: 1 }} />
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
           {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} {theme === "dark" ? "Light" : "Dark"}
         </button>
@@ -876,6 +886,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? "Publish" : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> Publish
         </button>
+        </div>{/* end RIGHT zone */}
       </div>
 
       {/* formatting toolbar */}
