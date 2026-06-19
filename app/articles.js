@@ -62,10 +62,14 @@
   /* One event = one NEW file: <UTC stamp>-<op>-<entropy>.jsonl. The stamp makes
      lexical order chronological; the random tail means two writers landing in
      the same millisecond create two files instead of one clobbering the other. */
+  // op tag in the filename: ins (publish), rec (edit), eva (reader feedback —
+  // a span-anchored suggestion/comment that folds as a no-op for the article
+  // state but rides the same auditable folder). Anything else lands as rec.
+  const OP_TAGS = { ins: "ins", rec: "rec", eva: "eva" };
   function versionFilenameFor(slug, op) {
     const stamp = nowIso().replace(/[-:.]/g, ""); // 2026-06-10T23:15:01.123Z → 20260610T231501123Z
     const tail = ("000" + Math.floor(Math.random() * 1679616).toString(36)).slice(-4);
-    return dirFor(slug) + "/" + stamp + "-" + (String(op).toLowerCase() === "ins" ? "ins" : "rec") + "-" + tail + ".jsonl";
+    return dirFor(slug) + "/" + stamp + "-" + (OP_TAGS[String(op).toLowerCase()] || "rec") + "-" + tail + ".jsonl";
   }
 
   /* djb2 → 7 hex chars. Not crypto — just a stable, human-quotable version id
@@ -646,6 +650,32 @@
     const res = await post({ filename, mode: "overwrite", contentRaw: line + "\n", message: message || ("edit: " + slug) }, token);
     return { res, line, sha: lineSha(line), filename };
   }
+  /* A generic event writer — one NEW version file carrying any EO op. Used by
+     the feedback layer (app/feedback.js) to land reader EVA deposits in the
+     same auditable folder as the article's own events. `schema` overrides the
+     event's `v` so feedback lines self-identify (npj/feedback-eo/1) while still
+     folding harmlessly through the article reader (EVA never touches state). */
+  async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema }) {
+    const head = { v: schema || SCHEMA, op, target: "article/" + slug, ts: nowIso(), actor: actor || null, operand: operand || {} };
+    if (note) head.note = note;
+    const line = JSON.stringify(Object.assign(head, extra || {}));
+    const filename = versionFilenameFor(slug, op);
+    const res = await post({ filename, mode: "overwrite", contentRaw: line + "\n", message: message || (String(op).toLowerCase() + ": " + slug) }, token);
+    return { res, line, sha: lineSha(line), filename };
+  }
+
+  /* Every event in a document's folder, folded once — the article reader keeps
+     only the article, but feedback needs the raw EVA deposits riding alongside
+     it. Returns { events, base_sha } (base_sha is the current article version,
+     used to flag a suggestion made against a since-superseded draft as stale). */
+  async function fetchEvents(slug) {
+    const s = slugify(slug) || slug;
+    const log = await fetchLog(s);
+    if (log == null) return { events: [], base_sha: null };
+    const folded = foldLog(log.text);
+    return { events: folded.events || [], base_sha: folded.article ? folded.article.base_sha : null };
+  }
+
   // Unpublish / republish — one REC version file carrying only the status.
   // Unpublish just takes the piece off the site: nothing is deleted, the whole
   // folder (every prior version) stays in GitHub, and the act of hiding it is
@@ -691,7 +721,7 @@
     META_STANDARD, checkMeta,
     listArticles, loadFront, patchFrontStatus, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
-    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, setArticleStatus,
+    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };
 })();

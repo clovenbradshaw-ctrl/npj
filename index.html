@@ -23,6 +23,36 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127,216,166,.6); } 70% { box-shadow: 0 0 0 7px rgba(127,216,166,0); } 100% { box-shadow: 0 0 0 0 rgba(127,216,166,0); } }
   html, body { background: var(--paper); }
   #root { min-height: 100vh; }
+
+  /* Boot splash: painted from static HTML the instant the page parses, so the
+     screen carries the brand while React, Babel, the ~30 in-browser .jsx files
+     and boot()'s committed-layout fetch all resolve. React clears #root on its
+     first render, which removes this automatically — no teardown needed. The
+     short fade-in delay means a warm-cache load that mounts in <200ms never
+     flashes the spinner; only a real wait shows it. */
+  @keyframes boot-fade { to { opacity: 1; } }
+  #boot-splash {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 26px; padding: 24px; background: var(--paper);
+    opacity: 0; animation: boot-fade .45s ease .18s forwards;
+  }
+  #boot-splash .boot-band {
+    background: var(--yellow); padding: 16px 34px; border-radius: 4px;
+    box-shadow: 0 1px 0 var(--rule-strong, rgba(22,20,13,.4));
+  }
+  #boot-splash .boot-band img { width: min(440px, 72vw); height: auto; display: block; }
+  #boot-splash .boot-spinner {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid var(--rule, rgba(22,20,13,.16));
+    border-top-color: var(--ink, #16140d);
+    animation: spin .8s linear infinite;
+  }
+  #boot-splash .boot-note {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-soft, #3a362b);
+  }
 </style>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
@@ -55,6 +85,9 @@
 <!-- the published record: per-document folders of timestamped version files
      (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
 <script src="app/articles.js"></script>
+<!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
+     the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
+<script src="app/feedback.js"></script>
 <!-- grounding model: reusable citation records (spans of a source) + sentence
      segmentation for the table view. Plain scripts; require window.NPJ. -->
 <script src="app/citations.js"></script>
@@ -105,7 +138,15 @@
 <script type="text/babel" src="app/AdminEditor.jsx"></script>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <!-- Static initialization state — replaced by <App /> on first React render. -->
+  <div id="boot-splash" role="status" aria-label="Loading People's Journalism">
+    <div class="boot-band"><img src="assets/npj-logo-wide.png" alt="People's Journalism" /></div>
+    <div class="boot-spinner" aria-hidden="true"></div>
+    <div class="boot-note">Loading the newsroom…</div>
+  </div>
+</div>
+<noscript><div style="padding:48px 24px;font-family:Georgia,serif;max-width:42rem;margin:0 auto;color:#16140d">People's Journalism needs JavaScript enabled to read and edit stories.</div></noscript>
 
 <template id="__bundler_thumbnail">
   <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -202,22 +243,60 @@ function App() {
   const [audit, setAudit] = useState(hp.includes("audit"));
   const [showSugg, setShowSugg] = useState(hp.includes("sugg"));
   const [filter, setFilter] = useState("all");
-  const [isEditor, setIsEditor] = useState(hp.includes("editor"));
 
   // figures rail is disabled until the extraction engine is ready
   const [entityData] = useState(null);
   const [entityOpen, setEntityOpen] = useState(false);
   const [activeEntity, setActiveEntity] = useState(null);
 
-  // suggestion store (empty until readers act)
-  const [suggestions, setSuggestions] = useState(() => window.NPJ.SUGGESTIONS.map(s => ({ ...s })));
-  const onVote = (id) => setSuggestions(list => list.map(s => s.id === id ? { ...s, voted: !s.voted, votes: s.votes + (s.voted ? -1 : 1) } : s));
-  const onResolve = (id, status) => setSuggestions(list => list.map(s => s.id === id ? { ...s, status } : s));
-  const onAddSuggestion = (claimId, d) => setSuggestions(list => [{
-    id: "n" + Date.now(), claimId, base_sha: (window.NPJ.ARTICLE && window.NPJ.ARTICLE.base_sha) || "draft", range: [0, 0],
-    status: "proposed", votes: 1, voted: true, author: me, trust: "open",
-    proposed: d.proposed, rationale: d.rationale, ts: new Date().toISOString().slice(0, 10)
-  }, ...list]);
+  // span feedback (window.NpjFeedback): suggestions + comments persisted as EVA
+  // events in the article's own folder, with a localStorage mirror. Loaded when
+  // an article opens. Proposing/voting/replying is open to anyone; MERGING
+  // commits a real REC through the authorized edit path (admin + assignees).
+  const [suggestions, setSuggestions] = useState([]);
+  const fbToken = () => (window.MatrixAuth && window.MatrixAuth.token && window.MatrixAuth.token()) || null;
+  const reloadFeedback = useCallback(() => {
+    const A = window.NPJ.ARTICLE; if (!A || !A.slug) { setSuggestions([]); return Promise.resolve(); }
+    return window.NpjFeedback.load(A.slug, { base_sha: A.base_sha }).then(setSuggestions).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (route !== "article" || !window.NPJ.ARTICLE) { setSuggestions([]); return; }
+    reloadFeedback();
+  }, [route, articleRev, reloadFeedback]);
+
+  const onVote = (id) => {
+    const A = window.NPJ.ARTICLE; if (!A) return;
+    setSuggestions(list => list.map(s => s.id === id ? { ...s, voted: !s.voted, votes: s.votes + (s.voted ? -1 : 1) } : s));
+    window.NpjFeedback.vote({ slug: A.slug, ref: id, author: me, token: fbToken() });
+  };
+  const onResolve = (id, outcome) => {
+    const A = window.NPJ.ARTICLE; if (!A) return;
+    window.NpjFeedback.resolve({ slug: A.slug, ref: id, outcome, author: me, token: fbToken() }).then(reloadFeedback);
+  };
+  const onReply = (id, text) => {
+    const A = window.NPJ.ARTICLE; if (!A) return;
+    window.NpjFeedback.reply({ slug: A.slug, ref: id, text, author: me, token: fbToken() }).then(reloadFeedback);
+  };
+  const onAddSuggestion = (draft) => {
+    const A = window.NPJ.ARTICLE; if (!A) return;
+    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: me, base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
+  };
+  // Merge a suggestion: apply its words to the body + commit a REC, then fold the
+  // updated article in place (same path as the Edit overlay). Returns the merge
+  // result so the card can surface a clean "conflict" (the base moved) state.
+  const onMerge = async (s) => {
+    const A = window.NPJ.ARTICLE; if (!A) return { ok: false };
+    const r = await window.NpjFeedback.merge({ slug: A.slug, article: A, suggestion: s, actor: me, token: fbToken() });
+    if (r.ok) {
+      const ts = new Date().toISOString();
+      const updated = { ...A, body: r.body, updated: ts.slice(0, 10), base_sha: r.sha,
+        readMins: window.NpjArticles.readMins(r.body),
+        versions: [{ sha: r.sha, ts, author: me, message: r.note || "Merged a suggestion", text: window.NpjArticles.plainText(r.body) }, ...(A.versions || [])] };
+      window.NPJ.ARTICLE = updated; setArticleRev(rv => rv + 1);
+      window.NpjArticles.loadFront().then(() => setFrontRev(rv => rv + 1)).catch(() => {});
+    }
+    return r;
+  };
 
   // apply system tweaks to :root
   useEffect(() => {
@@ -342,8 +421,8 @@ function App() {
         <ArticleRead key={(window.NPJ.ARTICLE.slug || "a") + ":" + articleRev}
           audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
-          suggestions={suggestions} onVote={onVote} onResolve={onResolve} onAddSuggestion={onAddSuggestion}
-          filter={filter} setFilter={setFilter} isEditor={isEditor} setIsEditor={setIsEditor}
+          suggestions={suggestions} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onAddSuggestion={onAddSuggestion}
+          filter={filter} setFilter={setFilter}
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
           me={me} onHome={goHome} onNewsroom={goNewsroom}

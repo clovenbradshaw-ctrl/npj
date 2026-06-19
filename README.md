@@ -33,6 +33,8 @@ founding admin curates the site and grows the network from there.
 | `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
 | `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing |
 | `app/versions.jsx` | article version history + word-level diff |
+| `app/feedback.js` | **span feedback** — readers suggest an edit (or comment) on any selected words; stored as EVA events in the article's folder + a local mirror; an editor **merges** (apply + commit a REC) or declines |
+| `app/SuggestionRail.jsx` | the review surface — PR-shaped cards (diff, rationale, 👍, threaded replies) with **Merge / Decline** for editors |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
 
@@ -104,6 +106,30 @@ All of it is curated live, saved locally, and committed into `site/layout.json`
 (`front`) through the same admin-gated publish webhook as the rest of the
 chrome.
 
+## Reader feedback, considered for merge (the PR idea, not the PR UX)
+
+The record stays open to public suggestion — span by span. In the reader, select
+**any words** in a story and a small bubble offers **Suggest edit** (propose the
+exact replacement words) or **Comment** (pin a note to the span). Each lands as
+an **EVA deposit** in the article's own folder (`app/feedback.js`,
+`articles/<slug>/…-eva-….jsonl`) and folds as a no-op for the article itself — so
+a proposal never changes a published word. Open suggestions are painted right
+into the prose (a soft dashed underline, the way a Google-Docs suggestion shows
+where a change is proposed), and the **Suggestions** rail reviews them like pull
+requests without the pull-request UX: a word-level diff of what would change, the
+rationale, 👍 weighting, and threaded replies.
+
+**Merging is the only thing that edits the words.** An editor (the admin or an
+article assignee) hits **Merge** and the proposed words are applied to the body
+and committed as an ordinary **REC** edit — attributed, with the reader's
+rationale as the edit note — then the suggestion is marked *merged*. A suggestion
+whose words are gone (the base moved) shows a clean **conflict**, never a silent
+wrong edit. Proposing is open to anyone; merging stays gated to the people who
+can already edit the piece. Everything is mirrored to `localStorage` so it
+survives a refresh, and rides the same auditable GitHub commit machinery as the
+article (see [`backend/README.md`](backend/README.md) for the EVA model + the one
+webhook rule that opens proposing to any verified reader).
+
 ## Identity & permissions (rooted in Matrix)
 
 Authorization flows from one founding admin and is stored where a browser wipe
@@ -167,6 +193,11 @@ that always shows a second view and **pivots** as you work:
   lives in more than one place). One record can back many sentences ("USED ×n");
   unlinking a sentence never destroys the record. **In context** opens the quote
   highlighted inside its source; **Usage ×n** lights up every sentence it backs.
+  **Reusing a record is one search away:** the cite modal and the grounding card
+  both carry a searchable **Reuse an existing citation** browser over the *whole*
+  registry (best mechanical match first, but never hidden behind a threshold), so
+  a citation you've already pinned attaches in one click instead of being hunted
+  down in its source and re-grabbed.
 - **Sources** — the documents themselves, rendered as paper with a letterhead
   (kind · title · archived-or-not). Search within the document, see every cited
   span highlighted in place, and — from any "+ Cite" — go in **armed**: Citey
