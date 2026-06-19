@@ -23,6 +23,36 @@
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127,216,166,.6); } 70% { box-shadow: 0 0 0 7px rgba(127,216,166,0); } 100% { box-shadow: 0 0 0 0 rgba(127,216,166,0); } }
   html, body { background: var(--paper); }
   #root { min-height: 100vh; }
+
+  /* Boot splash: painted from static HTML the instant the page parses, so the
+     screen carries the brand while React, Babel, the ~30 in-browser .jsx files
+     and boot()'s committed-layout fetch all resolve. React clears #root on its
+     first render, which removes this automatically — no teardown needed. The
+     short fade-in delay means a warm-cache load that mounts in <200ms never
+     flashes the spinner; only a real wait shows it. */
+  @keyframes boot-fade { to { opacity: 1; } }
+  #boot-splash {
+    position: fixed; inset: 0; z-index: 9999;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 26px; padding: 24px; background: var(--paper);
+    opacity: 0; animation: boot-fade .45s ease .18s forwards;
+  }
+  #boot-splash .boot-band {
+    background: var(--yellow); padding: 16px 34px; border-radius: 4px;
+    box-shadow: 0 1px 0 var(--rule-strong, rgba(22,20,13,.4));
+  }
+  #boot-splash .boot-band img { width: min(440px, 72vw); height: auto; display: block; }
+  #boot-splash .boot-spinner {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid var(--rule, rgba(22,20,13,.16));
+    border-top-color: var(--ink, #16140d);
+    animation: spin .8s linear infinite;
+  }
+  #boot-splash .boot-note {
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 12px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-soft, #3a362b);
+  }
 </style>
 
 <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
@@ -105,7 +135,15 @@
 <script type="text/babel" src="app/AdminEditor.jsx"></script>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">
+  <!-- Static initialization state — replaced by <App /> on first React render. -->
+  <div id="boot-splash" role="status" aria-label="Loading People's Journalism">
+    <div class="boot-band"><img src="assets/npj-logo-wide.png" alt="People's Journalism" /></div>
+    <div class="boot-spinner" aria-hidden="true"></div>
+    <div class="boot-note">Loading the newsroom…</div>
+  </div>
+</div>
+<noscript><div style="padding:48px 24px;font-family:Georgia,serif;max-width:42rem;margin:0 auto;color:#16140d">People's Journalism needs JavaScript enabled to read and edit stories.</div></noscript>
 
 <template id="__bundler_thumbnail">
   <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
