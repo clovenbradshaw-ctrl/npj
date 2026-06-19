@@ -214,7 +214,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
         setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
           ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "dir", logPath: "articles/" + m.slug }
           : x) } : p);
-        window.NpjArticles.loadFront().catch(() => {}); // the front page reflects it on next visit
+        // refresh the front index, then force this slug's new status in (the
+        // git-tree listing can lag a fresh commit) so home hides/shows it at once
+        const reflect = () => window.NpjArticles.patchFrontStatus(m.slug, next);
+        window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }
     } catch (e) {
       setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");

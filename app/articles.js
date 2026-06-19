@@ -295,6 +295,17 @@
     return metas;
   }
 
+  // Optimistically patch one slug's status in the in-memory front index, so an
+  // unpublish/republish reflects on the front page immediately — without waiting
+  // for GitHub's git-tree listing (which lags a freshly committed version file by
+  // a second or two). The next loadFront reconciles once the tree catches up.
+  function patchFrontStatus(slug, status) {
+    const F = window.NPJ && window.NPJ.FRONT; if (!F) return;
+    const fix = (it) => (it && it.slug === slug) ? Object.assign({}, it, { status }) : it;
+    if (F.lead) F.lead = fix(F.lead);
+    if (Array.isArray(F.secondary)) F.secondary = F.secondary.map(fix);
+  }
+
   // Fetch + fold one article; its sources join the global ledger so hover
   // cards, the source rail and the methods footer all resolve.
   async function loadArticle(slug) {
@@ -648,7 +659,7 @@
   window.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
-    listArticles, loadFront, loadArticle,
+    listArticles, loadFront, patchFrontStatus, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
     genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, setArticleStatus,
     saveReceipt, getReceipt
