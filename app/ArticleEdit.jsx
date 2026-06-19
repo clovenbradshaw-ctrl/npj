@@ -69,9 +69,21 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
     setBusy(true);
     // freshly-dropped images live on the media store — move them to archive.org
-    // before the body is committed (mutates the img srcs in place).
+    // before the body is committed (mutates the img srcs in place). Published
+    // images must live on archive.org, so a failed move is a hard stop: never
+    // commit a Matrix media-store URL into the record.
     if (window.NpjMedia && window.NpjMedia.freezeArticleMedia) {
-      try { await window.NpjMedia.freezeArticleMedia(blocks, { slug: A.slug, title: headline || A.headline }); } catch (e) {}
+      let froze = null, freezeErr = null;
+      try { froze = await window.NpjMedia.freezeArticleMedia(blocks, { slug: A.slug, title: headline || A.headline }); }
+      catch (e) { freezeErr = e; }
+      if (freezeErr || (froze && froze.failed)) {
+        setBusy(false);
+        const why = freezeErr ? (freezeErr.message || "") : ((froze.failReasons && froze.failReasons.join("; ")) || "");
+        setErr("Couldn't move " + ((froze && froze.failed) || "an") + " image" + ((froze && froze.failed !== 1) ? "s" : "") +
+          " to archive.org — nothing was committed. " + (why ? why + " " : "") +
+          "Published images must live on archive.org; check the n8n media endpoint (and IA_S3 keys), then retry.");
+        return;
+      }
     }
     // any sources the body now cites (including new ⊥ Source binds) ride in the REC
     const usedKeys = {};
