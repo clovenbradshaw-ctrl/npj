@@ -32,7 +32,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
       <div className="npj-masthead" style={{ background: "var(--yellow)", padding: "22px 72px 26px" }}>
         <div style={{ maxWidth: 1760, margin: "0 auto", display: "flex", alignItems: "center", gap: 32 }}>
           <button onClick={onHome} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", margin: "-8px 0 -10px -14px", flexShrink: 0 }}>
-            <img className="npj-logo" src="https://storage.googleapis.com/intelechia-content/im/NPD%20wide.png" alt="People's Journalism" style={{ height: 168, display: "block" }} />
+            <img className="npj-logo" src="assets/npj-logo-wide.png" alt="Nashville Peoples' Journal" style={{ height: 168, display: "block" }} />
           </button>
           <div style={{ flex: 1 }} />
           <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", gap: 28 }}>
