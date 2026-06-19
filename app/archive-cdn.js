@@ -18,22 +18,29 @@
 
   function isMediaUrl(u) { return HOST.test(String(u || "").trim()); }
 
-  /* ---- proxy fallback for when archive.org itself is unreachable ----
-     A published <img> hotlinks archive.org directly (no CORS needed), but when
-     the reader's network can't reach archive.org at all — it's blocked, rate-
-     limited, or down — even a plain <img> GET fails. proxied(url) wraps any URL
+  /* ---- proxy for archive.org images ----
+     A published <img> can hotlink archive.org directly (no CORS needed), but on
+     a network that can't reach archive.org — behind a VPN that blocks it, or
+     when it's rate-limited/down — that GET just fails. proxied(url) wraps a URL
      as a ?url= request to a same-host proxy that re-fetches the bytes
-     server-side; the reader falls back to it when the direct archive.org load
-     errors (see MediaImg in ArticleRead.jsx). Configurable via
-     npj_publish_cfg_v1.proxyEndpoint; otherwise derived from the publish host
-     (.../webhook/feed), then a hard default. The proxy must answer with the raw
-     image bytes — a text/xml proxy corrupts binary images. */
+     server-side (it CAN reach archive.org), so the image still loads.
+
+     By default the reader loads archive.org images THROUGH the proxy and keeps
+     the direct archive.org URL only as a backstop (proxyImagesPrimary) — that's
+     what makes images show on networks that block archive.org, with no
+     failed-request flash first. Set npj_publish_cfg_v1.proxyImages=false to flip
+     to direct-first (proxy only on error).
+
+     Endpoint: npj_publish_cfg_v1.proxyEndpoint, else derived from the publish
+     host (.../webhook/img), else a hard default. The proxy MUST return the raw
+     image bytes — a text/xml proxy (like the RSS /webhook/feed one) corrupts
+     binary images; see backend/npj-image-proxy.n8n.json for a binary-safe one. */
   function proxyBase() {
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.proxyEndpoint) return String(c.proxyEndpoint); } catch (e) {}
     const pub = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
     const m = pub.match(/^(https?:\/\/[^/]+\/webhook)\//i);
-    if (m) return m[1] + "/feed";
-    return "https://n8n.intelechia.com/webhook/feed";
+    if (m) return m[1] + "/img";
+    return "https://n8n.intelechia.com/webhook/img";
   }
   function proxied(url) {
     const u = String(url || "").trim();
@@ -42,6 +49,12 @@
     if (!base) return null;
     if (u.indexOf(base) === 0) return u; // already proxied — never double-wrap
     return base + (base.indexOf("?") < 0 ? "?" : "&") + "url=" + encodeURIComponent(u);
+  }
+  // Default true: load archive.org images through the proxy first (direct
+  // archive.org is the backstop). Off → direct-first, proxy only on error.
+  function proxyImagesPrimary() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && typeof c.proxyImages === "boolean") return c.proxyImages; } catch (e) {}
+    return true;
   }
 
   // wayback capture → the same capture with the im_ flag, which serves the
@@ -124,5 +137,5 @@
     return null; // honestly unconfirmed — SPN can take a while; a later check may find it
   }
 
-  window.NpjArchiveCDN = { isMediaUrl, resolve, proxied, proxyBase, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
+  window.NpjArchiveCDN = { isMediaUrl, resolve, proxied, proxyBase, proxyImagesPrimary, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
 })();

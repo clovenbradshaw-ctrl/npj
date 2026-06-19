@@ -147,20 +147,24 @@ function CropFrame({ src, alt, style, fit, crop, onError }) {
 }
 
 // Ordered URLs to try for a published image. archive.org is the canonical home
-// for published media, so any archive.org URL is tried first; if the reader's
-// network can't reach archive.org, the SAME url via the proxy is the next try
-// (NpjArchiveCDN.proxied). A non-archive URL — the live Matrix media-store copy —
-// comes last, as a best-effort fallback only. De-duped, order preserved.
+// for published media. By default each archive.org URL is loaded THROUGH the
+// proxy first, with the direct archive.org URL as a backstop — so images show
+// even on a network that blocks archive.org (e.g. behind a VPN), with no
+// failed-request flash. (proxyImagesPrimary=false flips to direct-first, proxy
+// only on error.) A non-archive URL — the live Matrix media-store copy — comes
+// last, as a best-effort fallback only. De-duped, order preserved.
 function imageCandidates(srcs) {
   const cdn = window.NpjArchiveCDN;
   const raw = (srcs || []).filter(Boolean);
   const archive = [], rest = [];
   raw.forEach(u => { (cdn && cdn.isMediaUrl && cdn.isMediaUrl(u)) ? archive.push(u) : rest.push(u); });
+  const proxyFirst = !!(cdn && cdn.proxyImagesPrimary && cdn.proxyImagesPrimary());
   const out = [];
   archive.forEach(u => {
-    out.push(u);
     const p = cdn && cdn.proxied && cdn.proxied(u);
-    if (p && p !== u) out.push(p);
+    if (proxyFirst && p && p !== u) out.push(p); // proxy first…
+    out.push(u);                                  // …then the direct archive.org URL
+    if (!proxyFirst && p && p !== u) out.push(p);  // (or proxy only as the on-error fallback)
   });
   rest.forEach(u => out.push(u));
   return out.filter((u, i) => u && out.indexOf(u) === i);
