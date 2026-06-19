@@ -234,15 +234,19 @@ function EmbedFigure({ url, caption }) {
 
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
-          suggestions, onVote, onResolve, onAddSuggestion, filter, setFilter,
-          isEditor, setIsEditor, me, onHome, onNewsroom, onEdited } = props;
+          suggestions, onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
+          me, onHome, onNewsroom, onEdited } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
   const A = window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
-  const [composeId, setComposeId] = useState(null);
+  // span feedback: a compose draft pinned to a span ({ quote, anchor, kind }),
+  // and the floating select-to-suggest bubble ({ x, y, range, claimId })
+  const [compose, setCompose] = useState(null);
+  const [bubble, setBubble] = useState(null);
+  const bodyRef = useRef(null);
   const [showVersions, setShowVersions] = useState(false);
   const [editing, setEditing] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
@@ -292,7 +296,60 @@ function ArticleRead(props) {
     setTimeout(() => el.classList.remove("claim-flash"), 1800);
   }, []);
 
-  const startCompose = (claimId) => { setComposeId(claimId); setShowSugg(true); setHover(null); };
+  // Open the composer pinned to a bound claim (from the hover card) — the whole
+  // claim span is the anchor, by its stable id.
+  const startCompose = (claimId, kind) => {
+    const claim = claimById[claimId];
+    if (!claim) return;
+    setCompose({ quote: claim.text, anchor: window.NpjFeedback.anchorFromClaim(claim), kind: kind || "suggestion" });
+    setShowSugg(true); setHover(null); setBubble(null);
+  };
+
+  // ---- select-to-suggest: pick any words in the story → a floating bubble ----
+  const closestClaimId = (node) => {
+    let el = node && node.nodeType === 3 ? node.parentElement : node;
+    el = el && el.closest ? el.closest(".claim") : null;
+    return el && el.id && el.id.indexOf("claim-") === 0 ? el.id.slice(6) : null;
+  };
+  const refreshBubble = useCallback(() => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !bodyRef.current) { setBubble(null); return; }
+    const r = sel.getRangeAt(0);
+    if (!bodyRef.current.contains(r.commonAncestorContainer) || r.toString().trim().length < 2) { setBubble(null); return; }
+    const rect = r.getBoundingClientRect();
+    setBubble({ x: rect.left + rect.width / 2, y: rect.top, range: r.cloneRange(), claimId: closestClaimId(r.commonAncestorContainer) });
+  }, [claimById]);
+  const openComposeFromBubble = (kind) => {
+    if (!bubble) return;
+    const anchor = window.NpjFeedback.makeAnchor(bodyRef.current, bubble.range, bubble.claimId);
+    if (!anchor) { setBubble(null); return; }
+    setCompose({ quote: bubble.range.toString(), anchor, kind });
+    setShowSugg(true); setBubble(null);
+    const sel = window.getSelection(); if (sel) sel.removeAllRanges();
+  };
+  // dismiss the bubble on a fresh click elsewhere or on scroll
+  useEffect(() => {
+    if (!bubble) return;
+    const down = (e) => { if (!e.target.closest || !e.target.closest(".fb-bubble")) setBubble(null); };
+    window.addEventListener("scroll", () => setBubble(null), { passive: true, once: true });
+    window.addEventListener("mousedown", down);
+    return () => window.removeEventListener("mousedown", down);
+  }, [bubble]);
+
+  // paint every open suggestion's span into the prose (Google-Docs feel), and
+  // re-locate them whenever the feedback list or the audit DOM changes
+  useEffect(() => {
+    if (!bodyRef.current || !window.NpjFeedback) return;
+    const t = setTimeout(() => {
+      const anchors = (suggestions || [])
+        .filter(s => (s.status === "proposed" || s.status === "review") && s.anchor)
+        .map(s => s.anchor);
+      window.NpjFeedback.paintAnchors(bodyRef.current, anchors);
+    }, 60);
+    return () => { clearTimeout(t); window.NpjFeedback.clearAnchors(); };
+  }, [suggestions, audit]);
+
+  const showInText = (s) => { if (s && s.anchor && bodyRef.current) window.NpjFeedback.flash(bodyRef.current, s.anchor); };
 
   // admin-only: unpublish (hide everywhere but admin) or republish. Appends one
   // REC{status} to the log — nothing is deleted — then refolds via onEdited so
@@ -372,7 +429,8 @@ function ArticleRead(props) {
   });
 
   const Body = (
-    <article style={{ fontFamily: "var(--serif)" }}>
+    <article ref={bodyRef} style={{ fontFamily: "var(--serif)" }}
+      onMouseUp={() => setTimeout(refreshBubble, 0)} onKeyUp={(e) => { if (e.shiftKey || e.key === "Shift") setTimeout(refreshBubble, 0); }}>
       {A.body.map((b, i) => {
         if (b.type === "h2" || b.type === "h3") {
           const Tag = b.type;
@@ -521,12 +579,19 @@ function ArticleRead(props) {
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
         entityData={entityData} active={activeEntity} setActive={setActiveEntity} />
 
-      <SuggestionRail open={showSugg} onClose={() => { setShowSugg(false); setComposeId(null); }}
+      {bubble && (
+        <div className="fb-bubble" style={{ left: bubble.x, top: bubble.y - 46 }} onMouseDown={(e) => e.preventDefault()}>
+          <button onClick={() => openComposeFromBubble("suggestion")}><span style={{ fontFamily: "var(--mono)" }}>✎</span> Suggest edit</button>
+          <button onClick={() => openComposeFromBubble("comment")}><span style={{ fontFamily: "var(--mono)" }}>💬</span> Comment</button>
+        </div>
+      )}
+
+      <SuggestionRail open={showSugg} onClose={() => { setShowSugg(false); setCompose(null); }}
         list={suggestions} claimById={claimById} filter={filter} setFilter={setFilter}
-        isEditor={isEditor} setIsEditor={setIsEditor} onVote={onVote} onResolve={onResolve}
-        composeClaim={composeId ? claimById[composeId] : null}
-        onSubmit={(d) => { onAddSuggestion(composeId, d); setComposeId(null); }}
-        onCancelCompose={() => setComposeId(null)} me={me} />
+        canReview={canEditArticle} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onShow={showInText}
+        composeDraft={compose}
+        onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
+        onCancelCompose={() => setCompose(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)} />}
       {editing && window.ArticleEdit && (
         <window.ArticleEdit article={A} me={me} isAdmin={isAdmin}
