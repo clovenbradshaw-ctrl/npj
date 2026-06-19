@@ -62,7 +62,7 @@ function AdminEditor() {
   const frontPool = [].concat(FRONT.lead ? [FRONT.lead] : [], Array.isArray(FRONT.secondary) ? FRONT.secondary : [])
     .filter(a => a && a.slug && a.status !== "unpublished");
   const frontOrdered = window.orderFrontItems(frontPool, front);
-  const slotLabel = (i) => i === 0 ? "Cover" : i <= 3 ? "Row 2 · " + i : "More · " + (i - 3);
+  const slotLabel = (i) => i === 0 ? "Cover" : i <= 3 ? "Row · " + i : "Feed · " + (i - 3);
   // hotswap: persist the FULL current order with the one move applied
   const reorderFront = (i, d) => setFront({ order: move(frontOrdered.map(x => x.slug), i, d) });
   const setCard = (slug, name) => {
@@ -162,7 +162,7 @@ function AdminEditor() {
             {/* Front-page lineup — hotswap positions + a layout template per piece */}
             <Section label="Front page lineup">
               <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
-                Reorder to <b style={{ color: AE.text }}>hotswap</b> which piece is the cover, the row-2 trio, or the “more” list. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
+                Reorder to <b style={{ color: AE.text }}>hotswap</b> which piece is the cover, the 3-across row, or the vertical feed. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 9 }}>
                 <span className="np-mono" style={{ fontSize: 10, color: AE.soft, flex: "0 0 auto" }}>Template</span>

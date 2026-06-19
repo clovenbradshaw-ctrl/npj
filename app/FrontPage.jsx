@@ -1,8 +1,15 @@
 /* NPJ masthead + front page — revamped layout.
-   The masthead is now a two-piece chrome: a yellow header band (logo +
-   taglines + utility links) and a dark section nav bar. The front page
-   drops the manifesto strip and restructures the lineup into a full-bleed
-   cover story, a three-column second row, and a compact "More" list. */
+   The masthead is a two-piece chrome: a yellow header band (logo + taglines +
+   utility links) and a dark section nav bar. On desktop the whole front page is
+   a centered 2/3-width column: a one-up cover story, a 3-across row, then the
+   rest as a single vertical feed. Each piece renders through its admin-chosen
+   layout template (FrontCard); the lineup order + templates come from
+   layout.front (see app/layout.jsx, app/AdminEditor.jsx). */
+
+// Desktop front-page shell: a centered column 2/3 of the screen wide (capped so
+// it never runs away on ultra-wide displays). On phones every container goes
+// full-width (handled per-component via useIsMobile + the existing mobile CSS).
+const SHELL_W = "min(66.67vw, 1760px)";
 
 function Placeholder({ label, h = 220, dark = false }) {
   const stroke = dark ? "rgba(255,255,255,.10)" : "rgba(22,20,13,.09)";
@@ -17,8 +24,13 @@ function Placeholder({ label, h = 220, dark = false }) {
 }
 
 /* ---- Masthead ---- */
-function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
+// `narrow` (front page only) centers the chrome inside the 2/3 shell column so
+// the header lines up with the lineup below it. Every other route leaves it
+// off → unchanged full-width masthead.
+function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow }) {
   const { layout } = React.useContext(window.LayoutCtx);
+  const mobile = window.useIsMobile();
+  const tight = narrow && !mobile; // apply the 2/3 column only on desktop
   const sections = (layout.sections || []).map(s => s.name);
   const utility = layout.utility || [];
   const taglines = layout.taglines || [];
@@ -29,8 +41,8 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
   return (
     <header>
       {/* yellow masthead band */}
-      <div className="npj-masthead" style={{ background: "var(--yellow)", padding: "22px 72px 26px" }}>
-        <div style={{ maxWidth: 1760, margin: "0 auto", display: "flex", alignItems: "center", gap: 32 }}>
+      <div className="npj-masthead" style={{ background: "var(--yellow)", padding: tight ? "22px 0 26px" : "22px 72px 26px" }}>
+        <div style={{ width: tight ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", display: "flex", alignItems: "center", gap: 32 }}>
           <button onClick={onHome} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", margin: "-8px 0 -10px -14px", flexShrink: 0 }}>
             <img className="npj-logo" src="assets/npj-logo-wide.png" alt="Nashville Peoples' Journal" style={{ height: 168, display: "block" }} />
           </button>
@@ -60,7 +72,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
       {/* dark section nav — hidden inside the article reader to avoid toolbar stacking */}
       {route !== "article" && (
         <nav style={{ background: "var(--ink)", color: "var(--paper)" }}>
-          <div className="npj-nav-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "0 72px", display: "flex", alignItems: "stretch", height: 58 }}>
+          <div className="npj-nav-inner" style={{ width: tight ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: tight ? "0" : "0 72px", display: "flex", alignItems: "stretch", height: 58 }}>
             {sections.map((s, i) => {
               const on = activeColumn ? activeColumn === s : i === 0;
               return (
@@ -93,11 +105,12 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn }) {
 
 /* ---- Archive status strip ---- */
 function ArchiveStrip() {
+  const mobile = window.useIsMobile();
   const snaps = (window.NPJ && window.NPJ.SOURCES) ? Object.keys(window.NPJ.SOURCES).length : null;
   if (snaps === 0) return null;
   return (
     <div style={{ background: "var(--paper)", borderBottom: "1px solid var(--rule)" }}>
-      <div className="npj-strip-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "11px 72px", display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
+      <div className="npj-strip-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "11px 16px" : "11px 0", display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
         <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--reject)", display: "inline-block", flexShrink: 0 }} />
         {snaps !== null
           ? <span><strong style={{ color: "var(--ink)" }}>{snaps}</strong> sources captured</span>
@@ -117,9 +130,14 @@ function ArchiveStrip() {
 /* ---- Front Page ---- */
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
+  const mobile = window.useIsMobile();
   const F = window.NPJ.FRONT || {};
   const sections = (layout.sections || []).map(s => s.name);
   const [col, setCol] = useState(null);
+  // The first column ("Latest") is just the unfiltered, newest-first feed — not
+  // a tag filter. Clicking it (or re-clicking the active column) clears the
+  // filter and shows everything.
+  const isLatest = (name) => name === sections[0] || /^latest$/i.test(name || "");
 
   const all = [];
   if (F.lead) all.push({ ...F.lead, _lead: true, tags: F.lead.tags || [] });
@@ -133,10 +151,10 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
 
   return (
     <div className="fade-in">
-      <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom}
-        activeColumn={col} onColumn={(name) => setCol(c => c === name ? null : name)} />
+      <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
+        activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
       <ArchiveStrip />
-      <main style={{ maxWidth: 1760, margin: "0 auto", padding: "34px 72px 0" }}>
+      <main style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 0 0" : "34px 0 0" }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
           : <FrontLineup items={shown} onOpen={onOpen} />}
@@ -148,9 +166,10 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
 
 /* ---- Footer ---- */
 function FrontFooter() {
+  const mobile = window.useIsMobile();
   return (
     <footer style={{ background: "var(--ink)", color: "#e3ddcc", marginTop: 36 }}>
-      <div className="npj-footer-inner" style={{ maxWidth: 1760, margin: "0 auto", padding: "24px 72px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div className="npj-footer-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 16px" : "24px 0", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <span aria-hidden="true" style={{ position: "relative", display: "inline-block", width: 15, height: 13, borderBottom: "3px solid var(--yellow)", flexShrink: 0 }}>
           <span style={{ position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)", width: 3, height: 10, background: "var(--yellow)" }} />
         </span>
@@ -324,9 +343,12 @@ function FrontLineup({ items, onOpen }) {
   const ordered = window.orderFrontItems(items, front);
   const lead = ordered.find(a => a.status !== "unpublished") || ordered[0];
   const rest = ordered.filter(a => a !== lead);
-  const row2 = rest.slice(0, 3);
-  const more = rest.slice(3);
+  const row2 = rest.slice(0, 3);   // the 3-across row
+  const feed = rest.slice(3);      // everything else — a vertical feed
   const tpl = (slug, pos) => window.cardTemplateFor(layout, slug, pos);
+  // Feed rows read best as side-by-side (photo + text) cards; an explicit
+  // per-article template override still wins.
+  const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-left";
 
   return (
     <>
@@ -351,18 +373,13 @@ function FrontLineup({ items, onOpen }) {
         </section>
       )}
 
-      {/* More from the newsroom — compact list rows */}
-      {more.length > 0 && (
-        <section style={{ borderTop: "2.5px solid var(--ink)", padding: "20px 0 12px" }}>
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>More from the newsroom</div>
-          {more.map((s, i) => (
-            <div key={s.slug || i} className="npj-more-row" style={{ display: "grid", gridTemplateColumns: "150px 1fr 170px", gap: 22, alignItems: "baseline", padding: "15px 0", borderTop: "1px solid var(--rule)" }}>
-              <span className="np-mono" style={{ fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase", color: "var(--ink-soft)" }}>{(s.tags || [])[0] || "Latest"}</span>
-              <button onClick={() => onOpen && onOpen(s.slug)} style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 23, lineHeight: 1.05, textTransform: "uppercase", background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}>
-                {s.headline}
-                {s.status === "unpublished" && <span style={{ marginLeft: 8 }}><UnpubBadge small /></span>}
-              </button>
-              <span className="np-mono" style={{ fontSize: 12, color: "var(--ink-soft)", textAlign: "right" }}>{s.published ? shortDate(s.published) : ""}</span>
+      {/* The rest — a single vertical feed of side-by-side cards */}
+      {feed.length > 0 && (
+        <section style={{ borderTop: "2.5px solid var(--ink)", paddingTop: 8 }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "12px 0 2px" }}>More from the newsroom</div>
+          {feed.map((s, i) => (
+            <div key={s.slug || i} style={{ padding: "22px 0", borderTop: i === 0 ? "none" : "1px solid var(--rule)" }}>
+              <FrontCard item={s} variant="card" template={feedTpl(s.slug)} onOpen={onOpen} />
             </div>
           ))}
         </section>

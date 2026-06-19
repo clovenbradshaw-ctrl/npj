@@ -77,14 +77,16 @@ is ever truly removed; the site just stops serving it.
 
 ### Front-page lineup — hotswap positions, pick layout templates
 
-By default the front page is newest-first: the latest piece is the cover, the
-next three fill the row, the rest drop into "More." The admin can override that
-from **Edit layout → Front page lineup** without touching any article:
+The front page is a centered **2/3-width** column on desktop (full-width on
+phones): the most recent piece runs **one-up** (full-width cover), the next
+three sit **3-across**, and everything else flows into a single **vertical
+feed**. By default that order is newest-first; the admin can override it from
+**Edit layout → Front page lineup** without touching any article:
 
 - **Hotswap positions.** Reorder the lineup (↑/↓) to choose which piece is the
-  **cover**, which fill the **row-2** trio, and which fall into **More**. The
-  order is stored as a list of slugs in `front.order`; clear it to fall back to
-  newest-first. Newly published pieces flow in after the pinned ones.
+  **cover**, which fill the **3-across row**, and which fall into the **feed**.
+  The order is stored as a list of slugs in `front.order`; clear it to fall back
+  to newest-first. Newly published pieces flow in after the pinned ones.
 - **Layout templates.** Pick a whole-page template (`front.template`:
   *standard / grid / river / posters*) for the default arrangement, then
   override any single card (`front.cards[slug]`). Each template moves the
