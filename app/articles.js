@@ -101,6 +101,35 @@
     return Math.max(1, Math.round(words / 220));
   }
 
+  /* ---------------- standardized article metadata ----------------
+     The fields every published piece should carry so the front page renders
+     consistently no matter which layout template it lands in. `required` ones
+     gate the "standardized" check the admin lineup editor surfaces; the rest are
+     recommended. Mirrors the keys produced by foldLog / listArticles. */
+  const META_STANDARD = [
+    { key: "headline",  label: "Title",    required: true },
+    { key: "dek",       label: "Subtitle", required: true },
+    { key: "column",    label: "Column",   required: true },
+    { key: "image",     label: "Photo",    required: true },
+    { key: "published", label: "Date",     required: true },
+    { key: "tags",      label: "Tags",     required: false },
+    { key: "authors",   label: "Byline",   required: false }
+  ];
+  function metaFieldEmpty(key, v) {
+    if (v == null) return true;
+    if (key === "image") return !(v && (v.src || v.store));
+    if (Array.isArray(v)) return v.length === 0;
+    return String(v).trim() === "";
+  }
+  // → { missing:[{key,label,required}], required:[…just the required misses…],
+  //     ok:boolean (all required present), score:0–100 }
+  function checkMeta(meta) {
+    const missing = META_STANDARD.filter(f => metaFieldEmpty(f.key, meta ? meta[f.key] : null));
+    const required = missing.filter(f => f.required);
+    const have = META_STANDARD.length - missing.length;
+    return { missing, required, ok: required.length === 0, score: Math.round((have / META_STANDARD.length) * 100) };
+  }
+
   /* ---------------- event lines ---------------- */
   function eventLine(op, slug, operand, actor, extra) {
     return JSON.stringify(Object.assign({
@@ -294,7 +323,7 @@
   // Fill window.NPJ.FRONT from the committed record. Returns the metas.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, headline: m.headline, dek: m.dek, tags: m.tags || [], published: m.published, updated: m.updated, versions: m.versions, status: m.status, image: m.image || null });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], published: m.published, updated: m.updated, versions: m.versions, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     return metas;
   }
@@ -689,6 +718,7 @@
   window.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
+    META_STANDARD, checkMeta,
     listArticles, loadFront, patchFrontStatus, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
     genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
