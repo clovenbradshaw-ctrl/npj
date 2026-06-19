@@ -54,6 +54,22 @@ function AdminEditor() {
 
   const move = (arr, i, d) => { const a = [...arr]; const j = i + d; if (j < 0 || j >= a.length) return a; [a[i], a[j]] = [a[j], a[i]]; return a; };
 
+  // ---- front-page lineup (hotswap order + per-card layout template) ----
+  const front = layout.front || { template: "standard", order: [], cards: {} };
+  const setFront = (next) => patch({ front: { ...front, ...next } });
+  // the published pool the front page draws from (unpublished are off the page)
+  const FRONT = (window.NPJ && window.NPJ.FRONT) || {};
+  const frontPool = [].concat(FRONT.lead ? [FRONT.lead] : [], Array.isArray(FRONT.secondary) ? FRONT.secondary : [])
+    .filter(a => a && a.slug && a.status !== "unpublished");
+  const frontOrdered = window.orderFrontItems(frontPool, front);
+  const slotLabel = (i) => i === 0 ? "Cover" : i <= 3 ? "Row 2 · " + i : "More · " + (i - 3);
+  // hotswap: persist the FULL current order with the one move applied
+  const reorderFront = (i, d) => setFront({ order: move(frontOrdered.map(x => x.slug), i, d) });
+  const setCard = (slug, name) => {
+    const cards = { ...(front.cards || {}) };
+    if (!name) delete cards[slug]; else cards[slug] = name;
+    setFront({ cards });
+  };
 
   const doPublish = async () => {
     savePublishCfg(cfg);
@@ -141,6 +157,48 @@ function AdminEditor() {
                 );
               })}
               <button onClick={() => setSections([...layout.sections, { name: "New column", publishers: [] }])} style={addBtn}>+ Add column</button>
+            </Section>
+
+            {/* Front-page lineup — hotswap positions + a layout template per piece */}
+            <Section label="Front page lineup">
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
+                Reorder to <b style={{ color: AE.text }}>hotswap</b> which piece is the cover, the row-2 trio, or the “more” list. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
+              </div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 9 }}>
+                <span className="np-mono" style={{ fontSize: 10, color: AE.soft, flex: "0 0 auto" }}>Template</span>
+                <select value={front.template} onChange={(e) => setFront({ template: e.target.value })} style={{ ...selStyle, flex: 1 }}>
+                  {Object.keys(window.FRONT_TEMPLATES).map(k => <option key={k} value={k}>{window.FRONT_TEMPLATES[k].label}</option>)}
+                </select>
+              </div>
+              {frontOrdered.length === 0 && (
+                <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, lineHeight: 1.5 }}>No published pieces yet — publish from the Newsroom, then arrange them here.</div>
+              )}
+              {frontOrdered.map((a, i) => {
+                const pos = i === 0 ? "lead" : "card";
+                const chk = window.NpjArticles.checkMeta(a);
+                const override = (front.cards || {})[a.slug] || "";
+                const effective = window.cardTemplateFor(layout, a.slug, pos);
+                const effLabel = (window.FRONT_CARD_TEMPLATES[effective] || {}).label || effective;
+                return (
+                  <div key={a.slug} style={{ border: "1px solid " + AE.line, padding: "7px", marginBottom: 7 }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <span className="np-mono" style={{ fontSize: 9, color: i === 0 ? "#16140f" : AE.text, background: i === 0 ? "var(--yellow)" : "transparent", border: "1px solid " + (i === 0 ? "var(--yellow)" : AE.line), padding: "2px 5px", whiteSpace: "nowrap", flex: "0 0 auto" }}>{slotLabel(i)}</span>
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13, color: AE.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.headline}>{a.headline || a.slug}</span>
+                      <MiniBtn onClick={() => reorderFront(i, -1)} title="Move up">↑</MiniBtn>
+                      <MiniBtn onClick={() => reorderFront(i, 1)} title="Move down">↓</MiniBtn>
+                    </div>
+                    <select value={override} onChange={(e) => setCard(a.slug, e.target.value)} style={{ ...selStyle, width: "100%", marginTop: 6, padding: "4px 6px" }}>
+                      <option value="">Template default · {effLabel}</option>
+                      {Object.keys(window.FRONT_CARD_TEMPLATES).map(k => <option key={k} value={k}>{window.FRONT_CARD_TEMPLATES[k].label}</option>)}
+                    </select>
+                    <div style={{ marginTop: 6 }}>
+                      {chk.ok
+                        ? <span className="np-mono" style={{ fontSize: 9, color: "#9fe0b8" }}>● standardized{chk.missing.length ? <span style={{ color: AE.soft }}> · also add {chk.missing.map(f => f.label).join(", ")}</span> : ""}</span>
+                        : <span className="np-mono" style={{ fontSize: 9, color: "#e0b585" }}>▲ missing {chk.required.map(f => f.label).join(", ")}</span>}
+                    </div>
+                  </div>
+                );
+              })}
             </Section>
 
             {/* Taglines */}
