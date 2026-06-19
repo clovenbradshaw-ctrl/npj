@@ -64,15 +64,17 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
   if (!data) return null;
   const { claim, x, y, srcKeys } = data;
   const vw = window.innerWidth, vh = window.innerHeight;
-  const w = 340;
+  // never wider than the viewport (340 on a phone overflows the right edge)
+  const w = Math.min(340, vw - 24);
   let left = Math.min(Math.max(12, x), vw - w - 12);
   let top = y + 8;
   const flip = top > vh - 260;
   // the other passages this same source backs — so you can hop between them
   const spans = spansForSource ? spansForSource(srcKeys[tab]) : [];
   return (
-    <div className="srccard" style={{ left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto" }}
-      onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <div className="srccard" role="dialog" aria-label="Citation for this claim"
+      style={{ left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w }}
+      onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onEnter} onBlur={onLeave}>
       {srcKeys.length > 1 && (
         <div style={{ display: "flex", borderBottom: "1.5px solid var(--ink)" }}>
           {srcKeys.map((k, i) => (
@@ -296,6 +298,15 @@ function ArticleRead(props) {
     if (onEdited) onEdited(updated);
   };
 
+  // a spoken description of a claim's grounding, for screen readers — the
+  // citation card is visual, so the label carries the same promise: what backs
+  // this claim, and how to open the receipts.
+  const claimAria = (claim) => {
+    const names = claim.src.map(k => { const s = srcOf(k); return s.title || s.id || k; });
+    const n = names.length;
+    return "Sourced claim. Backed by " + n + " " + (n === 1 ? "source" : "sources") + ": " + names.join("; ") + ". Press Enter to view the citation.";
+  };
+
   // render tokens for a paragraph: plain strings, style tokens ({t}) and
   // source-bound claims ({c, src, id}) — the EO log's full inline vocabulary
   const ent = activeEntity ? activeEntity.name : null;
@@ -316,7 +327,19 @@ function ArticleRead(props) {
     return (
       <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
         data-active={claim.src.includes(activeSrc) ? "1" : "0"}
+        tabIndex={0} role="button" aria-haspopup="dialog"
+        aria-expanded={hover && hover.claim.id === t.id ? "true" : "false"}
+        aria-label={claimAria(claim)}
         onMouseEnter={(e) => enterClaim(e, claim)} onMouseLeave={scheduleLeave}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (hover && hover.claim.id === t.id) { setHover(null); setActiveSrc(null); }
+            else enterClaim({ currentTarget: e.currentTarget }, claim);
+          } else if (e.key === "Escape" && hover) {
+            e.stopPropagation(); setHover(null); setActiveSrc(null); e.currentTarget.focus();
+          }
+        }}
         onClick={() => { setShowSugg(true); }}>
         {ent ? markEntities(t.c, ent, "c" + i) : t.c}
         {showMarkers && <sup className="claim-marker">{claim.num}</sup>}

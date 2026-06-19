@@ -1480,6 +1480,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     if (!parts.length) return null;
     return parts.join("; ") + ". You can publish anyway — these claims ship ungrounded, not held back.";
   })();
+  // shipping with ungrounded claims is allowed, but it must never look like a
+  // clean publish — the primary button turns caution-colored and says so.
+  const shipUngrounded = !blocked && !!groundWarn;
   const Row = ({ k, children }) => (
     <div style={{ display: "flex", gap: 10, padding: "7px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
       <span className="np-eyebrow" style={{ color: NR.muted, flex: "0 0 86px" }}>{k}</span>
@@ -1524,7 +1527,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             {!blocked && groundWarn && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px", display: "flex", gap: 8 }}><span aria-hidden="true">⚠</span><span>{groundWarn}</span></div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
-              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: blocked ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Publish it</button>
+              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: (blocked || shipUngrounded) ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : shipUngrounded ? NR.warn : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : shipUngrounded ? NR.warn : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> {shipUngrounded ? "Publish ungrounded" : "Publish it"}</button>
             </div>
           </div>
         )}

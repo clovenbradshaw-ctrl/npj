@@ -131,6 +131,13 @@ function Compose({ claim, onSubmit, onCancel, me }) {
           style={{ width: "100%", marginTop: 4, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4,
             padding: "8px 9px", border: "1.5px solid var(--ink)", background: "var(--paper)", resize: "vertical" }} />
 
+        {!valid && (
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>
+            {proposed.trim() === claim.text.trim()
+              ? "Edit the proposed text above so it differs from the original."
+              : "Add a rationale of at least 8 characters to deposit."}
+          </div>
+        )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>as {me}</span>
           <div style={{ display: "flex", gap: 7 }}>
@@ -159,9 +166,9 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, isE
   const resolved = filtered.filter(s => s.status === "accepted" || s.status === "rejected");
 
   return (
-    <aside className="np-scroll" style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: 408,
+    <aside className="np-scroll" style={{ position: "fixed", top: 0, right: 0, height: "100vh", width: "min(408px, 92vw)",
       background: "var(--paper)", borderLeft: "2.5px solid var(--ink)", boxShadow: "-12px 0 30px rgba(22,20,13,.16)",
-      transform: open ? "none" : "translateX(420px)", transition: "transform .28s cubic-bezier(.4,0,.1,1)",
+      transform: open ? "none" : "translateX(101%)", transition: "transform .28s cubic-bezier(.4,0,.1,1)",
       zIndex: 3000, overflowY: "auto", display: "flex", flexDirection: "column" }}>
       <div style={{ position: "sticky", top: 0, background: "var(--ink)", color: "var(--paper)", zIndex: 2 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px" }}>

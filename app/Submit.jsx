@@ -5,6 +5,31 @@
 
 const TIP_EMAIL = "peoplesjournalism@proton.com";
 
+/* A mailto: link silently does nothing on a device with no mail app configured
+   (common on shared/locked-down machines). This is the fallback: copy the
+   address to the clipboard so the tipster can paste it into webmail. */
+function CopyTipEmail({ style }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(TIP_EMAIL);
+    } catch (e) {
+      // clipboard API blocked (insecure context / old browser) — select-and-copy fallback
+      const ta = document.createElement("textarea");
+      ta.value = TIP_EMAIL; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } catch (_) {}
+      document.body.removeChild(ta);
+    }
+    setCopied(true); setTimeout(() => setCopied(false), 1600);
+  };
+  return (
+    <button type="button" onClick={copy} className="btn" style={{ display: "inline-flex", alignItems: "center", gap: 6, ...style }}>
+      <I.copy style={{ fontSize: 13 }} /> {copied ? "Copied ✓" : "Copy address"}
+    </button>
+  );
+}
+
 function SubmitPage({ session, onSignIn, onSignOut, onHome, onNewsroom, onDocs }) {
   const signedIn = !!session;
   return (
@@ -47,9 +72,12 @@ function SignedInPanel({ session, onDocs, onSignOut }) {
         <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 14px" }}>
           Send what you know to the newsroom inbox. Attach documents or links — we archive every source.
         </p>
-        <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
-          <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
-        </a>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
+          <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
+            <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
+          </a>
+          <CopyTipEmail />
+        </div>
       </div>
     </div>
   );
@@ -105,10 +133,13 @@ function AccountGate({ onSignIn }) {
           <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 14px" }}>
             Send what you know to our newsroom inbox. Attach documents or links — we archive every source.
           </p>
-          <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
-            <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
-          </a>
-          <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 12 }}>opens your mail app · {TIP_EMAIL}</div>
+          <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
+            <a href={mailto} className="btn btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>
+              <I.arrow style={{ fontSize: 14 }} /> Email {TIP_EMAIL}
+            </a>
+            <CopyTipEmail />
+          </div>
+          <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 12 }}>opens your mail app · no mail app? copy the address and use webmail</div>
         </div>
 
         {/* matrix path — contributors */}
