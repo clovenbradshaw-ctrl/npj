@@ -64,6 +64,8 @@ a { color: inherit; }
 
 /* ---- claim affordances (the spine) ---- */
 .claim { position: relative; cursor: help; transition: background .15s ease; }
+/* keyboard users get a clear focus ring on the claim they're about to open */
+.claim:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 
 /* clean read: low-key dotted underline */
 .read-clean .claim {

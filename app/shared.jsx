@@ -42,6 +42,7 @@ const I = {
   sun:     phIcon("sun"),
   moon:    phIcon("moon"),
   link:    phIcon("link-simple"),
+  copy:    phIcon("copy"),
   /* editor toolbar */
   undo:    phIcon("arrow-counter-clockwise"),
   redo:    phIcon("arrow-clockwise"),
@@ -232,7 +233,7 @@ function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", st
     ? "Everything in this draft — " + what + " — autosaves to this browser as you type, then backs up to your Matrix account (" + (user || "signed in") + ") a moment later. Sign out, wipe the browser or switch devices: the account copy survives."
     : "This draft autosaves to this browser as you type (" + what + ") — but it is NOT backed up to an account. Sign in with Matrix and it will be.";
   return (
-    <span className="np-mono" title={tip} style={{ fontSize: 10.5, color, border: "1px solid var(--nr-line-strong, rgba(22,20,13,.44))", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
+    <span className="np-mono" role="status" aria-live="polite" title={tip} style={{ fontSize: 10.5, color, border: "1px solid var(--nr-line-strong, rgba(22,20,13,.44))", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
   );
 }
 
