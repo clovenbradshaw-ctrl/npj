@@ -183,6 +183,37 @@ a { color: inherit; }
 
 .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 
+/* ---- span feedback painted into the prose (CSS Custom Highlight API) ----
+   Spans with open reader feedback wear a soft underline in the article itself,
+   the way a Google-Docs suggestion shows where a change is proposed. The flash
+   highlight is the rail's "show in text" jump. Silent no-op where unsupported. */
+::highlight(npj-feedback) {
+  background-color: color-mix(in srgb, var(--review, #b5701b) 16%, transparent);
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-decoration-color: var(--review, #b5701b);
+  text-underline-offset: 3px;
+}
+::highlight(npj-feedback-flash) {
+  background-color: var(--yellow);
+  color: var(--ink);
+}
+/* the floating selection bubble — Suggest edit / Comment on any span */
+.fb-bubble {
+  position: fixed; z-index: 4200; display: flex; gap: 0;
+  background: var(--ink); color: var(--paper);
+  border: 1.5px solid var(--ink); box-shadow: 0 6px 20px rgba(0,0,0,.32);
+  transform: translate(-50%, 0); animation: pop .14s ease;
+}
+.fb-bubble button {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: 0; color: var(--paper); cursor: pointer;
+  font-family: var(--cond); font-weight: 600; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .04em; padding: 7px 12px;
+}
+.fb-bubble button + button { border-left: 1px solid rgba(255,255,255,.22); }
+.fb-bubble button:hover { background: rgba(255,255,255,.12); color: var(--yellow); }
+
 /* trust badges */
 .trust-editor    { color: var(--verified); }
 .trust-preferred { color: var(--review); }

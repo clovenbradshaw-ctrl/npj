@@ -141,6 +141,60 @@ it receives; everything stays plaintext and auditable.
 Publish Webhook → Whoami → Fetch Roles → Authorize → Authorized? → GH Get File → Build Content → Exists? → GH Update / GH Create → OK
 ```
 
+## Span feedback rides the article's own folder (EVA deposits → merge as REC)
+
+Reader feedback — a span-anchored **suggestion** (the exact words it would
+change) or a **comment** — is stored as one more EO event in the *same*
+per-document folder as the article, schema `npj/feedback-eo/1`
+(reader/writer: `app/feedback.js`):
+
+```
+articles/<slug>/20260619T2031Z-eva-7f3k.jsonl   ← a reader's suggestion (EVA)
+articles/<slug>/20260619T2105Z-eva-9bd1.jsonl   ← a 👍 / reply / resolution (EVA)
+```
+
+```jsonl
+{"v":"npj/feedback-eo/1","op":"EVA","target":"article/<slug>","ts":"…","actor":"@reader:hs",
+ "operand":{"id":"fb-…","kind":"suggestion","anchor":{"quote":"…","prefix":"…","suffix":"…","claimId":null},
+            "proposed":"…","rationale":"…","base_sha":"a3f9c1e"}}
+{"v":"npj/feedback-eo/1","op":"EVA","target":"article/<slug>","ts":"…","actor":"@editor:hs",
+ "operand":{"id":"fbr-…","ref":"fb-…","act":"resolve","outcome":"merged","commit_sha":"…"}}
+```
+
+- **EVA folds as a no-op for the article reader** (`app/articles.js` keeps it in
+  `events[]` but never touches article state), so feedback shares the folder
+  without changing a single published word. The merge is the only thing that
+  edits the prose, and it goes through the ordinary **REC** edit path.
+- **Anchoring is re-locatable.** A span is pinned by its quote plus a little
+  context on each side (or a bound claim's stable id); `app/feedback.js` finds it
+  again in the live text even after the article moves on, and flags a suggestion
+  "stale" when its `base_sha` has been superseded.
+- **Merge = apply + commit.** An editor's *Merge* applies the proposed words to
+  the body and commits a normal `REC` (attributed, with the reader's rationale as
+  the edit note), then writes a resolution EVA marking the suggestion `merged`.
+  A suggestion whose words are gone is a clean **conflict**, never a silent wrong
+  edit — the pull-request idea (propose → review-in-context → merge/decline)
+  without the pull-request UX.
+- **Local mirror.** Every write is also mirrored to `localStorage`, so feedback
+  survives a refresh and the whole flow is demonstrable before the webhook rule
+  below is live.
+
+### Webhook rule to add (publish workflow)
+
+The commit path is the same `POST …/webhook/site/publish-npj`. Two new things
+for the `Authorize` + `Build Content` nodes:
+
+| File written | Who | Notes |
+|---|---|---|
+| `articles/<slug>/<stamp>-eva-<tail>.jsonl` | **any whoami-verified Matrix user** | proposing/commenting/voting is open — an EVA can't change article state, so it doesn't need editor or assignee rights |
+| the merge `…-rec-….jsonl` | **admin / assignee** (unchanged) | merging is an ordinary edit; the existing REC rule already gates it |
+
+So: relax the existing rule to let a *verified* user create an `*-eva-*.jsonl`
+inside `articles/<slug>/` (no role/assignee check), while every `*-rec-*` and
+`*-ins-*` write keeps its current admin/editor+assignee gate. Anonymous (no
+Matrix account) feedback can ride the separate **Suggestion API**
+(`npj-api.n8n.json`, `propose` op) instead — same lifecycle, Data-Table storage.
+
 ## Optional: EO-notation formatting (client-side)
 
 If you want commits stored as EO events instead of raw content, `eo-event.client.js`

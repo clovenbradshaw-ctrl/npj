@@ -157,6 +157,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [armIdx, setArmIdx] = useState(0);
   const [srcQuery, setSrcQuery] = useState("");
   const [srcFindIdx, setSrcFindIdx] = useState(0);
+  const [browseQuery, setBrowseQuery] = useState("");   // search the whole registry to reuse a record
+  const [browseOpen, setBrowseOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [hop, setHop] = useState(null);            // Citey hops when a claim resolves
   const mainRef = useRef(null);
@@ -323,9 +325,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     }
     setModal({ sid }); setSelSid(sid);
     if (best) setSelSrc(best);
-    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0);
+    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery("");
   };
-  const closeCite = () => { setModal(null); setPending(null); setArmIdx(0); };
+  const closeCite = () => { setModal(null); setPending(null); setArmIdx(0); setBrowseQuery(""); };
 
   // Citey's scent: candidate passages in the armed source — navigation aids only,
   // never a one-click pin. Document order; the author grabs the words.
@@ -487,6 +489,57 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
             </button>
           );
         })}
+      </div>
+    );
+  };
+
+  // Reuse ANY existing record — searchable, never gated by the match threshold.
+  // The mechanical match still orders the list (best first), but every record in
+  // the registry is one click from attaching, so a citation you've already
+  // pinned never has to be hunted down in its source and re-grabbed.
+  const browseFor = (row, max) => {
+    const attached = row ? rowCites(row).map(x => x.c.id) : [];
+    const q = browseQuery.trim().toLowerCase();
+    return allC
+      .filter(c => attached.indexOf(c.id) < 0)
+      .filter(c => !q || String(c.quote || "").toLowerCase().indexOf(q) >= 0 || srcShort(c.srcKey).toLowerCase().indexOf(q) >= 0)
+      .map(c => ({ c, score: row ? matchScore(row.text, c.quote) : 0 }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, max || 80);
+  };
+  const AttachBrowser = ({ row, compact }) => {
+    const items = browseFor(row, compact ? 40 : 80);
+    const totalOther = allC.filter(c => !row || rowCites(row).map(x => x.c.id).indexOf(c.id) < 0).length;
+    return (
+      <div>
+        <input value={browseQuery} onChange={e => setBrowseQuery(e.target.value)} autoFocus={!compact}
+          placeholder={"Search " + totalOther + " citation record" + (totalOther === 1 ? "" : "s") + " by quote or source…"} className="np-mono"
+          style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 11.5, padding: "6px 8px", outline: "none", marginBottom: 7 }} />
+        {items.length === 0
+          ? <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5 }}>{totalOther === 0 ? "No other records yet — grab a span in a source below to mint the first." : "No record matches — clear the search, or grab the span in the source below."}</div>
+          : (
+            <div className="np-scroll" style={{ display: "flex", flexDirection: "column", gap: 5, maxHeight: compact ? 200 : 280, overflowY: "auto", paddingRight: 2 }}>
+              {items.map(({ c, score }) => {
+                const u = api.usageCount(c.id);
+                const strong = score >= 0.3;
+                return (
+                  <div key={c.id} style={{ display: "flex", alignItems: "stretch", gap: 6, border: "1px solid " + NR.line, background: NR.field, borderRadius: 7, overflow: "hidden" }}>
+                    <button onClick={() => row && attachExisting(row, c.id)} disabled={!row} title={row ? "Attach this record to the sentence" : "Open a sentence to attach"}
+                      style={{ flex: 1, minWidth: 0, textAlign: "left", border: 0, background: "none", color: NR.text, cursor: row ? "pointer" : "default", padding: "6px 8px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
+                      <span className="np-mono" style={{ display: "block", fontSize: 9, color: strong ? "#1f8a55" : NR.muted, marginBottom: 1 }}>
+                        {(row ? "⊕ ATTACH · " : "") + clip(srcShort(c.srcKey), 26).toUpperCase() + (u ? " · USED ×" + u : " · UNUSED") + (strong ? " · STRONG MATCH" : "")}
+                      </span>
+                      {"“" + clip(c.quote, 96) + "”"}
+                    </button>
+                    {c.srcKey && (
+                      <button onClick={() => { setSelCid(c.id); pickSource(c.srcKey); }} title="See this quote in its source"
+                        style={{ flexShrink: 0, border: 0, borderLeft: "1px solid " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--mono)", fontSize: 11, padding: "0 9px" }}>↗</button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
       </div>
     );
   };
@@ -902,6 +955,12 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
             <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Best matches in the registry</div>
             <div style={{ marginBottom: 9 }}><AttachCands row={selRow.row} st={selRow.st} max={3} /></div>
           </React.Fragment>)}
+          {(selRow.st.key === "needs" || selRow.st.key === "conflict") && allC.length > 0 && (<React.Fragment>
+            <button onClick={() => setBrowseOpen(o => !o)} className="np-cond" style={chipBtn({ marginBottom: browseOpen ? 7 : 9, fontWeight: 700, borderColor: "#1f8a55", color: "#1f8a55" })}>
+              {browseOpen ? "▾ Hide registry" : "⊕ Reuse an existing citation"}
+            </button>
+            {browseOpen && <div style={{ marginBottom: 9 }}><AttachBrowser row={selRow.row} compact /></div>}
+          </React.Fragment>)}
           {selRow.st.key !== "owned" && srcList.length > 0 && (<React.Fragment>
             <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Find support in a source</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 9 }}>
@@ -1060,11 +1119,11 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <button onClick={closeCite} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
         <div className="np-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px" }}>
-          {candidatesFor(armedRow, statusOf(armedRow), 3).length > 0 && (<React.Fragment>
-            <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>Already in the registry — reuse the record</div>
-            <div style={{ marginBottom: 12 }}><AttachCands row={armedRow} st={statusOf(armedRow)} max={3} /></div>
+          {allC.length > 0 && (<React.Fragment>
+            <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>Reuse a citation you've already pinned — search the registry, best matches first</div>
+            <div style={{ marginBottom: 14 }}><AttachBrowser row={armedRow} /></div>
           </React.Fragment>)}
-          <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>…or go into a source and grab the spans that support it</div>
+          <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>{allC.length > 0 ? "…or grab fresh words from a source" : "Go into a source and grab the spans that support it"}</div>
           {srcList.length === 0
             ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources ingested yet — add one in the rail (Prose view), then come back.</div>
             : (<React.Fragment>
