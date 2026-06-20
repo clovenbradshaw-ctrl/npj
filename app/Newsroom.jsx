@@ -39,7 +39,7 @@ const START_DOC =
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
-  const { layout, me } = React.useContext(window.LayoutCtx);
+  const { layout, me, isAdmin } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
@@ -64,6 +64,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(false); // an unpublish in flight
+  const [statusErr, setStatusErr] = useState(null);
   const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
   const [dek, setDek] = useState("");                // explicit Subtitle field (mirrors .nr-dek)
   const [fileSlug, setFileSlug] = useState("");      // custom filename; "" = derived from the title
@@ -817,6 +819,35 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const liveMeta = (window.NpjArticles && window.NpjArticles.publishedMeta)
     ? window.NpjArticles.publishedMeta(fileSlug || slugify(title)) : null;
   const isRepublish = !!liveMeta;
+  const isLive = isRepublish && liveMeta.status !== "unpublished";
+
+  // admin: take an already-live piece off the site. A status-only REC (no
+  // content recommit, nothing deleted) — the draft stays here, and "Republish"
+  // pushes it back live anytime. Mirrors the reader/Documents unpublish path.
+  const unpublish = async () => {
+    const slug = fileSlug || slugify(title);
+    if (!slug) return;
+    setStatusErr(null);
+    const token = window.MatrixAuth && window.MatrixAuth.token();
+    if (!token) { setStatusErr("Sign in with Matrix to unpublish — the webhook re-verifies the token server-side."); return; }
+    if (!window.confirm("Unpublish “" + (title || slug) + "”?\n\nIt comes off the site for everyone but admins. Every version stays in GitHub — Republish brings it back anytime.")) return;
+    setStatusBusy(true);
+    try {
+      const actor = (session && session.user_id) || me || ((window.MatrixAuth.current() || {}).user_id) || null;
+      const out = await window.NpjArticles.setArticleStatus({ slug, status: "unpublished", actor, token });
+      if (!out.res.ok) {
+        setStatusErr("Rejected (HTTP " + out.res.status + ")" + ((out.res.status === 401 || out.res.status === 403) ? " — that Matrix account isn't authorized to manage publication." : " — nothing changed."));
+      } else {
+        // refresh the front index, then force this slug's new status in (the
+        // git-tree listing lags a fresh commit) and re-render so the button flips
+        const reflect = () => { window.NpjArticles.patchFrontStatus(slug, "unpublished"); setRev(r => r + 1); };
+        window.NpjArticles.loadFront().then(reflect).catch(reflect);
+      }
+    } catch (e) {
+      setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
+    }
+    setStatusBusy(false);
+  };
 
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
@@ -892,7 +923,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <div style={{ display: "flex" }}>
           {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
-        <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
+        {statusErr && <span className="np-mono" title={statusErr} style={{ fontSize: 10.5, color: NR.warn, maxWidth: 240, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{statusErr}</span>}
+        {isRepublish && !isLive && <span className="np-mono" title="This piece is currently off the site — Republish brings it back live." style={{ fontSize: 10, color: NR.warn, border: "1px solid " + NR.warn, padding: "2px 7px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ fontFamily: "var(--mono)" }}>⊘</span> Off the site</span>}
+        {isAdmin && isLive && (
+          <button onClick={unpublish} disabled={statusBusy} title="Unpublish — take this off the site for everyone but admins (the event log stays in GitHub)" className="np-cond" style={{ background: "transparent", color: NR.warn, border: "1.5px solid " + NR.warn, padding: "7px 14px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: statusBusy ? "wait" : "pointer", opacity: statusBusy ? .6 : 1 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
+          </button>
+        )}
+        <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? (isLive ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Republish — this piece is off the site; committing pushes the draft and brings it back live") : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> {isRepublish ? "Republish" : "Publish"}
         </button>
         </div>{/* end RIGHT zone */}
