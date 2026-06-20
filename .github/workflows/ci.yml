@@ -1,0 +1,24 @@
+name: CI
+
+# The app itself is no-build (in-browser Babel). This workflow guards the one
+# thing that needs guarding: the editing-only post-structure layer. It folds and
+# flattens the engine against the spec's invariants, and runs the leakage gate
+# that asserts no .structure/ artifact ever reaches the public record (I1, §8).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Structure engine tests (invariants I1–I4)
+        run: node --test tests/*.test.js
+      - name: Leakage gate (no structure in the public record)
+        run: node tests/leakage-gate.mjs
