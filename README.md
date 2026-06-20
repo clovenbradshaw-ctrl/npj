@@ -17,9 +17,11 @@ founding admin curates the site and grows the network from there.
 | `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
 | `app/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
 | `app/data.js` | content layer — **framework only**, seeded empty |
-| `app/layout.jsx` | the editable site chrome + the permission model + the public **contributor profiles** map |
+| `app/layout.jsx` | the editable site chrome, the **front-page lineup** model (slug ordering + layout templates), the permission model, and the public **contributor profiles** map |
 | `app/profiles.js` | contributor profiles — the byline **name + ≤250-char "About me"**, saved to the contributor's Matrix account (pulled from their account info) and folded into the public layout |
 | `app/Contributors.jsx` | the public **masthead** — every contributor with their role and About me |
+| `app/FrontPage.jsx` | the masthead + front page — renders each piece through the admin's chosen layout template (`FrontCard`) |
+| `app/AdminEditor.jsx` | the admin **Edit layout** panel — section nav, taglines, brand, roles, contributor profiles, and the front-page lineup editor |
 | `app/matrix-auth.js` | real Matrix client-server auth, roles, profile & room recovery |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
@@ -76,6 +78,35 @@ unpublished piece drops off the front page, the Documents list and the reader
 for everyone **except admins**, who keep seeing it badged and can
 **Republish** it (another `REC` with `status:"published"`) at any time. Nothing
 is ever truly removed; the site just stops serving it.
+
+### Front-page lineup — hotswap positions, pick layout templates
+
+The front page is a centered **2/3-width** column on desktop (full-width on
+phones): the most recent piece runs **one-up** (full-width cover), the next
+three sit **3-across**, and everything else flows into a single **vertical
+feed**. By default that order is newest-first; the admin can override it from
+**Edit layout → Front page lineup** without touching any article:
+
+- **Hotswap positions.** Reorder the lineup (↑/↓) to choose which piece is the
+  **cover**, which fill the **3-across row**, and which fall into the **feed**.
+  The order is stored as a list of slugs in `front.order`; clear it to fall back
+  to newest-first. Newly published pieces flow in after the pinned ones.
+- **Layout templates.** Pick a whole-page template (`front.template`:
+  *standard / grid / river / posters*) for the default arrangement, then
+  override any single card (`front.cards[slug]`). Each template moves the
+  **photo, title and subtitle** into a different arrangement — *photo below
+  text, photo on top, photo left/right, title over photo,* or *text only* —
+  and the public page renders the exact same `FrontCard`, so what the admin
+  picks is what ships.
+- **Standardized metadata.** The lineup editor checks every piece against the
+  shared metadata standard (`NpjArticles.META_STANDARD`: title, subtitle,
+  column, photo, date — plus recommended tags & byline) and badges what's
+  missing, so each card has the fields its template needs to render
+  consistently.
+
+All of it is curated live, saved locally, and committed into `site/layout.json`
+(`front`) through the same admin-gated publish webhook as the rest of the
+chrome.
 
 ## Reader feedback, considered for merge (the PR idea, not the PR UX)
 
