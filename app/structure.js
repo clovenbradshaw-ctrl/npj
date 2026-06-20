@@ -335,6 +335,79 @@
     return { id: "usr-" + makeId("type"), name: name || "My structure", description: "", slots: slots, builtin: false };
   }
 
+  /* ---------------- DOM bridge (browser/jsdom only; never touched in pure folds) ----------------
+   * The editor's contenteditable is the source of truth for prose. These two
+   * functions keep the structure log and the document in step, and are unit
+   * tested against a DOM so the section-span surgery can't scramble an article:
+   *   · collect  — read each section's span (its heading + the blocks beneath it,
+   *                up to the next heading) from a root element, in document order;
+   *   · reflow   — reorder those spans to match a flattened id order so WYSIWYG ===
+   *                what publishes (lead nodes — banner, title, dek, intro — stay);
+   *   · reconcile— DOM → events: every heading becomes a Section (stable identity
+   *                via data-sec, so renames/reorders keep their slot), new ones are
+   *                born just after the section above them inheriting its slot, and
+   *                a vanished heading drops its annotation (I3). Pure of side
+   *                effects except stamping data-sec on brand-new headings. */
+  function isHeadingTag(tag) { return /^H[1-6]$/.test(tag || ""); }
+  function domCollect(root) {
+    var spans = {}, order = [], cur = null;
+    Array.prototype.slice.call(root.children || []).forEach(function (node) {
+      var heading = isHeadingTag(node.tagName);
+      var sec = heading && node.getAttribute ? node.getAttribute("data-sec") : null;
+      if (heading && sec) { cur = sec; spans[sec] = [node]; order.push(sec); }
+      else if (heading) { cur = null; }          // title / unstamped heading closes a section
+      else if (cur) { spans[cur].push(node); }    // a body block of the current section
+    });
+    return { spans: spans, order: order };
+  }
+  function domReflow(root, orderedIds) {
+    if (!root || !orderedIds) return false;
+    var c = domCollect(root), spans = c.spans, domOrder = c.order;
+    var target = orderedIds.filter(function (id) { return spans[id]; });
+    domOrder.forEach(function (id) { if (target.indexOf(id) < 0) target.push(id); }); // defensive
+    if (target.length === domOrder.length && target.every(function (id, i) { return id === domOrder[i]; })) return false;
+    target.forEach(function (id) { spans[id].forEach(function (n) { root.appendChild(n); }); });
+    return true;
+  }
+  function domReconcile(root, log, opts) {
+    opts = opts || {};
+    var slugFor = opts.slugFor || function (h) { return h.id; };
+    var work = fold(log), evs = [], seen = {}, prevId = null;
+    var headings = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll("h2,h3")) : [];
+    headings.forEach(function (h) {
+      var text = ((h.innerText != null ? h.innerText : h.textContent) || "").trim();
+      if (!text) return;
+      var slug = slugFor(h) || ("s-" + text.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, ""));
+      var secId = h.getAttribute ? h.getAttribute("data-sec") : null;
+      var sec = secId ? sectionById(work, secId) : null;
+      if (sec && seen[sec.id]) sec = null;        // duplicate data-sec (copy/paste) → treat as new
+      if (sec) {
+        seen[sec.id] = true;
+        var local = [];
+        if (sec.heading !== text) local.push({ t: "section.set_heading", id: sec.id, heading: text });
+        if (!sec.body || sec.body.headingSlug !== slug) local.push({ t: "section.set_body", id: sec.id, body: { kind: "headingSpan", headingSlug: slug } });
+        if (local.length) { evs = evs.concat(local); work = fold(log.concat(evs)); }
+        prevId = sec.id;
+      } else {
+        var id = makeId("sec");
+        if (h.setAttribute) h.setAttribute("data-sec", id);
+        seen[id] = true;
+        var parent = null, at = 0;
+        if (prevId) {
+          var p = sectionById(work, prevId);
+          parent = p ? p.parentSlotId : null;
+          var group = parent == null ? topRefs(work).filter(function (r) { return r.kind === "section"; }).map(function (r) { return r.id; }) : childRefs(work, parent).map(function (x) { return x.id; });
+          var pi = group.indexOf(prevId); at = pi < 0 ? group.length : pi + 1;
+        }
+        evs.push({ t: "section.fromHeader", id: id, headingSlug: slug, heading: text, parentSlotId: parent, at: at });
+        work = fold(log.concat(evs));
+        prevId = id;
+      }
+    });
+    fold(log).sections.forEach(function (s) { if (!seen[s.id]) evs.push({ t: "section.delete", id: s.id }); });
+    return evs;
+  }
+
   /* ---------------- a cheap structural sanity check (used by tests/CI) ---------------- */
   function validate(state) {
     var errs = [];
@@ -399,6 +472,7 @@
     validate: validate,
     ops: ops,
     types: typeStore,
+    dom: { collect: domCollect, reflow: domReflow, reconcile: domReconcile },
     // low-level selectors (the editor reads these to render the rail)
     topRefs: topRefs, childRefs: childRefs, sectionById: sectionById, slotById: slotById, flatIndex: flatIndex
   };

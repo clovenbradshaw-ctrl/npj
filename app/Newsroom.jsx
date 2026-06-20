@@ -72,6 +72,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
   const [toc, setToc] = useState([]);
+  // ---- editing-only post structure (app/structure.js) ----
+  // the append-only event log is the source of truth; `structure` is its fold.
+  // Stamped onto headings as data-sec (stable identity across renames/reorders),
+  // persisted with the draft, NEVER published (stripped at build — Invariant I1).
+  const structLog = useRef([]);
+  const [structure, setStructure] = useState(() => (window.NpjStructure ? window.NpjStructure.emptyState(draftId) : null));
+  const [structTypes, setStructTypes] = useState(() => (window.NpjStructure ? window.NpjStructure.types.all() : []));
+  const [blankChosen, setBlankChosen] = useState(false);   // dismissed the start-a-post picker
+  const reconcileRef = useRef(null);
+  const reconcileTimer = useRef(null);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
   const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
   const [explorer, setExplorer] = useState(null);   // { key } — the source file explorer, open on a source
@@ -105,7 +115,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
     const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room });
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room, structure: structLog.current });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -119,6 +129,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // leaving the editor (sign-out, route change) with a save still in its
   // debounce window? write it now — those last keystrokes used to be lost
   useEffect(() => () => {
+    // flush a pending structure reconcile first, so the last heading is in the
+    // log before the final save, then write whatever's still in the debounce.
+    if (reconcileTimer.current) { clearTimeout(reconcileTimer.current); try { reconcileRef.current && reconcileRef.current(); } catch (e) {} }
     if (saveTimer.current) { clearTimeout(saveTimer.current); try { persistRef.current(); } catch (e) {} }
   }, []);
 
@@ -167,6 +180,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (Array.isArray(d.sources)) setSources(d.sources);
         if (Array.isArray(d.citeOrder)) { citeOrderRef.current = d.citeOrder; setCiteOrder(d.citeOrder); }
         if (d.room) setRoom(d.room);
+        // rehydrate the structure log; the post-restore scanHeadings reconciles
+        // it with the DOM (legacy drafts with no log fold to organic sections).
+        if (Array.isArray(d.structure) && window.NpjStructure) {
+          structLog.current = d.structure;
+          const s0 = window.NpjStructure.fold(d.structure); s0.articleId = draftId; setStructure(s0);
+          if (d.structure.length) setBlankChosen(true);
+        }
         setTimeout(scanHeadings, 30); setRev(v => v + 1);
       }
       restored.current = true;
@@ -210,8 +230,60 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
     });
     setMedia(found);
+    // keep the structure layer in step with the headings — debounced, so a burst
+    // of typing coalesces into one reconcile instead of an event per keystroke.
+    clearTimeout(reconcileTimer.current);
+    reconcileTimer.current = setTimeout(() => { if (reconcileRef.current) reconcileRef.current(); }, 350);
   }, []);
   useEffect(() => { const t = setTimeout(scanHeadings, 60); return () => clearTimeout(t); }, [scanHeadings]);
+
+  // ---- structure layer: DOM ⇄ log reconcile, fold, reflow ----
+  // refold the append-only log into the live PostStructure.
+  const refoldStruct = useCallback(() => {
+    if (!window.NpjStructure) return null;
+    const s = window.NpjStructure.fold(structLog.current); s.articleId = draftId; setStructure(s); return s;
+  }, [draftId]);
+
+  // reorder the document's section-spans to match the structure's flattened
+  // order so WYSIWYG === what publishes (lead nodes — banner, title, dek, intro —
+  // stay put). Only fires on explicit structural reorders, never mid-typing, so
+  // it can't fight the caret. Moving an <image-slot> figure is safe: it reloads
+  // its image by id. The span surgery itself lives in (and is tested in) the
+  // engine's dom bridge.
+  const reflowDOM = useCallback((orderedIds) => {
+    if (!window.NpjStructure || !ed.current) return;
+    if (window.NpjStructure.dom.reflow(ed.current, orderedIds)) setTimeout(() => { scanHeadings(); scheduleSave(); }, 0);
+  }, [scanHeadings, scheduleSave]);
+
+  // append events, refold, optionally reflow the document, persist.
+  const dispatchStruct = useCallback((events, opts) => {
+    if (!window.NpjStructure || !events || !events.length) return;
+    structLog.current = structLog.current.concat(events);
+    const s = refoldStruct();
+    if (opts && opts.reflow && s) reflowDOM(window.NpjStructure.flattenIds(s));
+    scheduleSave();
+  }, [refoldStruct, reflowDOM, scheduleSave]);
+
+  // DOM → log: keep the structure in step with the headings the author writes.
+  // scanHeadings has already stamped each heading's slug onto h.id, so the engine
+  // reads that as the binding slug. Emits nothing when nothing changed.
+  const reconcileStructure = () => {
+    const lib = window.NpjStructure, root = ed.current;
+    if (!lib || !root) return;
+    const evs = lib.dom.reconcile(root, structLog.current, { slugFor: h => h.id });
+    if (!evs.length) return;
+    structLog.current = structLog.current.concat(evs);
+    refoldStruct();
+    scheduleSave();
+  };
+  useEffect(() => { reconcileRef.current = reconcileStructure; });
+
+  // pull the author's saved post types in (localStorage + Matrix mirror).
+  useEffect(() => {
+    if (!window.NpjStructure) return;
+    setStructTypes(window.NpjStructure.types.all());
+    Promise.resolve(window.NpjStructure.types.sync()).then(() => setStructTypes(window.NpjStructure.types.all())).catch(() => {});
+  }, [session]);
 
   // ---- explicit Title / Subtitle fields ----
   // The fields are the source of truth; each writes through to the hidden body
@@ -245,6 +317,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const cr = cont.getBoundingClientRect(), er = el.getBoundingClientRect();
     cont.scrollTop += (er.top - cr.top) - 18;
   };
+
+  // the api the structure rail (app/PostStructure.jsx) drives. Every mutation
+  // goes through dispatchStruct → append-only log → fold → (reflow) → persist.
+  const structApi = useMemo(() => {
+    const lib = window.NpjStructure; if (!lib) return null;
+    const appliedType = (structure && structure.appliedTypeId)
+      ? (structTypes.find(t => t.id === structure.appliedTypeId) || lib.types.get(structure.appliedTypeId)) : null;
+    return {
+      state: structure, types: structTypes, appliedType,
+      hasContent: blankChosen || toc.length > 0 || !!(structure && structure.sections.length),
+      applyType: (typeId) => { const t = lib.types.get(typeId); if (t) { setBlankChosen(true); dispatchStruct(lib.ops.applyType(structure, t), { reflow: true }); } },
+      startBlank: () => { setBlankChosen(true); if (ed.current) ed.current.focus(); },
+      removeType: () => dispatchStruct(lib.ops.removeType(), { reflow: true }),
+      saveType: (name) => { const t = lib.saveFrom(structure, name); lib.types.save(t); setStructTypes(lib.types.all()); dispatchStruct(lib.ops.saveType(structure, t.id)); },
+      addSlot: (slotId) => { const sl = lib.slotById(structure, slotId); if (sl) dispatchStruct(lib.ops.addSlot(structure, sl)); },
+      moveSection: (id, parent, order) => dispatchStruct(lib.ops.moveSection(id, parent, order), { reflow: true }),
+      moveBulk: (ids, parent, order) => dispatchStruct(lib.ops.moveBulk(ids, parent, order), { reflow: true }),
+      reorderSlot: (id, order) => dispatchStruct(lib.ops.reorderSlot(id, order), { reflow: true }),
+      deleteSection: (id) => dispatchStruct(lib.ops.deleteSection(id)),
+      jumpTo: (slug) => { if (isMobile) setMTab("write"); setTimeout(() => scrollToId(slug), isMobile ? 30 : 0); }
+    };
+  }, [structure, structTypes, blankChosen, toc.length, dispatchStruct, isMobile]);
+
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
     if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); return; }
@@ -1033,10 +1128,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* contents / jumplinks */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
           <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
-          {toc.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>}
-          {toc.map(h => (
-            <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>
-          ))}
+          {/* the structure rail IS the editor TOC: the top-level Item list — slots
+              (labeled containers showing their prompt when empty) + orphan
+              sections, draggable. Editing-only; none of it reaches a reader. */}
+          {structApi && window.StructureRail
+            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} />
+            : (toc.length === 0
+                ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>
+                : toc.map(h => <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>))}
           {/* media census — every image/embed in the piece; images open the viewer */}
           <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
             <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
