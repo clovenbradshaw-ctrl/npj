@@ -19,3 +19,6 @@ scraps/
 
 # dev-only deps (the app is no-build; Babel/React load from unpkg at runtime)
 node_modules/
+
+# editing-only post structure — never published, never built (spec §9, Invariant I1)
+.structure/
