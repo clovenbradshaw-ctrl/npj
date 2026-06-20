@@ -809,6 +809,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const popItem = { display: "flex", gap: 10, alignItems: "center", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "8px 6px", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, cursor: "pointer", whiteSpace: "nowrap" };
   const FB = ({ onClick, children, hot, title }) => <button title={title} aria-label={title} onMouseDown={e => e.preventDefault()} onClick={onClick} style={{ background: hot ? "var(--yellow)" : "transparent", color: hot ? "var(--ink)" : "#e3ddcc", border: 0, padding: "5px 9px", fontSize: 13, fontWeight: 700, fontFamily: "var(--cond)", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>{children}</button>;
 
+  // Is this draft's slug already in the committed record? If so the publish
+  // control is really a REPUBLISH — the label + gate copy adapt so the editor
+  // never claims "nothing has been published yet" about a piece that's already
+  // live. Reactive to the title/filename, so it tracks what would actually be
+  // committed.
+  const liveMeta = (window.NpjArticles && window.NpjArticles.publishedMeta)
+    ? window.NpjArticles.publishedMeta(fileSlug || slugify(title)) : null;
+  const isRepublish = !!liveMeta;
+
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
       {/* top bar */}
@@ -883,8 +892,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <div style={{ display: "flex" }}>
           {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
-        <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? "Publish" : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
-          <I.lock style={{ fontSize: 14 }} /> Publish
+        <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
+          <I.lock style={{ fontSize: 14 }} /> {isRepublish ? "Republish" : "Publish"}
         </button>
         </div>{/* end RIGHT zone */}
       </div>
@@ -1281,6 +1290,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const articleUrl = window.npjArticleUrl(slug);
   const editSlug = (v) => { setSlugVal(v); if (onSlug) { const s = slugify(v); onSlug(!s || s === auto ? "" : s); } };
 
+  // Already in the committed record? Then this gate is a REPUBLISH, not a first
+  // publish — the copy + step labels + confirm button adapt so it never claims
+  // "nothing has been published yet" about a piece that's already live. Reactive
+  // to the slug field, so renaming the doc to an existing slug flips the gate.
+  const liveMeta = (window.NpjArticles && window.NpjArticles.publishedMeta) ? window.NpjArticles.publishedMeta(slug) : null;
+  const isRepublish = !!liveMeta;
+  const liveUnpublished = isRepublish && liveMeta.status === "unpublished";
+
   // ---- byline: who the piece is credited to (outward-facing) ----
   // Authors default to you (pulled from your account/profile). Editors are an
   // optional separate "Edited by" credit. "Publish unsigned" ships with no author.
@@ -1324,7 +1341,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const [phase, setPhase] = useState("confirm");          // confirm | run
   const [outcome, setOutcome] = useState(null);           // null | {ok:true} | {ok:false,msg}
   const [steps, setSteps] = useState(() => ([
-    { code: "EVA", label: "Pull the finished piece", detail: "draft → EO event (INS — the genesis line)", state: "wait" },
+    { code: "EVA", label: isRepublish ? "Pull the updated piece" : "Pull the finished piece", detail: isRepublish ? "draft → EO event (INS — a new version; the fold restarts from it)" : "draft → EO event (INS — the genesis line)", state: "wait" },
     { code: "SEG", label: "Build: resolve & pin every bound span", detail: flight.spans + " bound span" + (flight.spans === 1 ? "" : "s") + " to check", state: "wait" },
     { code: "INS", label: "Sources archived on archive.org", detail: flight.srcTotal ? flight.archived + " of " + flight.srcTotal + " archived" : "no sources bound", state: "wait", sources: true },
     { code: "DEF", label: "Commit the EO event log to GitHub", detail: "→ clovenbradshaw-ctrl/npj · articles/" + slug + "/", state: "wait" },
@@ -1490,7 +1507,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // hold the payload (with any archive.org-frozen image srcs) AND the
     // generated version filename, so a retry re-POSTs the same bytes to the
     // same path instead of creating a second version file
-    payloadRef.current = { slug, line, token, message: "publish: " + slug, filename: window.NpjArticles.versionFilenameFor(slug, "ins") };
+    payloadRef.current = { slug, line, token, message: (isRepublish ? "republish: " : "publish: ") + slug, filename: window.NpjArticles.versionFilenameFor(slug, "ins") };
     upd(3, { detail: "→ clovenbradshaw-ctrl/npj · " + payloadRef.current.filename });
     await commit();
   };
@@ -1523,7 +1540,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       <div className="newsroom" style={{ width: 560, maxWidth: "100%", maxHeight: "calc(100vh - 48px)", overflowY: "auto", background: "var(--nr-field)", border: "1.5px solid var(--yellow)", boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>
         <div style={{ background: "var(--yellow)", color: "var(--ink)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 18 }}>⊛</span>
-          <span style={{ fontFamily: "var(--display)", fontSize: 21 }}>PUBLISH BOUNDARY</span>
+          <span style={{ fontFamily: "var(--display)", fontSize: 21 }}>{isRepublish ? "REPUBLISH BOUNDARY" : "PUBLISH BOUNDARY"}</span>
           <span style={{ flex: 1 }} />
           <span className="np-mono" style={{ fontSize: 11 }}>GitHub + archive.org</span>
         </div>
@@ -1531,7 +1548,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
         {phase === "confirm" && (
           <div style={{ padding: "20px 22px" }}>
             <div style={{ fontFamily: "var(--display)", fontSize: 24, color: NR.text, marginBottom: 4 }}>ONE LAST LOOK</div>
-            <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 12 }}>Nothing has been published yet. This is what goes out the moment you confirm — committed to the public repo and served on GitHub Pages.</div>
+            <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 12 }}>{
+              isRepublish
+                ? (liveUnpublished
+                    ? "This piece is in the record but unpublished. Confirming commits a new version to its event log and returns it to the site — every prior version stays in the public record."
+                    : "This piece is already live. Confirming commits an updated version to its event log — it replaces what's on the site the moment you confirm, and every prior version stays in the public record.")
+                : "Nothing has been published yet. This is what goes out the moment you confirm — committed to the public repo and served on GitHub Pages."
+            }</div>
             <Row k="Folder">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                 <input value={slugVal} onChange={e => editSlug(e.target.value)} placeholder={auto} title="Name the document anything — it doesn't have to match the headline" className="np-mono" spellCheck={false}
@@ -1577,7 +1600,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             {!blocked && groundWarn && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px", display: "flex", gap: 8 }}><span aria-hidden="true">⚠</span><span>{groundWarn}</span></div>}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
-              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: (blocked || shipUngrounded) ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : shipUngrounded ? NR.warn : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : shipUngrounded ? NR.warn : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> {shipUngrounded ? "Publish ungrounded" : "Publish it"}</button>
+              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: (blocked || shipUngrounded) ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : shipUngrounded ? NR.warn : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : shipUngrounded ? NR.warn : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> {shipUngrounded ? (isRepublish ? "Republish ungrounded" : "Publish ungrounded") : (isRepublish ? "Republish it" : "Publish it")}</button>
             </div>
           </div>
         )}
@@ -1609,7 +1632,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                 {outcome.ok
                   ? <React.Fragment>
                       <div style={{ fontFamily: "var(--display)", fontSize: 26, color: outcome.warn ? NR.warn : "var(--yellow)", marginBottom: 4 }}>{outcome.warn ? "COMMITTED — CHECK THE FILE" : "COMMITTED — GOING LIVE"}</div>
-                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || ("articles/" + slug + "/ is in clovenbradshaw-ctrl/npj — version 1 of the article's event log. Every future edit lands as another timestamped version file in that folder. The front page lists it and the link below opens the formatted reader.")}</div>
+                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || (isRepublish ? ("articles/" + slug + "/ has a new version in clovenbradshaw-ctrl/npj — every prior version stays in that folder. The front page reflects the update and the link below opens the formatted reader.") : ("articles/" + slug + "/ is in clovenbradshaw-ctrl/npj — version 1 of the article's event log. Every future edit lands as another timestamped version file in that folder. The front page lists it and the link below opens the formatted reader."))}</div>
                       {outcome.sha && <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, marginBottom: 16 }}>committed @ {outcome.sha.slice(0, 7)}</div>}
                       {!outcome.warn && (
                         <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>

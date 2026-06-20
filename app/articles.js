@@ -343,6 +343,22 @@
     if (Array.isArray(F.secondary)) F.secondary = F.secondary.map(fix);
   }
 
+  /* Is this slug already in the committed record? Scans the loaded front index
+     (loadFront fills it from listArticles, which lists every document folder —
+     published OR unpublished). Returns that document's meta if found, else
+     null, so the composer can tell a first publish from a republish/update of a
+     piece that's already live without another network round-trip. The meta
+     carries `status`, so a caller can also tell live ("published") from a piece
+     that exists but is currently hidden ("unpublished"). */
+  function publishedMeta(slug) {
+    const s = slugify(slug);
+    if (!s) return null;
+    const F = window.NPJ && window.NPJ.FRONT;
+    if (!F) return null;
+    const all = [].concat(F.lead ? [F.lead] : [], Array.isArray(F.secondary) ? F.secondary : []);
+    return all.find((a) => a && a.slug === s) || null;
+  }
+
   // Fetch + fold one article; its sources join the global ledger so hover
   // cards, the source rail and the methods footer all resolve.
   async function loadArticle(slug) {
@@ -731,7 +747,7 @@
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
-    listArticles, loadFront, patchFrontStatus, loadArticle,
+    listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
     genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
