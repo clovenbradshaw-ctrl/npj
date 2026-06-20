@@ -801,7 +801,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     } catch (e) { setRooms({ joined: [], drafts: [], error: e.message }); }
   };
 
-  const versions = [{ sha: "draft", ts: new Date().toISOString().slice(0, 10), author: (session && session.user_id) || me, message: "Current working draft", text: ed.current ? (ed.current.innerText || "") : "" }];
+  const versions = [{ sha: "draft", ts: new Date().toISOString().slice(0, 10), author: (session && session.user_id) || me, message: "Current working draft", headline: title || "", dek: dek || "", text: ed.current ? (ed.current.innerText || "") : "" }];
 
   const TB = ({ onClick, children, title }) => <button onMouseDown={e => e.preventDefault()} onClick={onClick} title={title} aria-label={title} className="np-cond" style={{ background: "transparent", border: 0, color: NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>{children}</button>;
   const Sep = () => <span style={{ width: 1, height: 18, background: NR.line, margin: "0 5px" }} />;

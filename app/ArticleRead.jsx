@@ -261,7 +261,7 @@ function ArticleRead(props) {
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
   const jump = (id) => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" }); };
-  const artVersions = A.versions && A.versions.length ? A.versions : [{ sha: A.base_sha || "v1", ts: A.published, author: (A.authors || [])[0], message: "Published", text: window.NPJ.articlePlainText() }];
+  const artVersions = A.versions && A.versions.length ? A.versions : [{ sha: A.base_sha || "v1", ts: A.published, author: (A.authors || [])[0], message: "Published", headline: A.headline || "", dek: A.dek || "", text: window.NPJ.articlePlainText() }];
 
   const showMarkers = audit;
   const openByClaim = {};
@@ -373,7 +373,7 @@ function ArticleRead(props) {
     const ts = new Date().toISOString();
     const updated = {
       ...A, status: next, updated: ts.slice(0, 10), base_sha: out.sha,
-      versions: [{ sha: out.sha, ts, author: me, message: next === "unpublished" ? "Unpublished" : "Republished", text: window.NPJ.articlePlainText() }, ...(A.versions || [])]
+      versions: [{ sha: out.sha, ts, author: me, message: next === "unpublished" ? "Unpublished" : "Republished", headline: A.headline || "", dek: A.dek || "", text: window.NPJ.articlePlainText() }, ...(A.versions || [])]
     };
     setStatusBusy(false);
     if (onEdited) onEdited(updated);
