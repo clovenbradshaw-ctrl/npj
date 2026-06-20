@@ -110,6 +110,40 @@ function VersionBadge({ sha, count, onClick, dark }) {
   );
 }
 
+/* ---- version byline ----
+   Each version stores its author's raw mxid, but we resolve it to the
+   contributor's PUBLIC display name at render time (window.npjPerson, fed by the
+   world-readable site/layout.json `contributors` map on GitHub). That means a
+   contributor who changes their display name once — Documents → "Your byline &
+   About me", committed to layout.json — re-credits every past version at once,
+   and the cramped full handle (@collective_boundary730383:hyphae.social) that
+   used to spill past the card's right edge is replaced by a short, wrapping name
+   (the full mxid stays available on hover). */
+function versionAuthorName(mxid) {
+  if (!mxid) return "—";
+  if (window.npjPerson) { const n = window.npjPerson(mxid).name; if (n) return n; }
+  return String(mxid).replace(/^@/, "").split(":")[0] || "—";
+}
+// compact, human timestamp — tolerates a full ISO instant or a date-only string
+function versionTime(ts) {
+  if (!ts) return "";
+  const s = String(ts).trim();
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const d = new Date(dateOnly ? s + "T00:00:00" : s);
+  if (isNaN(d.getTime())) return s;
+  return dateOnly
+    ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function VersionMeta({ v, size = 9.5 }) {
+  return (
+    <div style={{ marginTop: 2, minWidth: 0 }}>
+      <div className="np-mono" title={v.author || ""} style={{ fontSize: size, color: "var(--ink-soft)", overflowWrap: "anywhere" }}>{versionAuthorName(v.author)}</div>
+      {v.ts ? <div className="np-mono" style={{ fontSize: size, color: "var(--ink-soft)", opacity: .85, overflowWrap: "anywhere" }}>{versionTime(v.ts)}</div> : null}
+    </div>
+  );
+}
+
 /* ---- the history overlay: pick two versions, see the diff ---- */
 function VersionHistory({ versions, onClose }) {
   const list = (versions && versions.length) ? versions : [];
@@ -136,7 +170,7 @@ function VersionHistory({ versions, onClose }) {
           <div style={{ padding: "18px 22px 28px" }}>
             <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "11px 13px", marginBottom: 18 }}>
               <div className="np-mono" style={{ fontSize: 12, fontWeight: 600 }}>⊛ v.{vB.sha} · current</div>
-              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 3 }}>{vB.author || "—"} · {vB.ts || ""}</div>
+              <VersionMeta v={vB} size={10} />
               {vB.message && <div style={{ fontFamily: "var(--serif)", fontSize: 13, marginTop: 5, lineHeight: 1.4 }}>{vB.message}</div>}
             </div>
             <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 12 }}>
@@ -154,7 +188,7 @@ function VersionHistory({ versions, onClose }) {
               return (
                 <div key={v.sha + i} style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
                   <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>⊛ v.{v.sha}{i === 0 ? " · current" : ""}</div>
-                  <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 2 }}>{v.author || "—"} · {v.ts || ""}</div>
+                  <VersionMeta v={v} />
                   {v.message && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35 }}>{v.message}</div>}
                   <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
                     <button onClick={() => setA(i)} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isFrom ? "var(--ink)" : "transparent", color: isFrom ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>from</button>
