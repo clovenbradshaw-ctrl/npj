@@ -307,7 +307,7 @@ function App() {
       const ts = new Date().toISOString();
       const updated = { ...A, body: r.body, updated: ts.slice(0, 10), base_sha: r.sha,
         readMins: window.NpjArticles.readMins(r.body),
-        versions: [{ sha: r.sha, ts, author: me, message: r.note || "Merged a suggestion", text: window.NpjArticles.plainText(r.body) }, ...(A.versions || [])] };
+        versions: [{ sha: r.sha, ts, author: me, message: r.note || "Merged a suggestion", headline: A.headline || "", dek: A.dek || "", text: window.NpjArticles.plainText(r.body) }, ...(A.versions || [])] };
       window.NPJ.ARTICLE = updated; setArticleRev(rv => rv + 1);
       window.NpjArticles.loadFront().then(() => setFrontRev(rv => rv + 1)).catch(() => {});
     }

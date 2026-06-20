@@ -169,6 +169,7 @@
       versions.unshift({
         sha: lineSha(line), ts: ev.ts || "", author: ev.actor || "",
         message: ev.note || (ev.op === "INS" ? "Published" : "Edited"),
+        headline: state.headline || "", dek: state.dek || "",
         text: plainText(state.body)
       });
     });

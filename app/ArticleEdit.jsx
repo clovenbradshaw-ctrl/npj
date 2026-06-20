@@ -135,7 +135,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
       updated: ts.slice(0, 10),
       base_sha: out.sha,
       readMins: window.NpjArticles.readMins(blocks),
-      versions: [{ sha: out.sha, ts, author: me, message: note.trim() || "Edited", text: window.NpjArticles.plainText(blocks) }, ...(A.versions || [])]
+      versions: [{ sha: out.sha, ts, author: me, message: note.trim() || "Edited", headline: operand.headline != null ? operand.headline : (A.headline || ""), dek: operand.dek != null ? operand.dek : (A.dek || ""), text: window.NpjArticles.plainText(blocks) }, ...(A.versions || [])]
     };
     setBusy(false);
     onSaved(updated);

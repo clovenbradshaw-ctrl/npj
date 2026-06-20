@@ -3,7 +3,9 @@
 
    Versions come from the publish chain (each commit to GitHub is a version, keyed
    by short SHA). A version is:
-     { sha, ts, author, message, text }   // text = plaintext snapshot of the body
+     { sha, ts, author, message, headline, dek, text }  // text = body snapshot
+   The headline (title) and dek (subtitle) ride alongside the body so an edit to
+   either is visible in the diff — otherwise a retitle reads as "+0 / −0".
    The newest version is first. Until a piece has history, the list is just its
    current version. Diffs are word-level (LCS), rendered inline: additions are
    underlined green, deletions struck red. Mechanical, no model. */
@@ -40,23 +42,59 @@ function diffStats(parts) {
   return { add, del };
 }
 
-/* ---- inline diff renderer ---- */
+/* render a token-diff parts[] inline — additions underlined green, deletions struck red */
+function renderInline(parts) {
+  return parts.map((p, i) => p.type === "same"
+    ? <React.Fragment key={i}>{p.text}</React.Fragment>
+    : p.type === "add"
+      ? <ins key={i} style={{ textDecoration: "none", background: "color-mix(in srgb, var(--verified,#1f8a5b) 18%, transparent)", borderBottom: "2px solid var(--verified,#1f8a5b)" }}>{p.text}</ins>
+      : <del key={i} style={{ background: "color-mix(in srgb, var(--reject,#b23a26) 13%, transparent)", color: "var(--reject,#b23a26)", textDecorationThickness: "1.5px" }}>{p.text}</del>);
+}
+
+// a version snapshot is { headline, dek, text }; tolerate a bare body string too
+function snapFields(v) {
+  if (typeof v === "string") return { headline: "", dek: "", text: v };
+  v = v || {};
+  return { headline: v.headline || "", dek: v.dek || "", text: v.text || "" };
+}
+
+const titleStyle = { fontFamily: "var(--display)", fontSize: 22, lineHeight: 1.15, margin: 0, textWrap: "pretty" };
+const dekStyle = { fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 16, lineHeight: 1.4, margin: 0, color: "var(--ink-soft)", textWrap: "pretty" };
+const bodyStyle = { fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.7, margin: 0, textWrap: "pretty" };
+const ruleStyle = { borderTop: "1px solid var(--rule)", margin: "12px 0" };
+const FieldLabel = ({ children }) => <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 2 }}>{children}</div>;
+
+/* ---- inline diff renderer: title, then subtitle, then body ---- */
 function DiffView({ from, to }) {
-  const parts = React.useMemo(() => diffWords(from, to), [from, to]);
-  const { add, del } = diffStats(parts);
+  const A = snapFields(from), B = snapFields(to);
+  const head = React.useMemo(() => diffWords(A.headline, B.headline), [A.headline, B.headline]);
+  const dek = React.useMemo(() => diffWords(A.dek, B.dek), [A.dek, B.dek]);
+  const body = React.useMemo(() => diffWords(A.text, B.text), [A.text, B.text]);
+  const { add, del } = [head, dek, body].reduce((s, p) => { const d = diffStats(p); s.add += d.add; s.del += d.del; return s; }, { add: 0, del: 0 });
+  const hasHead = !!(A.headline || B.headline), hasDek = !!(A.dek || B.dek);
   return (
-    <div style={{ fontFamily: "var(--serif)" }}>
+    <div>
       <div className="np-mono" style={{ fontSize: 11, marginBottom: 10, display: "flex", gap: 12 }}>
         <span style={{ color: "var(--verified, #1f8a5b)" }}>+{add} added</span>
         <span style={{ color: "var(--reject, #b23a26)" }}>−{del} removed</span>
       </div>
-      <p style={{ fontSize: 16.5, lineHeight: 1.7, margin: 0, textWrap: "pretty" }}>
-        {parts.map((p, i) => p.type === "same"
-          ? <React.Fragment key={i}>{p.text}</React.Fragment>
-          : p.type === "add"
-            ? <ins key={i} style={{ textDecoration: "none", background: "color-mix(in srgb, var(--verified,#1f8a5b) 18%, transparent)", borderBottom: "2px solid var(--verified,#1f8a5b)" }}>{p.text}</ins>
-            : <del key={i} style={{ background: "color-mix(in srgb, var(--reject,#b23a26) 13%, transparent)", color: "var(--reject,#b23a26)", textDecorationThickness: "1.5px" }}>{p.text}</del>)}
-      </p>
+      {hasHead && <div style={{ marginBottom: 8 }}><FieldLabel>Title</FieldLabel><p style={titleStyle}>{renderInline(head)}</p></div>}
+      {hasDek && <div style={{ marginBottom: 8 }}><FieldLabel>Subtitle</FieldLabel><p style={dekStyle}>{renderInline(dek)}</p></div>}
+      {(hasHead || hasDek) && <div style={ruleStyle} />}
+      <p style={bodyStyle}>{renderInline(body)}</p>
+    </div>
+  );
+}
+
+/* a plain (non-diff) snapshot — used for a lone version or when "from" === "to" */
+function Snapshot({ v }) {
+  const f = snapFields(v);
+  return (
+    <div>
+      {f.headline && <p style={{ ...titleStyle, marginBottom: 6 }}>{f.headline}</p>}
+      {f.dek && <p style={{ ...dekStyle, marginBottom: 6 }}>{f.dek}</p>}
+      {(f.headline || f.dek) && <div style={ruleStyle} />}
+      <p style={bodyStyle}>{f.text}</p>
     </div>
   );
 }
@@ -104,7 +142,7 @@ function VersionHistory({ versions, onClose }) {
             <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 12 }}>
               First and only version — no edits since publishing. A diff appears once this piece is revised.
             </div>
-            <p style={{ fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.7, margin: 0, textWrap: "pretty" }}>{vB.text}</p>
+            <Snapshot v={vB} />
           </div>
         ) : (
         <div style={{ display: "grid", gridTemplateColumns: "232px 1fr", minHeight: 0 }}>
@@ -134,8 +172,8 @@ function VersionHistory({ versions, onClose }) {
               {a === b && <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>· same version — pick two to compare</span>}
             </div>
             {a === b
-              ? <p style={{ fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.7, margin: 0 }}>{vB.text}</p>
-              : <DiffView from={vA.text} to={vB.text} />}
+              ? <Snapshot v={vB} />
+              : <DiffView from={vA} to={vB} />}
           </div>
         </div>
         )}
