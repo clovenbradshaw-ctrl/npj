@@ -1281,6 +1281,18 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const articleUrl = window.npjArticleUrl(slug);
   const editSlug = (v) => { setSlugVal(v); if (onSlug) { const s = slugify(v); onSlug(!s || s === auto ? "" : s); } };
 
+  // ---- byline: who the piece is credited to (outward-facing) ----
+  // Authors default to you (pulled from your account/profile). Editors are an
+  // optional separate "Edited by" credit. "Publish unsigned" ships with no author.
+  const meMx = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || "";
+  const [unsigned, setUnsigned] = useState(false);
+  const [authorsInput, setAuthorsInput] = useState(meMx);
+  const [editorsInput, setEditorsInput] = useState("");
+  const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
+  const bylineAuthors = parseMx(authorsInput);
+  const bylineEditors = parseMx(editorsInput);
+  const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
+
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {
     const c = (getContent ? getContent() : null) || { html: "", title };
@@ -1444,7 +1456,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // existing file. Authority is re-verified server-side by the webhook.
     upd(3, { state: "active", detail: flight.mediaToFreeze ? ("moving " + flight.mediaToFreeze + " image" + (flight.mediaToFreeze === 1 ? "" : "s") + " to archive.org — this can take up to a minute each…") : ("→ clovenbradshaw-ctrl/npj · articles/" + slug + "/") });
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
-    const gen = window.NpjArticles.genesisFromContent(flight.content, { slug, headline: title, actor });
+    const gen = window.NpjArticles.genesisFromContent(flight.content, {
+      slug, headline: title, actor,
+      authors: bylineAuthors, editors: bylineEditors, byline: unsigned ? "Unsigned" : ""
+    });
     // move any media-store images onto archive.org (download + reupload, or the
     // Wayback fallback), then rebuild the genesis line from the mutated operand
     // so the committed body hotlinks archive.org — never the media store.
@@ -1530,6 +1545,30 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
+            {/* Byline — outward-facing credit. Defaults to you; editors optional; can be Unsigned. */}
+            <div style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
+              <span className="np-eyebrow" style={{ color: NR.muted, flex: "0 0 86px" }}>Byline</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5, color: NR.text }}>
+                  {unsigned || !bylineAuthors.length ? "Unsigned" : "By " + bylineAuthors.map(nameOfMx).join(", ")}
+                  {bylineEditors.length ? <span style={{ color: NR.muted }}>{"  ·  Edited by " + bylineEditors.map(nameOfMx).join(", ")}</span> : null}
+                </div>
+                {!unsigned && (
+                  <React.Fragment>
+                    <input value={authorsInput} onChange={e => setAuthorsInput(e.target.value)} placeholder="@you:server" className="np-mono" spellCheck={false}
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
+                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Authors · Matrix IDs, comma-separated. Defaults to you; the name comes from each contributor's profile.</div>
+                  </React.Fragment>
+                )}
+                <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:server  (optional)" className="np-mono" spellCheck={false}
+                  style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
+                <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Edited by · optional, shown as a separate credit line.</div>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, cursor: "pointer" }}>
+                  <input type="checkbox" checked={unsigned} onChange={e => setUnsigned(e.target.checked)} />
+                  <span className="np-mono" style={{ fontSize: 10.5, color: NR.text }}>Publish unsigned — no author credit</span>
+                </label>
+              </div>
+            </div>
             <Row k="Length">{flight.words} words</Row>
             <Row k="Sources">{flight.srcTotal ? flight.srcTotal + " bound · " + flight.archived + " archived" + (flight.srcTotal - flight.archived ? " · " + (flight.srcTotal - flight.archived) + " snapshot-only" : "") : "none"}</Row>
             <Row k="Spans">{flight.spans} cited span{flight.spans === 1 ? "" : "s"}{flight.missing.length ? " · " + flight.missing.length + " unresolved" : ""}{flight.unpinned ? " · " + flight.unpinned + " not pinned to source" : ""}</Row>

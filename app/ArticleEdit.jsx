@@ -19,6 +19,10 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const [dek, setDek] = useState(A.dek || "");
   const [note, setNote] = useState("");
   const [assignees, setAssignees] = useState((A.assignees || []).join(", "));
+  // byline — outward-facing credit, editable by anyone who can edit the piece
+  const [authorsInput, setAuthorsInput] = useState((A.authors || []).join(", "));
+  const [editorsInput, setEditorsInput] = useState((A.editors || []).join(", "));
+  const [unsigned, setUnsigned] = useState((A.byline || "").trim().toLowerCase() === "unsigned");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const bodyRef = useRef(null);
@@ -57,7 +61,9 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     sel.removeAllRanges();
   };
 
-  const parseAssignees = () => assignees.split(/[\s,]+/).map(s => s.trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
+  const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
+  const parseAssignees = () => parseMx(assignees);
+  const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
 
   const save = async () => {
     setErr(null);
@@ -101,6 +107,13 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     if (dek.trim() !== (A.dek || "")) operand.dek = dek.trim();
     const nextAssignees = parseAssignees();
     if (isAdmin && nextAssignees.join(",") !== (A.assignees || []).join(",")) operand.assignees = nextAssignees;
+    // byline diff — only the fields that actually changed ride the REC
+    const nextAuthors = unsigned ? [] : parseMx(authorsInput);
+    const nextEditors = parseMx(editorsInput);
+    const nextByline = unsigned ? "Unsigned" : "";
+    if (nextAuthors.join(",") !== (A.authors || []).join(",")) operand.authors = nextAuthors;
+    if (nextEditors.join(",") !== (A.editors || []).join(",")) operand.editors = nextEditors;
+    if (nextByline !== (A.byline || "")) operand.byline = nextByline;
 
     let out;
     try {
@@ -181,6 +194,25 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             dangerouslySetInnerHTML={{ __html: seedHtml }}
             style={{ minHeight: 320, maxHeight: "46vh", overflowY: "auto", border: "1.5px solid var(--ink)", background: "var(--card)",
               padding: "16px 18px", fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.6, outline: "none" }} />
+
+          {/* Byline — outward-facing credit. Editable by anyone who can edit. */}
+          <div className="np-eyebrow" style={{ margin: "16px 0 6px" }}>Byline · how the piece is credited</div>
+          <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, marginBottom: 8 }}>
+            {unsigned || !parseMx(authorsInput).length ? "Unsigned" : "By " + parseMx(authorsInput).map(nameOfMx).join(", ")}
+            {parseMx(editorsInput).length ? <span style={{ color: "var(--ink-soft)" }}>{"  ·  Edited by " + parseMx(editorsInput).map(nameOfMx).join(", ")}</span> : null}
+          </div>
+          {!unsigned && (
+            <React.Fragment>
+              <input value={authorsInput} onChange={e => setAuthorsInput(e.target.value)} placeholder="@author:hyphae.social" className="np-mono" style={{ ...field, fontSize: 12.5 }} />
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 8px" }}>Authors · comma-separated Matrix IDs. Names come from each contributor's profile.</div>
+            </React.Fragment>
+          )}
+          <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:hyphae.social  (optional)" className="np-mono" style={{ ...field, fontSize: 12.5 }} />
+          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 0" }}>Edited by · optional, shown as a separate credit line.</div>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 9, cursor: "pointer" }}>
+            <input type="checkbox" checked={unsigned} onChange={e => setUnsigned(e.target.checked)} />
+            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink)" }}>Unsigned — no author credit</span>
+          </label>
 
           {isAdmin && (
             <React.Fragment>

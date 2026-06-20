@@ -290,6 +290,21 @@
     } catch (e) { return []; }
   }
 
+  /* ---- public profile (displayname + avatar) ----
+     A Matrix profile is world-readable per the spec, so this resolves a byline
+     name for ANY mxid (not just the signed-in user) — the "pull from their
+     account info" path for contributor profiles. Unauthenticated-friendly:
+     falls back to the signed-in session's homeserver when no base is known. */
+  async function getProfile(mxidInput) {
+    const id = parseMxid(mxidInput);
+    if (!id) return null;
+    const base = session ? session.base_url : await discover(id.domain);
+    try {
+      const out = await api(base, "/_matrix/client/v3/profile/" + encodeURIComponent(id.mxid), { token: token() || undefined });
+      return { mxid: id.mxid, displayname: out.displayname || "", avatar_url: out.avatar_url || "" };
+    } catch (e) { return null; }
+  }
+
   // Per-account durable index (server-side, private, survives wipe).
   const DRAFTS_TYPE = "press.npj.drafts";
   async function getAccountData(type) {
@@ -337,7 +352,7 @@
 
   window.MatrixAuth = {
     ADMIN_MXID, CONTROL_ALIAS, APP_ROOM_TYPE, parseMxid, discover, login, logout, restore, current, token,
-    isSignedIn, isAdmin, resolveRoom, invite, tagRoom, ensureControlRoom, readPermissions, writePermissions,
+    isSignedIn, isAdmin, resolveRoom, invite, tagRoom, ensureControlRoom, readPermissions, writePermissions, getProfile,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, roomMembers, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange

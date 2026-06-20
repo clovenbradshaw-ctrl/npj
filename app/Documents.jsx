@@ -181,6 +181,109 @@ function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle, onOpen
   );
 }
 
+/* ---- self-service contributor profile (the byline) ----
+   Any signed-in contributor sets their public display name + a ≤250-char
+   "About me". The name defaults from their Matrix account. It saves durably to
+   their Matrix account (recovers after a wipe) and shows in their byline live.
+   An admin's save also commits it to the PUBLIC layout.json (the world-readable
+   store); a non-admin's save is durable on their account and goes public when an
+   admin next publishes the layout. */
+function ProfileCard({ session, me }) {
+  const ctx = React.useContext(window.LayoutCtx);
+  const { layout, setLayout, isAdmin } = ctx;
+  const BIO_MAX = (window.NpjProfiles && window.NpjProfiles.BIO_MAX) || 250;
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [bio, setBio] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [msg, setMsg] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!window.NpjProfiles) { setLoaded(true); return; }
+      const p = await window.NpjProfiles.loadMine(session, layout);
+      if (!alive) return;
+      setName(p.name || ""); setBio(p.bio || ""); setLoaded(true);
+    })();
+    return () => { alive = false; };
+  }, [me]);
+
+  const pullName = async () => {
+    if (!window.NpjProfiles) return;
+    setPulling(true);
+    const dn = await window.NpjProfiles.accountDisplayName(session);
+    setPulling(false);
+    if (dn) { setName(dn); setMsg({ ok: true, text: "Pulled your display name from your Matrix account." }); }
+    else setMsg({ ok: false, text: "Your Matrix account has no display name set — type one here." });
+  };
+
+  const save = async () => {
+    if (!window.NpjProfiles) return;
+    setBusy(true); setMsg(null);
+    const prof = { name: name.trim(), bio: bio.trim() };
+    const r = await window.NpjProfiles.saveMine(session, prof);
+    if (!r.ok) { setBusy(false); setMsg({ ok: false, text: r.error || "Couldn't save your profile." }); return; }
+    // reflect into the layout so the byline shows it live in this session
+    const nextLayout = window.NpjProfiles.intoLayout(layout, me, r.profile);
+    setLayout(nextLayout);
+    // an admin can commit it to the public store right now
+    if (isAdmin && window.NpjLayout && window.MatrixAuth) {
+      const token = window.MatrixAuth.token();
+      try {
+        await window.NpjLayout.publishLayout({ matrixToken: token, layout: nextLayout, author: me, message: "update contributor profile: " + me });
+        setMsg({ ok: true, text: "Saved and published to the site — your byline is live." });
+      } catch (e) {
+        setMsg({ ok: false, text: "Saved to your account, but the public publish failed: " + (e.message || "network error") + "." });
+      }
+    } else {
+      setMsg({ ok: true, text: "Saved to your Matrix account. It shows in your byline here now, and goes public when an admin next publishes the site layout." });
+    }
+    setBusy(false);
+  };
+
+  const field = { width: "100%", boxSizing: "border-box", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "8px 10px", fontFamily: "var(--serif)", fontSize: 14.5, outline: "none" };
+  const over = bio.length > BIO_MAX;
+
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper-2)", boxShadow: "4px 4px 0 rgba(22,20,13,.10)", marginBottom: 16 }}>
+      <button onClick={() => setOpen(o => !o)} style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, background: "none", border: 0, padding: "11px 14px", cursor: "pointer", textAlign: "left" }}>
+        <span aria-hidden="true" style={{ width: 24, height: 24, borderRadius: "50%", background: (window.npjPerson ? window.npjPerson(me).color : "#b23a26"), color: "#fff", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}>{((name || me || "?").replace(/^@/, "")[0] || "?").toUpperCase()}</span>
+        <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16 }}>Your byline &amp; About me</span>
+        <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>{loaded ? (bio ? "set" : "not set yet") : "…"}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontFamily: "var(--mono)", color: "var(--ink-soft)" }}>{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div style={{ padding: "4px 14px 16px", borderTop: "1px solid var(--rule)" }}>
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.55, margin: "10px 0 12px" }}>
+            This is how you appear on every story you're credited on. Public, world-readable. Stored on your Matrix account so it survives a browser wipe.
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Display name</div>
+            <span style={{ flex: 1 }} />
+            <button className="btn btn-sm btn-ghost" onClick={pullName} disabled={pulling} style={{ fontSize: 11 }}>{pulling ? "…" : "Pull from my Matrix account"}</button>
+          </div>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder={me ? me.replace(/^@/, "").split(":")[0] : "Your name"} style={field} />
+
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "13px 0 4px" }}>About me</div>
+          <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
+          <div className="np-mono" style={{ fontSize: 10, color: over ? "var(--reject)" : "var(--ink-soft)", marginTop: 4, textAlign: "right" }}>{bio.length} / {BIO_MAX}</div>
+
+          {msg && <div className="np-mono" style={{ fontSize: 11, lineHeight: 1.5, margin: "6px 0 0", color: msg.ok ? "var(--verified)" : "var(--reject)", border: "1px solid " + (msg.ok ? "var(--verified)" : "var(--reject)"), padding: "8px 10px" }}>{msg.text}</div>}
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={save} disabled={busy || over} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {busy ? "Saving…" : isAdmin ? "Save & publish" : "Save my profile"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onSignIn }) {
   const signedIn = !!session;
   const me = session && session.user_id;
@@ -426,6 +529,8 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                 </button>
               </div>
             </div>
+
+            <ProfileCard session={session} me={me} />
 
             {/* ---- the explorer, grouped by project ----
                  A project is a shared Matrix room: one set of invitees, any

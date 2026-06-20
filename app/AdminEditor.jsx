@@ -29,6 +29,7 @@ function AdminEditor() {
   const [newMember, setNewMember] = useState("");
   const [newRole, setNewRole] = useState("editor");
   const [expandCol, setExpandCol] = useState(null);
+  const [expandProfile, setExpandProfile] = useState(null); // mxid whose name/bio is open
 
   // Every hook stays ABOVE this guard. isAdmin flips false→true the moment the
   // admin signs in, so an early return placed before some of the hooks changes
@@ -45,6 +46,27 @@ function AdminEditor() {
   const setUtility = (utility) => patch({ utility });
   const setRoles = (roles) => patch({ roles });
   const setBrand = (brand) => patch({ brand: { ...(layout.brand || {}), ...brand } });
+  // contributor profiles (the public byline) — curated here, committed with the
+  // layout. Empty (no name and no bio) entries prune themselves.
+  const setContributor = (mx, p) => {
+    const c = { ...(layout.contributors || {}) };
+    const cur = c[mx] || {};
+    const next = { name: ((p.name != null ? p.name : cur.name) || "").trim(), bio: ((p.bio != null ? p.bio : cur.bio) || "").slice(0, 250) };
+    if (!next.name && !next.bio) delete c[mx]; else c[mx] = next;
+    patch({ contributors: c });
+  };
+  // Plain function (NOT a component) so the inputs keep focus across renders.
+  const renderProfileFields = (mx) => {
+    const cur = (layout.contributors || {})[mx] || {};
+    const fld = { width: "100%", boxSizing: "border-box", border: "1px solid " + AE.line, background: AE.field, color: AE.text, fontFamily: "var(--cond)", fontSize: 12.5, padding: "5px 7px", outline: "none" };
+    return (
+      <div style={{ margin: "5px 0 4px", paddingLeft: 8, borderLeft: "2px solid " + AE.line }}>
+        <input value={cur.name || ""} onChange={(e) => setContributor(mx, { name: e.target.value })} placeholder="Display name" style={{ ...fld, marginBottom: 5 }} />
+        <textarea value={cur.bio || ""} onChange={(e) => setContributor(mx, { bio: e.target.value.slice(0, 250) })} rows={2} placeholder="About me — ≤250 characters, shown on every byline" style={{ ...fld, resize: "vertical" }} />
+        <div className="np-mono" style={{ fontSize: 9, color: AE.soft, textAlign: "right", marginTop: 2 }}>{(cur.bio || "").length} / 250</div>
+      </div>
+    );
+  };
   const addRole = () => {
     const id = window.MatrixAuth.parseMxid(newMember);
     if (!id) { setPub({ state: "err", msg: "Contributor needs a full Matrix ID (@name:server)" }); return; }
@@ -231,19 +253,27 @@ function AdminEditor() {
 
             {/* Roles / contributors */}
             <Section label="Contributors &amp; permissions">
-              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>The network starts closed. <b style={{ color: AE.text }}>admin</b> can publish + manage roles; <b style={{ color: AE.text }}>editor</b> can draft &amp; edit. Authority flows from you — invite them to the project too.</div>
-              <div style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-                <span className="np-mono" style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: "#9fe0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{admin}</span>
-                <span className="np-mono" style={{ fontSize: 10, color: "#9fe0b8", border: "1px solid #2f5b45", padding: "2px 6px" }}>founder · admin</span>
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>The network starts closed. <b style={{ color: AE.text }}>admin</b> can publish + manage roles; <b style={{ color: AE.text }}>editor</b> can draft &amp; edit. Authority flows from you — invite them to the project too. <b style={{ color: AE.text }}>Profile</b> sets a contributor's public byline name + About me (committed with the layout).</div>
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  <span className="np-mono" style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: "#9fe0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{admin}</span>
+                  <button onClick={() => setExpandProfile(expandProfile === admin ? null : admin)} className="np-mono" style={{ background: "none", border: "1px solid " + AE.line, color: AE.soft, fontSize: 9.5, padding: "2px 6px", cursor: "pointer" }}>profile</button>
+                  <span className="np-mono" style={{ fontSize: 10, color: "#9fe0b8", border: "1px solid #2f5b45", padding: "2px 6px" }}>founder · admin</span>
+                </div>
+                {expandProfile === admin && renderProfileFields(admin)}
               </div>
               {Object.keys(layout.roles || {}).map((mx) => (
-                <div key={mx} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
-                  <span className="np-mono" style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: AE.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mx}</span>
-                  <select value={layout.roles[mx]} onChange={(e) => setRoles({ ...layout.roles, [mx]: e.target.value })}
-                    style={{ border: "1px solid " + AE.line, background: AE.field, color: AE.text, fontFamily: "var(--cond)", fontSize: 12, padding: "3px 5px" }}>
-                    <option value="editor">editor</option><option value="admin">admin</option>
-                  </select>
-                  <MiniBtn danger onClick={() => { const r = { ...layout.roles }; delete r[mx]; setRoles(r); }} title="Remove">×</MiniBtn>
+                <div key={mx} style={{ marginBottom: 6 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span className="np-mono" style={{ flex: 1, minWidth: 0, fontSize: 11.5, color: AE.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{mx}</span>
+                    <button onClick={() => setExpandProfile(expandProfile === mx ? null : mx)} className="np-mono" style={{ background: "none", border: "1px solid " + AE.line, color: AE.soft, fontSize: 9.5, padding: "2px 6px", cursor: "pointer" }}>profile</button>
+                    <select value={layout.roles[mx]} onChange={(e) => setRoles({ ...layout.roles, [mx]: e.target.value })}
+                      style={{ border: "1px solid " + AE.line, background: AE.field, color: AE.text, fontFamily: "var(--cond)", fontSize: 12, padding: "3px 5px" }}>
+                      <option value="editor">editor</option><option value="admin">admin</option>
+                    </select>
+                    <MiniBtn danger onClick={() => { const r = { ...layout.roles }; delete r[mx]; setRoles(r); }} title="Remove">×</MiniBtn>
+                  </div>
+                  {expandProfile === mx && renderProfileFields(mx)}
                 </div>
               ))}
               <div style={{ display: "flex", gap: 5, marginTop: 4 }}>

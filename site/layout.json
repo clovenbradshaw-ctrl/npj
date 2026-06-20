@@ -43,6 +43,7 @@
     "brand": {
       "accent": "#ffec01"
     },
-    "roles": {}
+    "roles": {},
+    "contributors": {}
   }
 }
