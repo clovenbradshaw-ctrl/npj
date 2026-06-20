@@ -195,6 +195,50 @@ inside `articles/<slug>/` (no role/assignee check), while every `*-rec-*` and
 Matrix account) feedback can ride the separate **Suggestion API**
 (`npj-api.n8n.json`, `propose` op) instead — same lifecycle, Data-Table storage.
 
+## Contributor profiles — the byline (name + "About me")
+
+Every story is bylined to its contributors, and each contributor has a public
+display **name** and a ≤250-char **About me**. Today these live in the
+world-readable `site/layout.json` under a `contributors` map:
+
+```json
+"contributors": {
+  "@reporter:hyphae.social": { "name": "Sam Reporter", "bio": "Covers housing and the courts." }
+}
+```
+
+- **Read** is a plain GitHub read — the app folds `layout.contributors` into the
+  byline at boot (no auth). The display name **defaults from the contributor's
+  Matrix account** (their homeserver displayname), so a new byline is right
+  without typing.
+- **Write today is admin-only.** A contributor edits their own profile in-app
+  (Documents → *Your byline & About me*); it saves durably to **their Matrix
+  account** (`press.npj.profile` account data) and shows in their byline live.
+  The **admin's** "Publish layout" commits everyone's profiles into the public
+  `site/layout.json` (the existing admin-only `site/layout.json` rule covers it —
+  no workflow change needed). An admin editing their *own* profile publishes it
+  straight away. This is the live default: **no public self-write yet.**
+
+### Ready-to-enable: self-service profiles direct to GitHub
+
+To let a **non-admin** contributor publish their own profile without waiting on
+an admin — same spirit as the open EVA-feedback rule — add ONE rule to the
+`Authorize` + `Build Content` nodes. A verified user may write **only their own**
+profile file, keyed by their mxid:
+
+| File written | Who | Notes |
+|---|---|---|
+| `site/contributors/<localpart>=<domain>.json` | **the whoami-verified owner only** | the path must encode the caller's own `user_id` (`@a:b` → `a=b.json`); body is `{ name, bio }`, bio clamped to 250 — a profile can't change article state or anyone else's entry, so it needs no role |
+
+So: relax the rule to let a verified user create/overwrite the single file whose
+name decodes back to their own `user_id` (reject any other path with **403**),
+while every `site/layout.json`, `*-ins-*` and `*-rec-*` write keeps its current
+gate. The app would then read `site/contributors/` (one git-tree call, like the
+front page) and fold those per-user files over the `layout.contributors` map.
+The client plumbing already exists (`app/profiles.js`: durable account-data
+save + a stable shape); flipping this on is purely the webhook rule above plus a
+directory read. **Not wired into the live flow yet** — documented so it's ready.
+
 ## Optional: EO-notation formatting (client-side)
 
 If you want commits stored as EO events instead of raw content, `eo-event.client.js`

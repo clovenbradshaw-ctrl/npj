@@ -75,6 +75,8 @@
 
 <!-- plain scripts: matrix auth, durable drafts -->
 <script src="app/matrix-auth.js"></script>
+<!-- contributor profiles (the byline): name + About me, local + Matrix account, pulled from account info -->
+<script src="app/profiles.js"></script>
 <!-- media store: uploads image-slot drops to the Matrix homeserver while drafting, frozen to archive.org at publish -->
 <script src="app/media-store.js"></script>
 <!-- source view: makes an uploaded source viewable + citable (kind detection,
@@ -129,6 +131,7 @@
 <script type="text/babel" src="app/GroundingWorkspace.jsx"></script>
 <script type="text/babel" src="app/Newsroom.jsx"></script>
 <script type="text/babel" src="app/Standards.jsx"></script>
+<script type="text/babel" src="app/Contributors.jsx"></script>
 <script type="text/babel" src="app/Submit.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
 <script type="text/babel" src="app/Documents.jsx"></script>
@@ -190,6 +193,11 @@ function App() {
   const role = window.roleOf(layout, session && session.user_id);
   const isAdmin = role === "admin";
   const isEditorRole = role === "admin" || role === "editor";
+  // Fold the committed contributor profiles (name + About me) into the people
+  // registry every render, so the byline, the Handle and the masthead always
+  // read the current published names/bios (idempotent — a plain merge into
+  // window.NPJ.PEOPLE, the same registry signIn already writes).
+  if (window.applyContributorsToPeople) window.applyContributorsToPeople(layout);
   // openArticle is a stable useCallback; read admin status through a ref so the
   // unpublished-article gate always sees the live role without re-creating the
   // callback (which the boot/deep-link effect depends on).
@@ -219,8 +227,16 @@ function App() {
     return () => { alive = false; };
   }, [session, setLayout]);
 
+  // hydrate MY durable profile from my Matrix account on sign-in, so my own
+  // byline reads right even before the layout is (re)published. Best-effort; it
+  // folds into window.NPJ.PEOPLE and the next render picks it up.
+  useEffect(() => {
+    if (!session || !window.NpjProfiles) return;
+    window.NpjProfiles.hydrateMine(session, window.loadLayout()).catch(() => {});
+  }, [session]);
+
   const hp = (location.hash.slice(1) || "").split(/[;,&]/).map(s => s.trim());
-  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs"].find(r => hp.includes(r)) || "home");
+  const [route, setRoute] = useState(["newsroom", "article", "standards", "submit", "explore", "docs", "contributors"].find(r => hp.includes(r)) || "home");
   // ---- the published record (versioned EO event logs under articles/) ----
   // frontRev repaints the front page once the committed line-up loads;
   // articleRev remounts the reader when an article is opened or edited.
@@ -385,6 +401,7 @@ function App() {
   const goStandards = () => { setRoute("standards"); window.scrollTo(0, 0); };
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
+  const goContributors = () => { setRoute("contributors"); window.scrollTo(0, 0); };
   const goDocs = () => { setRoute("docs"); window.scrollTo(0, 0); };
   const openDoc = (id) => {
     const did = id || "working";
@@ -396,7 +413,8 @@ function App() {
   const signIn = (sess) => {
     setSession(sess);
     if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
-      window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: "#b23a26" };
+      const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(sess.user_id) : "#b23a26";
+      window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: col };
     }
     // land in the workspace — Documents — not on a free-floating writing
     // surface (the old flow dropped you into an orphan post composer)
@@ -411,7 +429,7 @@ function App() {
     setSession(null);
   };
 
-  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, docs: goDocs,
+  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
   return (
@@ -438,6 +456,7 @@ function App() {
         ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
+      {route === "contributors" && <ContributorsPage onHome={goHome} onNewsroom={goNewsroom} />}
       {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} />}
       {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} />}
       {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
@@ -490,8 +509,12 @@ function App() {
       }
     } catch (e) {}
   }
+  // fold committed contributor profiles into the people registry before the
+  // first paint, so bylines/mastheads render with real names from the start
+  const bootLayout = window.__bootLayout || window.normalizeLayout(cached);
+  if (window.applyContributorsToPeople) window.applyContributorsToPeople(bootLayout);
   // brand vars before the first frame — effects re-apply these identically
-  const b = ((window.__bootLayout || window.normalizeLayout(cached)).brand) || {};
+  const b = (bootLayout.brand) || {};
   const r = document.documentElement.style;
   if (b.accent) { r.setProperty("--yellow", b.accent); r.setProperty("--yellow-deep", `color-mix(in srgb, ${b.accent} 78%, #000)`); }
   if (b.headline) r.setProperty("--display", `'${b.headline}', 'Arial Narrow', sans-serif`);

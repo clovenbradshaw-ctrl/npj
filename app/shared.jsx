@@ -130,9 +130,20 @@ function shortDate(iso) {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+/* ---------- contributor lookup ---------- */
+// One resolver for "who is this mxid" — name + bio + a stable color — folding the
+// committed contributor profiles (layout.json → window.NPJ.PEOPLE) with a sane
+// localpart fallback. Used by the handle, the byline and the masthead.
+function npjPerson(mxid) {
+  const p = (window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[mxid]) || {};
+  const color = p.color || (window.NpjProfiles ? window.NpjProfiles.colorFor(mxid) : "#6b6b6b");
+  const name = p.name || (mxid ? String(mxid).replace(/^@/, "").split(":")[0] : "");
+  return { mxid, name, bio: p.bio || "", color };
+}
+
 /* ---------- MXID handle ---------- */
 function Handle({ mxid, showName = false, size = 18 }) {
-  const p = (window.NPJ.PEOPLE[mxid]) || { name: mxid, trust: "open", color: "#6b6b6b" };
+  const p = npjPerson(mxid);
   const initial = (p.name || mxid).replace(/^@/, "").charAt(0).toUpperCase();
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
@@ -143,6 +154,84 @@ function Handle({ mxid, showName = false, size = 18 }) {
         {showName ? p.name : mxid}
       </span>
     </span>
+  );
+}
+
+/* ---------- byline ----------
+   The outward-facing credit under a headline. Reads authors + (optional) editors
+   off the article, resolves each to a public profile, and shows the name as a
+   chip that expands to the contributor's "About me". An explicit `byline` string
+   ("Unsigned") overrides the author names entirely. Editor names are optional —
+   the "Edited by" line only appears when there are editors. */
+function ContributorChip({ mxid, bold, onOpen, open }) {
+  const p = npjPerson(mxid);
+  const hasBio = !!(p.bio && p.bio.trim());
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+      <span aria-hidden="true" style={{ width: 22, height: 22, borderRadius: "50%", background: p.color, color: "#fff",
+        fontFamily: "var(--cond)", fontWeight: 700, fontSize: 12, display: "inline-flex", alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}>
+        {(p.name || "?").charAt(0).toUpperCase()}
+      </span>
+      {hasBio ? (
+        <button onClick={() => onOpen && onOpen(open ? null : mxid)} title={"About " + p.name}
+          aria-expanded={!!open}
+          style={{ background: "none", border: 0, padding: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: bold ? 700 : 600,
+            fontSize: 15, color: "var(--ink)", borderBottom: "1px dotted var(--ink-soft)", lineHeight: 1.2 }}>
+          {p.name}
+        </button>
+      ) : (
+        <span style={{ fontFamily: "var(--cond)", fontWeight: bold ? 700 : 600, fontSize: 15, color: "var(--ink)" }}>{p.name}</span>
+      )}
+    </span>
+  );
+}
+
+function NameList({ list, onOpen, openId }) {
+  return list.map((mx, i) => (
+    <React.Fragment key={mx}>
+      {i > 0 && <span style={{ color: "var(--ink-soft)" }}>{i === list.length - 1 ? " and " : ", "}</span>}
+      <ContributorChip mxid={mx} bold onOpen={onOpen} open={openId === mx} />
+    </React.Fragment>
+  ));
+}
+
+function Byline({ authors = [], editors = [], byline = "" }) {
+  const [openId, setOpenId] = useState(null);
+  const auth = (authors || []).filter(Boolean);
+  const eds = (editors || []).filter(Boolean);
+  const override = (byline || "").trim();
+  const openMx = openId;
+  const openP = openMx ? npjPerson(openMx) : null;
+  const goContributors = () => { if (window.__nav && window.__nav.contributors) window.__nav.contributors(); };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 11 }}>By</span>
+        {override
+          ? <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>{override}</span>
+          : auth.length
+            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><NameList list={auth} onOpen={setOpenId} openId={openId} /></span>
+            : <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Unsigned</span>}
+      </div>
+      {eds.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 11 }}>Edited by</span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><NameList list={eds} onOpen={setOpenId} openId={openId} /></span>
+        </div>
+      )}
+      {openP && openP.bio && (
+        <div className="fade-in" style={{ border: "1px solid var(--ink)", background: "var(--card)", padding: "9px 11px", maxWidth: 460 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+            <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14 }}>{openP.name}</span>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{openP.mxid}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => setOpenId(null)} aria-label="Close" style={{ background: "none", border: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 13, lineHeight: 1 }}><I.x /></button>
+          </div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)" }}>{openP.bio}</div>
+          <button onClick={goContributors} className="np-mono" style={{ marginTop: 7, background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 10.5, textDecoration: "underline", textUnderlineOffset: 2 }}>About the contributors →</button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -278,4 +367,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });

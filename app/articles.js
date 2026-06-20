@@ -111,7 +111,7 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "assignees", "published", "body", "status"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status"];
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -159,6 +159,10 @@
       dek: state.dek || "",
       tags: Array.isArray(state.tags) ? state.tags : [],
       authors: Array.isArray(state.authors) ? state.authors : [],
+      // editors credited in the byline (optional, separate from the authors line);
+      // byline is an optional override string ("Unsigned" suppresses author names)
+      editors: Array.isArray(state.editors) ? state.editors : [],
+      byline: typeof state.byline === "string" ? state.byline : "",
       assignees: Array.isArray(state.assignees) ? state.assignees : [],
       published: state.published || (versions.length ? String(versions[versions.length - 1].ts).slice(0, 10) : today()),
       updated: versions.length ? String(versions[0].ts).slice(0, 10) : null,
@@ -578,13 +582,21 @@
     const sources = {};
     Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = window.NPJ.SOURCES[k]; });
     const actor = o.actor || null;
+    const mxids = (arr) => (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
+    // Byline: authors default to the publisher; "Unsigned" is an explicit override
+    // that ships with NO credited author. Editors are an optional separate credit.
+    // Either way the ACTOR stays an assignee, so they can always edit after publish.
+    const unsigned = o.byline === "Unsigned" || o.unsigned === true;
+    const authors = o.authors != null ? mxids(o.authors) : (actor ? [actor] : []);
     const operand = {
       slug: o.slug || slugify(headline || o.headline) || "untitled",
       headline: headline || o.headline || "Untitled",
       dek: dek || o.dek || "",
       column: c.column || "",
       tags: Array.isArray(c.tags) ? c.tags : [],
-      authors: actor ? [actor] : [],
+      authors: unsigned ? [] : authors,
+      editors: mxids(o.editors),
+      byline: unsigned ? "Unsigned" : (typeof o.byline === "string" ? o.byline : ""),
       assignees: actor ? [actor] : [], // the publisher can edit after publish; admin always can
       published: today(),
       body: blocks,

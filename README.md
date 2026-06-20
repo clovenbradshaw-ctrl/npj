@@ -17,8 +17,10 @@ founding admin curates the site and grows the network from there.
 | `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
 | `app/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
 | `app/data.js` | content layer — **framework only**, seeded empty |
-| `app/layout.jsx` | the editable site chrome + the permission model |
-| `app/matrix-auth.js` | real Matrix client-server auth, roles & room recovery |
+| `app/layout.jsx` | the editable site chrome + the permission model + the public **contributor profiles** map |
+| `app/profiles.js` | contributor profiles — the byline **name + ≤250-char "About me"**, saved to the contributor's Matrix account (pulled from their account info) and folded into the public layout |
+| `app/Contributors.jsx` | the public **masthead** — every contributor with their role and About me |
+| `app/matrix-auth.js` | real Matrix client-server auth, roles, profile & room recovery |
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
@@ -117,6 +119,35 @@ can't lose it (GitHub + Matrix):
   only pays attention to tagged rooms — the rest of your Matrix account is
   ignored. Rooms are recovered from the homeserver on login (one filtered `/sync`
   + a per-account index), so switching or wiping a browser never loses your work.
+
+## Bylines & contributor profiles (the masthead)
+
+Every story carries an outward-facing **byline**, and every contributor has a
+public profile — a display **name** and a **≤250-character "About me."**
+
+- **Set the byline at the gate (and after).** The publish boundary has a byline
+  control: the authors (defaults to you), an optional **"Edited by"** credit, or
+  **Unsigned** (no author credit). The same control rides the edit-after-publish
+  overlay, so a byline can be changed on the record like any other field. Authors
+  and editors are stored on the article's EO event (`authors[]`, `editors[]`,
+  `byline`), so the credit is part of the permanent, auditable log.
+- **Names pull from the contributor's account.** A byline name defaults to the
+  contributor's **Matrix display name** (`app/profiles.js` → the profile API) —
+  the byline is right without anyone typing it. Editor names are optional; a
+  byline can be **Unsigned**.
+- **"About me" is the contributor's to set.** From **Documents → "Your byline &
+  About me,"** any signed-in contributor edits their name + a 250-char bio. It
+  saves to **their Matrix account** (`press.npj.profile`), so it survives a
+  browser wipe, and shows in their byline immediately.
+- **Stored publicly on GitHub, as a variable.** Profiles live in the
+  world-readable `site/layout.json` under a `contributors` map — the same public
+  file as roles and chrome. Every visitor reads names + bios straight from there
+  (folded into the byline, the expandable contributor card under each story, and
+  the **Contributors** masthead page). An admin curates/commits them with the
+  existing "Publish layout"; a non-admin's bio is durable on their account and
+  goes public on the next layout publish. The backend is **ready for direct
+  self-service** writes too (see [`backend/README.md`](backend/README.md) → the
+  per-contributor profile rule) — documented, not yet wired into the live flow.
 
 ## Submitting
 
