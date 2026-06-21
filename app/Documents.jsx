@@ -327,9 +327,20 @@ function ProfileCard({ session, me }) {
         });
         setMsg({ ok: true, text: "Saved and published to the site — your byline is live." });
       } catch (e) {
-        setMsg({ ok: false, text: e && e.transient
-          ? "Saved to your account, but the public push couldn't reach the site (" + (e.status || "network error") + ") after several tries. Your byline is safe here — press Save & publish to try again."
-          : "Saved to your account, but the public publish failed: " + (e.message || "network error") + "." });
+        let text;
+        if (e && e.transient) {
+          // A genuine gateway/network blip — the request never got a verdict.
+          text = "Saved to your account, but the public push couldn't reach the site (" + (e.status || "network error") + ") after several tries. Your byline is safe here — press Save & publish to try again.";
+        } else if (e && (e.gh_status === 401 || e.gh_status === 403)) {
+          // The webhook answered, but its GitHub access was rejected — the most
+          // common cause of a sudden every-publish failure (expired credential).
+          text = "Saved to your account, but the site publisher's GitHub access was rejected (" + e.gh_status + "), so the public push didn't land. Your byline is safe here — the publishing service's GitHub credential needs renewing, then press Save & publish.";
+        } else if (e && e.gh_status) {
+          text = "Saved to your account, but GitHub rejected the commit (" + e.gh_status + (e.error ? " — " + e.error : "") + "). Your byline is safe here — press Save & publish to try again.";
+        } else {
+          text = "Saved to your account, but the public publish failed: " + (e.message || "network error") + ".";
+        }
+        setMsg({ ok: false, text });
       }
     } else {
       setMsg({ ok: true, text: "Saved to your Matrix account. It shows in your byline here now, and goes public when an admin next publishes the site layout." });
