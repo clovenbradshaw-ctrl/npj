@@ -123,22 +123,34 @@ Setup in n8n (one-time):
 - Re-import `npj-publish.n8n.json` and **activate**. The media branch needs no
   GitHub cred (it only talks to the homeserver + archive.org).
 
-> ⚠️ **The committed `npj-publish.n8n.json` predates this media split** — it still
-> ships a single `media-npj` → archive.org branch. Re-export the workflow from the
-> live instance (or add the `MArc *` / `media-archive-npj` branch) so the committed
-> copy carries the publish-time migration the app now calls.
+> ✅ **The committed `npj-publish.n8n.json` now carries this branch.** It registers
+> both `site/media-npj` (draft upload → Matrix store) and `site/media-archive-npj`
+> (the `MArc *` publish-time migration the app calls), so the committed copy matches
+> the live instance. Re-import it and **activate** to deploy; the IA keys come from
+> the `IA_S3_ACCESS` / `IA_S3_SECRET` env vars above — the JSON references
+> `$env.IA_S3_*`, never a literal key (a committed workflow JSON is public).
 
 > ⚠️ The IA Put node uses n8n's HTTP Request binary-body mode
 > (`contentType: binaryData`). If your n8n version names that differently, fix it
 > once on the node, and confirm a test publish returns `{ ok:true, url }` from
 > `media-archive-npj` before relying on it.
 
-n8n workflow (`npj-publish.n8n.json`) — two webhooks that commit to
-`github.com/clovenbradshaw-ctrl/npj` (main). It commits whatever `contentRaw`
-it receives; everything stays plaintext and auditable.
+n8n workflow (`npj-publish.n8n.json`) — five POST webhooks, each its own branch
+off the same workflow. The publish + chain-head branches commit to
+`github.com/clovenbradshaw-ctrl/npj` (main), committing whatever `contentRaw`
+they receive (everything stays plaintext and auditable); the media + source
+branches move bytes to archive.org instead.
+
+| Webhook path | Branch | What it does |
+|---|---|---|
+| `site/publish-npj` | `Publish Webhook → … → GH Update / GH Create → Mirror? → Publish OK` | commit an article/layout/profile to GitHub, then mirror a snapshot to archive.org |
+| `site/media-npj` | `Media Webhook → … → Media OK` | draft-time image upload → Matrix media store, returns `{ ok, mxc }` |
+| `site/media-archive-npj` | `MArc Webhook → … → MArc OK` | publish-time migration: pull one image from Matrix by `mxc`, PUT to archive.org, return `{ ok, url }` |
+| `site/source-npj` | `Source Webhook → … → Source OK` | redaction-gated source-document upload → archive.org |
+| `chain-head-npj` | `Chain Head Webhook → … → Chain OK` | commit `chain_head.json` (static-token auth) |
 
 ```
-Publish Webhook → Whoami → Fetch Roles → Authorize → Authorized? → GH Get File → Build Content → Exists? → GH Update / GH Create → OK
+Publish Webhook → Whoami → Fetch Roles → Authorize → Authorized? → GH Get File → Build Content → Forbidden? → Exists? → GH Update / GH Create → Check GH Result → Mirror? → (Mirror to Archive.org) → Publish OK
 ```
 
 ## Span feedback rides the article's own folder (EVA deposits → merge as REC)

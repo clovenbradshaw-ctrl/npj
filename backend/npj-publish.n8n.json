@@ -2,6 +2,24 @@
   "nodes": [
     {
       "parameters": {
+        "httpMethod": "POST",
+        "path": "site/media-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a48e4849-c23a-447d-a234-ab8be576de2d",
+      "name": "Media Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        1504
+      ],
+      "webhookId": "site-media",
+      "notes": "DRAFT-TIME MEDIA UPLOAD\nPOST /webhook/site/media-npj\nAuthorization: Bearer <matrix token>\nBody: { filename, mimetype, contentBase64, title? }\nStores the image in the hyphae.social Matrix media repo and returns { ok, mxc, filename }.\nThe mxc:// uri is what the draft article references. Migration to archive.org happens at publish via site/media-archive-npj."
+    },
+    {
+      "parameters": {
         "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
         "sendHeaders": true,
         "headerParameters": {
@@ -20,16 +38,15 @@
           }
         }
       },
-      "id": "2db62639-7d5b-4343-8d56-4612123a6501",
-      "name": "Whoami",
+      "id": "c0cb1aed-12a1-4213-baef-883089916849",
+      "name": "Media Whoami",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1504,
-        1344
+        2240,
+        1504
       ],
-      "continueOnFail": true,
-      "notes": "Re-verifies the caller's Matrix token with the homeserver."
+      "continueOnFail": true
     },
     {
       "parameters": {
@@ -52,27 +69,61 @@
           }
         }
       },
-      "id": "224e8d11-9ca5-4666-a79f-14a2816138ce",
-      "name": "Fetch Roles",
+      "id": "7025fe06-30b2-49e1-b047-ae711ac8a759",
+      "name": "Media Fetch Roles",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -1280,
-        1344
+        2448,
+        1504
       ],
       "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "const FOUNDER = '@collective_boundary730383:hyphae.social';\n// a legacy single-file log, OR a timestamped version file inside the\n// document's folder (articles/<slug>/<stamp>-<op>-<tail>.jsonl) — every\n// publish/edit/unpublish now CREATES one of these; nothing is updated in place\nconst ARTICLE_RE = /^articles\\/[a-z0-9][a-z0-9-]*(\\.jsonl|\\/[A-Za-z0-9][A-Za-z0-9._-]*\\.jsonl)$/;\n\nconst hook = $('Publish Webhook1').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst mode = body && body.mode ? String(body.mode) : 'overwrite';\n\nconst who = $('Whoami').first().json || {};\nconst userIdRaw = who.user_id || null;\nconst userId = userIdRaw ? String(userIdRaw).trim() : null;\n\nlet roles = {};\ntry {\n  const raw = $('Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = parsed && (parsed.layout || parsed);\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\n\nconst isFounder = userId === FOUNDER;\nconst delegatedRole = userId ? (roles[userId] || null) : null;\nconst isAdmin = isFounder || delegatedRole === 'admin';\nconst role = isAdmin ? 'admin' : delegatedRole;\n\nconst isArticle = ARTICLE_RE.test(filename);\nconst modeOk = mode === 'append' || mode === 'overwrite';\nconst authorized = !!userId && !!filename && modeOk &&\n  (role === 'admin' || (role === 'editor' && isArticle));\n\nreturn [{ json: { authorized, user_id: userId, role, filename, mode, isArticle } }];"
+        "jsCode": "const who = $('Media Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Media Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\nreturn [{ json: { authorized, user_id: userId, role } }];"
       },
-      "id": "bbdddfae-d216-4378-82f8-3051e626b58a",
-      "name": "Authorize",
+      "id": "b3f90586-fb89-4269-84f7-6fc76dec9ffe",
+      "name": "Media Authorize",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -1056,
-        1344
+        2656,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-media-authz",
+              "leftValue": "={{ String($json.authorized === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3c5bf206-299a-44d5-a2dc-8ff3e5b51bd3",
+      "name": "Media Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        1504
       ]
     },
     {
@@ -91,13 +142,196 @@
           }
         }
       },
-      "id": "638c89bc-1b47-4401-a9d5-02096d709d32",
-      "name": "Respond Unauthorized",
+      "id": "d3cb1afb-be1f-4f43-b93e-5d7f8ff77d5b",
+      "name": "Respond Media Unauthorized",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        -608,
-        1584
+        3072,
+        1696
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode posted image into n8n binary, capture the caller's bearer token for the Matrix upload.\nconst hook = $('Media Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst auth = (hook.headers && (hook.headers.authorization || hook.headers.Authorization)) || '';\nconst filename = (String(body.filename || ('img-' + Date.now() + '.webp')).replace(/[^A-Za-z0-9._-]/g, '')) || ('img-' + Date.now() + '.webp');\nconst b64 = String(body.contentBase64 || '');\nconst mime = String(body.mimetype || 'image/webp');\nconst title = String(body.title || '').slice(0, 180);\nif (!b64) return [{ json: { __nobytes: true } }];\nreturn [{ json: { filename, mime, title, auth, hasBytes: true }, binary: { data: { data: b64, mimeType: mime, fileName: filename } } }];"
+      },
+      "id": "31f68dd1-fd54-4d45-8577-2ced8ad58b3a",
+      "name": "Matrix Media Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ 'https://hyphae.social/_matrix/media/v3/upload?filename=' + encodeURIComponent($json.filename) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.auth }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.mime }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "bc8f4a66-eb59-4686-b0ca-53f7b73591d2",
+      "name": "Matrix Media Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3280,
+        1504
+      ],
+      "continueOnFail": true,
+      "notes": "Stores bytes in the Matrix content repository. Returns { content_uri: 'mxc://hyphae.social/<id>' }."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst built = $('Matrix Media Build').first().json || {};\nconst payload = r.body || r;\nconst mxc = payload && payload.content_uri ? payload.content_uri : null;\nconst status = Number(r.statusCode || 0) || null;\nconst ok = !!mxc && (!status || status < 400);\nconst err = ok ? null : ((payload && (payload.error || payload.errcode)) || ('matrix upload failed (' + (status || '?') + ')'));\nreturn [{ json: { ok, statusCode: ok ? 200 : (status || 502), mxc, filename: built.filename, error: err } }];"
+      },
+      "id": "94e35cda-ddb3-48de-8d39-4c7a9d5a2042",
+      "name": "Media Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.ok, mxc: $json.mxc, filename: $json.filename, error: $json.error }) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d4af9592-2c36-49c1-9af4-659f4e01f614",
+      "name": "Media OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3696,
+        1504
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/media-archive-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "b00f3540-2ed7-4bab-a4e3-a5d2659226a0",
+      "name": "Media Archive Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        2064
+      ],
+      "webhookId": "site-media-archive",
+      "notes": "PUBLISH-TIME MEDIA MIGRATION (one media per call)\nPOST /webhook/site/media-archive-npj\nAuthorization: Bearer <matrix token>\nBody: { mxc, identifier, filename, mimetype?, title? }\nServer pulls the bytes from the Matrix media repo by mxc, then PUTs to archive.org.\nReturns { ok, url } where url is the permanent archive.org download URL to swap in for the mxc."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "3a35197b-5ad6-44ab-a5ae-86fe00125d85",
+      "name": "MArc Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        2064
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cb",
+              "value": "={{ Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "0d01fe1c-e0cb-4674-aa29-3d4afa351005",
+      "name": "MArc Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        2064
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const who = $('MArc Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('MArc Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\n\nconst hook = $('Media Archive Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst auth = (hook.headers && (hook.headers.authorization || hook.headers.Authorization)) || '';\nconst mxc = String(body.mxc || '');\nconst m = mxc.match(/^mxc:\\/\\/([^/]+)\\/(.+)$/);\nconst server = m ? m[1] : null;\nconst mediaId = m ? m[2] : null;\nconst identifier = (String(body.identifier || 'npj-media').replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 90)) || 'npj-media';\nconst filename = (String(body.filename || (mediaId ? mediaId + '.webp' : 'img-' + Date.now() + '.webp')).replace(/[^A-Za-z0-9._-]/g, '')) || ('img-' + Date.now() + '.webp');\nconst mime = String(body.mimetype || 'image/webp');\nconst title = String(body.title || '').replace(/[^\\x20-\\x7E]/g, '').slice(0, 180);\nconst validMxc = !!(server && mediaId);\n\nreturn [{ json: { authorized, user_id: userId, role, auth, server, mediaId, validMxc, identifier, filename, mime, title,\n  downloadUrl: validMxc ? ('https://hyphae.social/_matrix/client/v1/media/download/' + server + '/' + mediaId) : null } }];"
+      },
+      "id": "118a7d76-6f69-41e6-85f4-9191b64fdd89",
+      "name": "MArc Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        2064
       ]
     },
     {
@@ -111,9 +345,9 @@
           },
           "conditions": [
             {
-              "id": "c-token",
-              "leftValue": "={{ String(($json.body ? $json.body.token : $json.token) || '') }}",
-              "rightValue": "CHANGE_ME_SECRET",
+              "id": "c-marc-authz",
+              "leftValue": "={{ String(($json.authorized === true) && ($json.validMxc === true)) }}",
+              "rightValue": "true",
               "operator": {
                 "type": "string",
                 "operation": "equals",
@@ -125,19 +359,19 @@
         },
         "options": {}
       },
-      "id": "4dfe3fe9-647f-46f2-ad4a-21591cf58753",
-      "name": "Auth Check1",
+      "id": "4727c50b-5739-4563-b3e5-aec46a09aac0",
+      "name": "MArc Authorized?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -800,
+        2864,
         2064
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized' }) }}",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: ($json.authorized ? 'invalid or missing mxc' : 'unauthorized'), user: $json.user_id || null, role: $json.role || null }) }}",
         "options": {
           "responseCode": 401,
           "responseHeaders": {
@@ -150,13 +384,652 @@
           }
         }
       },
-      "id": "1aa55ca2-2124-47f8-b262-d0a4ae3f74df",
-      "name": "Respond Unauthorized1",
+      "id": "f114976c-81c6-4ace-b81a-1a4f332ab9fe",
+      "name": "Respond MArc Unauthorized",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        -560,
+        3072,
         2256
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.downloadUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ $json.auth }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "id": "e5552711-9435-47d5-aa79-ef0a37a600ca",
+      "name": "MArc Fetch Bytes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3072,
+        2064
+      ],
+      "continueOnFail": true,
+      "notes": "Authenticated Matrix media download. Returns the bytes as binary field 'data'."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Carry the metadata forward alongside the fetched binary (which is in field 'data').\nconst meta = $('MArc Authorize').first().json || {};\nconst item = $input.first();\nconst hasBinary = item.binary && Object.keys(item.binary).length > 0;\nconst binKey = hasBinary ? Object.keys(item.binary)[0] : null;\nconst out = hasBinary ? { data: item.binary[binKey] } : {};\nif (out.data) { out.data.fileName = meta.filename; out.data.mimeType = meta.mime; }\nreturn [{ json: { identifier: meta.identifier, filename: meta.filename, mime: meta.mime, title: meta.title, hasBytes: hasBinary }, binary: out }];"
+      },
+      "id": "9b9d0b20-fe11-41bf-9805-cef2b57831fa",
+      "name": "MArc Prep",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3280,
+        2064
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://s3.us.archive.org/' + $json.identifier + '/' + $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "=LOW {{ $env.IA_S3_ACCESS }}:{{ $env.IA_S3_SECRET }}"
+            },
+            {
+              "name": "x-amz-auto-make-bucket",
+              "value": "1"
+            },
+            {
+              "name": "x-archive-meta-mediatype",
+              "value": "image"
+            },
+            {
+              "name": "x-archive-meta-subject",
+              "value": "npj-media"
+            },
+            {
+              "name": "x-archive-meta-title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.mime }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a8d63613-ec7a-4858-8d2f-d0070bed7848",
+      "name": "MArc IA Put",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3488,
+        2064
+      ],
+      "continueOnFail": true,
+      "notes": "Uses IA S3 keys from n8n env vars IA_S3_ACCESS / IA_S3_SECRET (archive.org/account/s3.php). Never hard-code keys here — a committed workflow JSON is public."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst built = $('MArc Prep').first().json || {};\nconst status = Number(r.statusCode || (r.error && (r.error.httpCode || r.error.status)) || 0) || null;\nconst errored = !!r.error || !built.hasBytes || (status && status >= 400);\nconst ok = !errored && (!status || status < 400);\nconst url = ok ? ('https://archive.org/download/' + built.identifier + '/' + built.filename) : null;\nconst errMsg = !built.hasBytes ? 'no bytes fetched from Matrix' : (errored ? ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org upload failed (' + (status || '?') + ')')) : null);\nreturn [{ json: { ok, statusCode: ok ? 200 : (status || 502), url, error: errMsg, identifier: built.identifier, filename: built.filename } }];"
+      },
+      "id": "8131edf4-15a8-44c1-a8e8-6d25d246956a",
+      "name": "MArc Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3696,
+        2064
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.ok, url: $json.url, error: $json.error, identifier: $json.identifier, filename: $json.filename }) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "aaf5cdcf-38aa-4b94-ac07-90b24f7d057c",
+      "name": "MArc OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3904,
+        2064
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/source-npj",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*",
+          "rawBody": true
+        }
+      },
+      "id": "486781a2-5455-47db-a016-e94fb06a231a",
+      "name": "Source Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        2704
+      ],
+      "webhookId": "site-source",
+      "notes": "DRAFT-TIME SOURCE DOCUMENT UPLOAD (redaction-gated)\nPOST /webhook/site/source-npj\nAuthorization: Bearer <matrix token>\nBody: multipart with one binary file + JSON fields:\n  kind: source|dataset|document|media (default source)\n  filename, title, description, license (default CC-BY-4.0), tags, mime\n  parent_identifier?, research_id?\n  redactions?: [{type:'text-replace',find,replace}] | [{type:'csv-cell',row,col,replacement}]\n  consent_acknowledged: ['permanence','privacy','rights'] (required)\nGoes Matrix-auth -> validate+consent -> Apply Redactions -> archive.org."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "7dff396a-7286-48ef-9d9d-d0f840119f78",
+      "name": "Source Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        2704
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cb",
+              "value": "={{ Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "33018cad-0a02-4d70-bb28-4554f8d02dc7",
+      "name": "Source Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        2704
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const who = $('Source Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Source Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\nreturn [{ json: { authorized, user_id: userId, role } }];"
+      },
+      "id": "79f6c2c0-a70e-4b55-965f-1260d246761c",
+      "name": "Source Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-source-authz",
+              "leftValue": "={{ String($json.authorized === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "292c4b93-7b3a-4299-bc76-7d7099eb6f0c",
+      "name": "Source Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, error: 'unauthorized', user: $json.user_id || null, role: $json.role || null }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "51875f28-9768-4c2f-aa3e-13d05a17b143",
+      "name": "Respond Source Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3072,
+        2912
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate & Normalize source upload. Binary + metadata travel from the webhook item.\nfunction uuid(){return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return (c==='x'?r:(r&0x3|0x8)).toString(16);});}\nfunction resolveBody(q){const c=[];if(q&&typeof q==='object'){if(q.body&&typeof q.body==='object')c.push(q.body);if(typeof q.body==='string'){try{c.push(JSON.parse(q.body));}catch(e){}}c.push(q);}const plumbing=new Set(['headers','params','query','body','binary','webhookUrl','executionMode','pairedItem']);for(const x of c){if(!x||typeof x!=='object')continue;if(Object.keys(x).filter(k=>!plumbing.has(k)).length>0)return x;}return c[0]||{};}\nfunction normConsent(raw){if(!raw)return [];if(Array.isArray(raw))return raw.map(String);if(typeof raw==='string'){const s=raw.trim();if(s.startsWith('[')){try{const a=JSON.parse(s);if(Array.isArray(a))return a.map(String);}catch(e){}}if(s.includes(','))return s.split(',').map(x=>x.trim()).filter(Boolean);return [s];}if(typeof raw==='object')return Object.keys(raw).filter(k=>!!raw[k]);return [];}\n\nconst q = $input.item.json;\nconst body = resolveBody(q);\nconst errors = [];\nconst kind = body.kind || 'source';\nif(!['source','dataset','document','media'].includes(kind)) errors.push(`kind must be source|dataset|document|media, got: ${kind}`);\nif(!$input.item.binary || Object.keys($input.item.binary).length===0) errors.push('no binary data attached to request');\nconst binaryKey = $input.item.binary ? Object.keys($input.item.binary)[0] : null;\nconst binaryMeta = binaryKey ? $input.item.binary[binaryKey] : {};\nconst mime = body.mime || binaryMeta.mimeType || 'application/octet-stream';\nconst ack = normConsent(body.consent_acknowledged);\nconst missing = ['permanence','privacy','rights'].filter(r=>!ack.includes(r));\nif(missing.length>0) errors.push(`consent_acknowledged missing: ${missing.join(', ')}`);\nconst redactions = Array.isArray(body.redactions) ? body.redactions : [];\nif(errors.length>0) return [{ json: { __halt: true, success: false, errors, stage: 'validate' } }];\n\nconst itemGuid = uuid();\nconst fileGuid = uuid();\nconst origFilename = body.filename || binaryMeta.fileName || '';\nconst ext = origFilename.includes('.') ? '.'+origFilename.split('.').pop() : '';\nlet archiveMediatype = 'data';\nif(mime.startsWith('video/')) archiveMediatype='movies';\nelse if(mime.startsWith('audio/')) archiveMediatype='audio';\nelse if(mime.startsWith('image/')) archiveMediatype='image';\nelse if(mime==='application/pdf'||mime.startsWith('text/')) archiveMediatype='texts';\n\nreturn [{ json: {\n  identifier: itemGuid,\n  filename: fileGuid + ext,\n  kind, mime, archiveMediatype,\n  title: body.title || 'Archived source document',\n  description: body.description || '',\n  license: body.license || 'CC-BY-4.0',\n  tags: body.tags || '',\n  parent_identifier: body.parent_identifier || '',\n  research_id: body.research_id || '',\n  consent: ack,\n  redactions,\n  hasRedactions: redactions.length>0,\n  date: new Date().toISOString().split('T')[0],\n  binaryKey\n}, binary: $input.item.binary }];"
+      },
+      "id": "7e997763-4b13-45f6-ba9d-ed56b22a5d9c",
+      "name": "Validate & Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3072,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "halt-check",
+              "leftValue": "={{ String($json.__halt === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d4e751f3-f784-441c-b214-b8b6c8fe7fed",
+      "name": "Validation Failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3280,
+        2704
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: false, errors: $json.errors, stage: $json.stage }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "ddc3ee39-f5d0-4a0a-a2b1-94f2876b83f7",
+      "name": "Respond: Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3488,
+        2528
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.item;\nconst d = item.json;\nconst binaryKey = d.binaryKey;\nconst buf = await this.helpers.getBinaryDataBuffer(0, binaryKey);\nconst mime = d.mime || '';\nconst warnings = [];\nlet outBuf = buf;\nif(d.hasRedactions){\n  const isTextual = mime.startsWith('text/')||mime==='application/json'||mime==='application/csv'||d.filename.endsWith('.csv')||d.filename.endsWith('.md')||d.filename.endsWith('.txt')||d.filename.endsWith('.json');\n  if(isTextual){\n    let content = buf.toString('utf-8');\n    for(const r of d.redactions){\n      if(r.type==='text-replace'){\n        const escaped = r.find.replace(/[.*+?^${}()|[\\]\\\\]/g,'\\\\$&');\n        content = content.replace(new RegExp(escaped,'g'), r.replace || '[REDACTED]');\n      } else if(r.type==='csv-cell'){\n        const lines = content.split(/\\r?\\n/);\n        if(r.row>=0 && r.row<lines.length){\n          const cells = lines[r.row].split(',');\n          if(r.col>=0 && r.col<cells.length){ cells[r.col]=r.replacement||'[REDACTED]'; lines[r.row]=cells.join(','); }\n        }\n        content = lines.join('\\n');\n      } else { warnings.push(`unknown redaction type: ${r.type}`); }\n    }\n    outBuf = Buffer.from(content,'utf-8');\n  } else {\n    warnings.push(`redactions not supported for mime ${mime}; redact client-side before upload`);\n  }\n}\nconst mergedBinary = { ...item.binary };\nmergedBinary.output = { data: outBuf.toString('base64'), mimeType: mime, fileName: d.filename, fileSize: outBuf.length };\nreturn [{ json: { ...d, output_size: outBuf.length, original_size: buf.length, redaction_warnings: warnings }, binary: mergedBinary }];"
+      },
+      "id": "39c1f3ce-37b0-46fd-a03c-c649d51a9aa4",
+      "name": "Apply Redactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3488,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "=https://s3.us.archive.org/{{ $json.identifier }}/{{ $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=LOW {{ $env.IA_S3_ACCESS }}:{{ $env.IA_S3_SECRET }}"
+            },
+            {
+              "name": "x-archive-auto-make-bucket",
+              "value": "1"
+            },
+            {
+              "name": "x-archive-meta-mediatype",
+              "value": "={{ $json.archiveMediatype }}"
+            },
+            {
+              "name": "x-archive-meta-title",
+              "value": "={{ $json.title }}"
+            },
+            {
+              "name": "x-archive-meta-description",
+              "value": "={{ $json.description }}"
+            },
+            {
+              "name": "x-archive-meta-date",
+              "value": "={{ $json.date }}"
+            },
+            {
+              "name": "x-archive-meta-licenseurl",
+              "value": "=https://creativecommons.org/licenses/{{ $json.license.toLowerCase().replace('cc-','').replace('-4.0','/4.0') }}/"
+            },
+            {
+              "name": "x-archive-meta-subject",
+              "value": "={{ $json.tags }}"
+            },
+            {
+              "name": "x-archive-meta01-collection",
+              "value": "opensource"
+            },
+            {
+              "name": "Content-Type",
+              "value": "={{ $json.mime }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "output",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          },
+          "timeout": 120000
+        }
+      },
+      "id": "c0d8114f-fa4d-457c-8db7-813d6b26ae9c",
+      "name": "Upload Source to Archive.org",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3696,
+        2800
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst v = $('Validate & Normalize').first().json || {};\nconst red = $('Apply Redactions').first().json || {};\nconst status = Number(r.statusCode || 0) || null;\nconst ok = !r.error && (!status || status < 400);\nreturn [{ json: {\n  success: ok,\n  statusCode: ok ? 200 : (status || 502),\n  redacted: v.hasRedactions,\n  archive: { identifier: v.identifier, url: 'https://archive.org/details/' + v.identifier, filename: v.filename, mime: v.mime, size_bytes: red.output_size },\n  kind: v.kind,\n  research_id: v.research_id,\n  consent_acknowledged: v.consent,\n  redaction_warnings: red.redaction_warnings,\n  error: ok ? null : ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org PUT failed (' + (status || '?') + ')')),\n  uploaded_at: new Date().toISOString()\n} }];"
+      },
+      "id": "917a68a0-79d0-4807-9e1d-8dce381b195b",
+      "name": "Source Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3904,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "41fb71ce-1dae-407e-8613-e068966fe642",
+      "name": "Source OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        4112,
+        2800
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/publish-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "52049968-5b66-46ee-8e18-08b4fc6b947e",
+      "name": "Publish Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        3408
+      ],
+      "webhookId": "site-publish",
+      "notes": "PUBLISH (article -> GitHub live CMS + archive.org backup mirror)\nPOST /webhook/site/publish-npj\nAuthorization: Bearer <matrix token>\nBody: { filename:'articles/<slug>.jsonl', mode:'append'|'overwrite', contentRaw, message, compress?, mirror?:true }\nCommits to clovenbradshaw-ctrl/npj (main) then mirrors a snapshot to archive.org."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "2a9060a5-01cb-41bf-9f91-be2840501992",
+      "name": "Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        3408
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cb",
+              "value": "={{ Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "80252b3f-145b-41f7-9f02-ea3142ae8e2a",
+      "name": "Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2448,
+        3408
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const FOUNDER = '@collective_boundary730383:hyphae.social';\nconst ARTICLE_RE = /^articles\\/[a-z0-9][a-z0-9-]*\\.jsonl$/;\nconst hook = $('Publish Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst mode = body && body.mode ? String(body.mode) : 'overwrite';\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nlet roles = {};\ntry { const raw = $('Fetch Roles').first().json || {}; const text = typeof raw.data==='string'?raw.data:JSON.stringify(raw); const parsed=JSON.parse(text); const lay=parsed&&(parsed.layout||parsed); if(lay&&lay.roles&&typeof lay.roles==='object') roles=lay.roles; } catch(e){}\nconst isFounder = userId === FOUNDER;\nconst delegatedRole = userId ? (roles[userId] || null) : null;\nconst isAdmin = isFounder || delegatedRole === 'admin';\nconst role = isAdmin ? 'admin' : delegatedRole;\nconst isArticle = ARTICLE_RE.test(filename);\nconst modeOk = mode === 'append' || mode === 'overwrite';\nconst authorized = !!userId && !!filename && modeOk && (role === 'admin' || (role === 'editor' && isArticle));\nreturn [{ json: { authorized, user_id: userId, role, filename, mode, isArticle } }];"
+      },
+      "id": "e9dceb59-c66d-477e-98c5-78b47b2a0e9d",
+      "name": "Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        3408
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-authz",
+              "leftValue": "={{ String($json.authorized === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b65f599d-ac75-49c2-8207-584d02eca76e",
+      "name": "Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        3408
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized', user: $json.user_id || null, role: $json.role || null }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "0efa0943-de9b-4408-b0a4-2d4ffc8bdfdd",
+      "name": "Respond Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3072,
+        3616
       ]
     },
     {
@@ -170,20 +1043,20 @@
           "value": "npj",
           "mode": ""
         },
-        "filePath": "chain_head.json",
+        "filePath": "={{ $json.body ? $json.body.filename : $json.filename }}",
         "additionalParameters": {
           "reference": "main"
         }
       },
-      "id": "8f7e5328-9588-4ec9-b491-66fbd3b2c18c",
-      "name": "GH Get File1",
+      "id": "dfd058a2-e033-42a7-a192-5f353ab46880",
+      "name": "GH Get File",
       "type": "n8n-nodes-base.github",
       "typeVersion": 1,
       "position": [
-        -560,
-        2064
+        3072,
+        3408
       ],
-      "webhookId": "868d11b2-eb12-42f6-8a1a-d26e4d3fac48",
+      "webhookId": "gh-get-publish",
       "credentials": {
         "githubOAuth2Api": {
           "id": "818QKPlLgc22aSHm",
@@ -194,200 +1067,15 @@
     },
     {
       "parameters": {
-        "jsCode": "const hook = $('Chain Head Webhook1').first().json;\nconst body = hook.body || hook;\n\nif (!body || !body.head_id) {\n  return [{ json: { __invalid: true, error: 'missing head_id in body' } }];\n}\n\nconst text = JSON.stringify({\n  head_id:         body.head_id,\n  head_hash:       body.head_hash || null,\n  next_index:      body.next_index || 0,\n  last_block_date: body.last_block_date || null,\n  last_aggregate:  body.last_aggregate || null,\n  published_at:    new Date().toISOString(),\n}, null, 2) + '\\n';\n\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\n\nreturn [{ json: {\n  filename: 'chain_head.json',\n  message: `chain head -> ${body.head_id} (block ${(body.next_index || 1) - 1})`,\n  contentBase64: Buffer.from(text, 'utf8').toString('base64'),\n  sha: existingSha,\n  bytes: text.length,\n}}];"
+        "jsCode": "const hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = parsed.filename;\nconst mode = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message = parsed.message || `update ${filename}`;\nconst compress = !!parsed.compress;\nconst mirror = parsed.mirror !== false;\nif(!filename) throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\nconst ghResp = $input.first().json || {};\nconst existingSha = (ghResp && ghResp.sha && !ghResp.error) ? ghResp.sha : '';\nconst existingB64 = ghResp.content || '';\nlet existingText = '';\nif(existingB64){ try { existingText = Buffer.from(existingB64,'base64').toString('utf8'); } catch(e){ existingText=''; } }\nconst auth = $('Authorize').first().json || {};\nconst isAdmin = auth.role === 'admin';\nif(!isAdmin && existingText){\n  let assignees=[];\n  try { const genesis=JSON.parse(existingText.split('\\n').find(l=>l.trim())||'{}'); const op=genesis.operand||{}; assignees=Array.isArray(op.assignees)?op.assignees:[]; } catch(e){}\n  if(!assignees.includes(auth.user_id)) return [{ json: { __forbidden:true, user_id:auth.user_id, role:auth.role, filename, error:'not an assignee on this article' } }];\n}\nlet finalText;\nif(mode==='append'){ const prev=existingText?(existingText.endsWith('\\n')?existingText:existingText+'\\n'):''; const next=contentRaw.endsWith('\\n')?contentRaw:contentRaw+'\\n'; finalText=prev+next; } else { finalText=contentRaw; }\nlet b64;\nif(compress){ const zlib=require('zlib'); b64=zlib.gzipSync(Buffer.from(finalText,'utf8')).toString('base64'); } else { b64=Buffer.from(finalText,'utf8').toString('base64'); }\n// snapshot fields for the archive.org mirror (always uncompressed plaintext)\nconst slug = String(filename).replace(/^articles\\//,'').replace(/\\.jsonl$/,'').replace(/[^a-z0-9-]/gi,'-').toLowerCase();\nreturn [{ json: {\n  __forbidden:false, filename, message, contentBase64:b64, sha:existingSha, bytes:finalText.length,\n  user_id:auth.user_id, role:auth.role,\n  mirror,\n  mirror_identifier: 'npj-article-' + slug,\n  mirror_filename: slug + '.jsonl',\n  mirror_contentB64: Buffer.from(finalText,'utf8').toString('base64'),\n  mirror_title: 'NPJ article: ' + slug\n} }];"
       },
-      "id": "97d4f414-4b49-4397-9080-c24f99473c1c",
-      "name": "Build Content1",
+      "id": "72b0bda8-6abb-49b3-a377-31eb8684b311",
+      "name": "Build Content",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -320,
-        2064
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c-invalid",
-              "leftValue": "={{ String($json.__invalid === true) }}",
-              "rightValue": "true",
-              "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "312e8c24-9326-444f-9ec4-09499dbdc215",
-      "name": "Invalid?",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        -96,
-        2064
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
-        "options": {
-          "responseCode": 400,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "*"
-              }
-            ]
-          }
-        }
-      },
-      "id": "e19b9b7d-faef-4195-999a-a635b2a6a363",
-      "name": "Respond Invalid",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [
-        128,
-        1936
-      ]
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c-exists1",
-              "leftValue": "={{ String(!!($json.sha && String($json.sha).length > 0 && $json.sha !== 'null')) }}",
-              "rightValue": "true",
-              "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "0ae71956-0605-4f2f-b228-83deb19cc1af",
-      "name": "Exists?1",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        128,
-        2176
-      ]
-    },
-    {
-      "parameters": {
-        "authentication": "oAuth2",
-        "resource": "file",
-        "operation": "edit",
-        "owner": "clovenbradshaw-ctrl",
-        "repository": {
-          "__rl": true,
-          "value": "npj",
-          "mode": ""
-        },
-        "filePath": "chain_head.json",
-        "fileContent": "={{ $json.contentBase64 }}",
-        "commitMessage": "={{ $json.message }}",
-        "additionalParameters": {
-          "branch": {}
-        }
-      },
-      "id": "f53a74cb-4ab8-4fb5-a28c-2e7ee4e7b99e",
-      "name": "GH Update1",
-      "type": "n8n-nodes-base.github",
-      "typeVersion": 1,
-      "position": [
-        352,
-        2080
-      ],
-      "webhookId": "316c39da-5ee3-43da-bc11-4a721132f514",
-      "credentials": {
-        "githubOAuth2Api": {
-          "id": "818QKPlLgc22aSHm",
-          "name": "GitHub account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "authentication": "oAuth2",
-        "resource": "file",
-        "owner": "clovenbradshaw-ctrl",
-        "repository": {
-          "__rl": true,
-          "value": "npj",
-          "mode": ""
-        },
-        "filePath": "chain_head.json",
-        "fileContent": "={{ $json.contentBase64 }}",
-        "commitMessage": "={{ $json.message }}",
-        "additionalParameters": {
-          "branch": {}
-        }
-      },
-      "id": "c94b054e-99bb-4388-a24f-991791a77cf6",
-      "name": "GH Create1",
-      "type": "n8n-nodes-base.github",
-      "typeVersion": 1,
-      "position": [
-        352,
-        2288
-      ],
-      "webhookId": "07adb92b-0882-4bc7-bccb-af71dd1221be",
-      "credentials": {
-        "githubOAuth2Api": {
-          "id": "818QKPlLgc22aSHm",
-          "name": "GitHub account"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, filename: 'chain_head.json', head_id: ($('Chain Head Webhook1').first().json.body || $('Chain Head Webhook1').first().json).head_id, raw_url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/chain_head.json' }) }}",
-        "options": {
-          "responseCode": 200,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "*"
-              }
-            ]
-          }
-        }
-      },
-      "id": "b30a5b6f-d821-4974-941a-f5042b0ba7a0",
-      "name": "OK1",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [
-        592,
-        2176
+        3280,
+        3408
       ]
     },
     {
@@ -415,13 +1103,13 @@
         },
         "options": {}
       },
-      "id": "f6f144bc-83eb-42d1-889c-6997f24d4c62",
+      "id": "35848015-7e6b-493e-88d3-e50712ce80ba",
       "name": "Forbidden?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -272,
-        1344
+        3488,
+        3408
       ]
     },
     {
@@ -440,31 +1128,14 @@
           }
         }
       },
-      "id": "e947bba2-b5fa-4dbd-8df0-9db105147848",
+      "id": "47c3c4f0-dc77-4e10-8dde-cff7db7ff470",
       "name": "Respond Forbidden",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        -48,
-        1584
+        3696,
+        3616
       ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "site/publish-npj",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "5eac749d-dd79-451e-909b-878a26ab5891",
-      "name": "Publish Webhook1",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [
-        -1728,
-        1344
-      ],
-      "webhookId": "site-publish"
     },
     {
       "parameters": {
@@ -477,88 +1148,7 @@
           },
           "conditions": [
             {
-              "id": "c-authz",
-              "leftValue": "={{ String($json.authorized === true) }}",
-              "rightValue": "true",
-              "operator": {
-                "type": "string",
-                "operation": "equals",
-                "name": "filter.operator.equals"
-              }
-            }
-          ],
-          "combinator": "and"
-        },
-        "options": {}
-      },
-      "id": "a76f4288-4784-49f1-a88e-824744a5fba7",
-      "name": "Authorized?1",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2.2,
-      "position": [
-        -832,
-        1344
-      ]
-    },
-    {
-      "parameters": {
-        "authentication": "oAuth2",
-        "resource": "file",
-        "operation": "get",
-        "owner": "clovenbradshaw-ctrl",
-        "repository": {
-          "__rl": true,
-          "value": "npj",
-          "mode": ""
-        },
-        "filePath": "={{ $json.body ? $json.body.filename : $json.filename }}",
-        "additionalParameters": {
-          "reference": "main"
-        }
-      },
-      "id": "09f7548c-3e99-49be-b39a-4654ac1f5357",
-      "name": "GH Get File2",
-      "type": "n8n-nodes-base.github",
-      "typeVersion": 1,
-      "position": [
-        -608,
-        1344
-      ],
-      "webhookId": "1c9a6e7d-1c48-43e8-b978-a8385ddf439a",
-      "credentials": {
-        "githubOAuth2Api": {
-          "id": "818QKPlLgc22aSHm",
-          "name": "GitHub account"
-        }
-      },
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "jsCode": "const hook = $('Publish Webhook1').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\n\nconst filename   = parsed.filename;\nconst mode       = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message    = parsed.message || `update ${filename}`;\nconst compress   = !!parsed.compress;\n\nif (!filename) {\n  throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\n}\n\nconst ghResp = $input.first().json || {};\nconst existingSha = ghResp.sha || '';\nconst existingB64 = ghResp.content || '';\n\nlet existingText = '';\nif (existingB64) {\n  try {\n    existingText = Buffer.from(existingB64, 'base64').toString('utf8');\n  } catch (e) {\n    existingText = '';\n  }\n}\n\nconst auth = $('Authorize').first().json || {};\nconst isAdmin = auth.role === 'admin';\n\n// Non-admins must be assignees on the document they touch. Two storages:\n//  - legacy single-file log: the genesis is line 1 of the fetched file\n//  - folder of version files (articles/<slug>/<stamp>.jsonl) — every write is\n//    a NEW file, so there's nothing at `filename` to fetch: read the genesis\n//    from the EARLIEST file in the folder instead. A folder with no files yet\n//    is a fresh document — the editor creating it becomes its assignee.\n// Best-effort: if the folder lookup itself fails, fall through (the editor\n// role was already verified in Authorize).\nif (!isAdmin) {\n  let assignees = null;\n  if (existingText) {\n    try {\n      const genesis = JSON.parse(existingText.split('\\n').find(l => l.trim()) || '{}');\n      const op = genesis.operand || {};\n      assignees = Array.isArray(op.assignees) ? op.assignees : [];\n    } catch (e) {}\n  } else {\n    const dirMatch = /^(articles\\/[a-z0-9][a-z0-9-]*)\\/[^/]+\\.jsonl$/i.exec(filename);\n    if (dirMatch) {\n      try {\n        const list = await this.helpers.httpRequest({\n          url: 'https://api.github.com/repos/clovenbradshaw-ctrl/npj/contents/' + dirMatch[1] + '?ref=main',\n          headers: { 'User-Agent': 'npj-n8n', Accept: 'application/vnd.github+json' },\n          json: true,\n        });\n        const files = (Array.isArray(list) ? list : [])\n          .filter(f => f.type === 'file' && /\\.jsonl$/i.test(f.name))\n          .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));\n        if (files.length) {\n          const rawTxt = await this.helpers.httpRequest({ url: files[0].download_url });\n          const genesis = JSON.parse(String(rawTxt).split('\\n').find(l => l.trim()) || '{}');\n          const op = genesis.operand || {};\n          assignees = Array.isArray(op.assignees) ? op.assignees : [];\n        }\n      } catch (e) { /* listing unavailable -> fall through */ }\n    }\n  }\n  if (assignees && !assignees.includes(auth.user_id)) {\n    return [{ json: { __forbidden: true, user_id: auth.user_id, role: auth.role, filename,\n      error: 'not an assignee on this article' } }];\n  }\n}\n\nlet finalText;\nif (mode === 'append') {\n  const prev = existingText ? (existingText.endsWith('\\n') ? existingText : existingText + '\\n') : '';\n  const next = contentRaw.endsWith('\\n') ? contentRaw : contentRaw + '\\n';\n  finalText = prev + next;\n} else {\n  finalText = contentRaw;\n}\n\nlet b64;\nif (compress) {\n  const zlib = require('zlib');\n  b64 = zlib.gzipSync(Buffer.from(finalText, 'utf8')).toString('base64');\n} else {\n  b64 = Buffer.from(finalText, 'utf8').toString('base64');\n}\n\nreturn [{ json: {\n  __forbidden: false,\n  filename,\n  message,\n  contentBase64: b64,\n  sha: existingSha,\n  bytes: finalText.length,\n  user_id: auth.user_id,\n  role: auth.role,\n}}];"
-      },
-      "id": "a1616beb-9c48-40f4-acc3-8519ba7a974f",
-      "name": "Build Content2",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -384,
-        1344
-      ],
-      "notes": "Assignee gate for both storages: legacy flat logs (genesis = line 1 of the fetched file) and per-document version folders (genesis = earliest file in articles/<slug>/, fetched via this.helpers.httpRequest)."
-    },
-    {
-      "parameters": {
-        "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "loose",
-            "version": 2
-          },
-          "conditions": [
-            {
-              "id": "c-exists2",
+              "id": "c-exists",
               "leftValue": "={{ String(!!($json.sha && String($json.sha).length > 0 && $json.sha !== 'null')) }}",
               "rightValue": "true",
               "operator": {
@@ -572,13 +1162,13 @@
         },
         "options": {}
       },
-      "id": "708c3c97-baed-483b-8e8e-5eeac3329ac8",
-      "name": "Exists?2",
+      "id": "5a5a482f-e62f-437f-ae1c-7e48ce005b9e",
+      "name": "Exists?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        64,
-        1344
+        3696,
+        3408
       ]
     },
     {
@@ -611,13 +1201,13 @@
           }
         }
       },
-      "id": "ea58c936-857e-4917-b372-871079932443",
-      "name": "GH Update2",
+      "id": "999fec11-de06-4daa-b153-8fc496d6304a",
+      "name": "GH Update",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        288,
-        1216
+        3904,
+        3280
       ],
       "credentials": {
         "githubOAuth2Api": {
@@ -641,18 +1231,20 @@
         "fileContent": "={{ $json.contentBase64 }}",
         "commitMessage": "={{ $json.message }}",
         "additionalParameters": {
-          "branch": {}
+          "branch": {
+            "branch": "main"
+          }
         }
       },
-      "id": "56c9d5de-edf8-4f7f-ae49-11a14dd3541f",
-      "name": "GH Create2",
+      "id": "f0236d85-a8cf-40c0-8918-4a49d4cc4c7d",
+      "name": "GH Create",
       "type": "n8n-nodes-base.github",
       "typeVersion": 1,
       "position": [
-        288,
-        1456
+        3904,
+        3520
       ],
-      "webhookId": "e37a3b28-9124-4f6f-b27f-05d65b604ee1",
+      "webhookId": "gh-create-publish",
       "credentials": {
         "githubOAuth2Api": {
           "id": "818QKPlLgc22aSHm",
@@ -663,149 +1255,15 @@
     },
     {
       "parameters": {
-        "jsCode": "// Surface the REAL GitHub outcome — don't swallow it as a generic failure.\n// GH Update2 / GH Create2 run with continueOnFail, so a 4xx/5xx from GitHub\n// lands here as data. n8n shapes that error differently across versions:\n//   { error: \"message string\" }   ·   { error: { message, httpCode } }\n//   sometimes a top-level .status / .statusCode, sometimes nested in .context.\n// A success returns the GitHub API body: { commit:{sha}, content:{sha} }.\nconst gh = $input.first().json || {};\nconst build = $('Build Content2').first().json || {};\n\nconst errObj = gh.error;\nconst errMsg = (typeof errObj === 'string' ? errObj\n  : (errObj && (errObj.message || errObj.description))) || gh.message || null;\n\nconst ctx = (errObj && (errObj.context || errObj.cause)) || {};\nconst ghStatus = Number(\n  gh.status || gh.statusCode || gh.httpCode ||\n  (errObj && (errObj.httpCode || errObj.status || errObj.statusCode)) ||\n  ctx.httpCode || ctx.statusCode || 0\n) || null;\n\nconst commitSha = (gh.commit && gh.commit.sha) || (gh.content && gh.content.sha) || null;\nconst hasError = !!errObj || (ghStatus && ghStatus >= 400) || (!commitSha && !!errMsg);\nconst statusCode = hasError ? (ghStatus || 502) : 200;\n\nreturn [{ json: {\n  ok: !hasError,\n  statusCode,\n  filename: build.filename,\n  bytes: build.bytes,\n  user_id: build.user_id,\n  role: build.role,\n  error: hasError ? (errMsg || 'github commit failed') : null,\n  gh_status: ghStatus,\n  commit_sha: commitSha,\n}}];"
+        "jsCode": "const gh = $input.first().json || {};\nconst build = $('Build Content').first().json || {};\nconst errObj = gh.error;\nconst errMsg = (typeof errObj==='string'?errObj:(errObj&&(errObj.message||errObj.description)))||gh.message||null;\nconst ctx = (errObj&&(errObj.context||errObj.cause))||{};\nconst ghStatus = Number(gh.status||gh.statusCode||gh.httpCode||(errObj&&(errObj.httpCode||errObj.status||errObj.statusCode))||ctx.httpCode||ctx.statusCode||0)||null;\nconst commitSha = (gh.commit&&gh.commit.sha)||(gh.content&&gh.content.sha)||null;\nconst hasError = !!errObj||(ghStatus&&ghStatus>=400)||(!commitSha&&!!errMsg);\nreturn [{ json: {\n  gh_ok: !hasError,\n  gh_status: ghStatus,\n  gh_error: hasError ? (errMsg||'github commit failed') : null,\n  commit_sha: commitSha,\n  filename: build.filename, bytes: build.bytes, user_id: build.user_id, role: build.role,\n  mirror: build.mirror,\n  mirror_identifier: build.mirror_identifier, mirror_filename: build.mirror_filename,\n  mirror_contentB64: build.mirror_contentB64, mirror_title: build.mirror_title\n} }];"
       },
-      "id": "ac264db3-855b-4c5a-9c3e-df42c8b42101",
+      "id": "3804620c-66e6-45b3-9714-a72fddbe11f6",
       "name": "Check GH Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        416,
-        1344
-      ]
-    },
-    {
-      "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: $json.ok, filename: $json.filename, bytes: $json.bytes, user: $json.user_id, role: $json.role, error: $json.error, gh_status: $json.gh_status, commit_sha: $json.commit_sha }) }}",
-        "options": {
-          "responseCode": "={{ $json.statusCode }}",
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "*"
-              }
-            ]
-          }
-        }
-      },
-      "id": "4950cae8-d4e3-4a12-8fec-048e2962b55c",
-      "name": "OK2",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [
-        640,
-        1344
-      ]
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "chain-head-npj",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "2745a2c0-1882-4388-9bd0-ad39c03ab54a",
-      "name": "Chain Head Webhook1",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [
-        -944,
-        2064
-      ],
-      "webhookId": "chain-head-publish"
-    },
-    {
-      "parameters": {
-        "httpMethod": "POST",
-        "path": "site/media-npj",
-        "responseMode": "responseNode",
-        "options": {}
-      },
-      "id": "media-webhook-0001",
-      "name": "Media Webhook",
-      "type": "n8n-nodes-base.webhook",
-      "typeVersion": 1,
-      "position": [
-        -1728,
-        560
-      ],
-      "webhookId": "site-media",
-      "notes": "POST /webhook/site/media-npj\\nAuthorization: Bearer <Matrix token>\\nBody: { identifier, filename, mimetype, title, contentBase64 }\\nUploads one image to archive.org (server-side IA S3 keys) and returns { ok, url }."
-    },
-    {
-      "parameters": {
-        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
-            }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true
-            }
-          }
-        }
-      },
-      "id": "media-whoami-0001",
-      "name": "Media Whoami",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -1504,
-        560
-      ],
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
-        "sendQuery": true,
-        "queryParameters": {
-          "parameters": [
-            {
-              "name": "cb",
-              "value": "={{ Date.now() }}"
-            }
-          ]
-        },
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true,
-              "responseFormat": "text"
-            }
-          }
-        }
-      },
-      "id": "media-roles-0001",
-      "name": "Media Fetch Roles",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
-      "position": [
-        -1280,
-        560
-      ],
-      "continueOnFail": true
-    },
-    {
-      "parameters": {
-        "jsCode": "// Media auth: a valid Matrix token whose account is admin/editor may upload.\nconst who = $('Media Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Media Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\nreturn [{ json: { authorized, user_id: userId, role } }];"
-      },
-      "id": "media-authorize-0001",
-      "name": "Media Authorize",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        -1056,
-        560
+        4112,
+        3408
       ]
     },
     {
@@ -819,8 +1277,8 @@
           },
           "conditions": [
             {
-              "id": "c-media-authz",
-              "leftValue": "={{ String($json.authorized === true) }}",
+              "id": "c-mirror",
+              "leftValue": "={{ String(($json.gh_ok === true) && ($json.mirror === true)) }}",
               "rightValue": "true",
               "operator": {
                 "type": "string",
@@ -833,122 +1291,118 @@
         },
         "options": {}
       },
-      "id": "media-authzif-0001",
-      "name": "Media Authorized?",
+      "id": "20a52772-38d7-46d0-9f38-b42d8c37c24b",
+      "name": "Mirror?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
       "position": [
-        -832,
-        560
+        4320,
+        3408
       ]
     },
     {
       "parameters": {
-        "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized', user: $json.user_id || null, role: $json.role || null }) }}",
-        "options": {
-          "responseCode": 401,
-          "responseHeaders": {
-            "entries": [
-              {
-                "name": "Access-Control-Allow-Origin",
-                "value": "*"
-              }
-            ]
-          }
-        }
+        "jsCode": "// Stage the plaintext article snapshot as binary for the archive.org PUT.\nconst d = $input.first().json;\nreturn [{ json: d, binary: { snapshot: { data: d.mirror_contentB64, mimeType: 'application/x-ndjson', fileName: d.mirror_filename } } }];"
       },
-      "id": "media-unauth-0001",
-      "name": "Respond Media Unauthorized",
-      "type": "n8n-nodes-base.respondToWebhook",
-      "typeVersion": 1,
-      "position": [
-        -608,
-        760
-      ]
-    },
-    {
-      "parameters": {
-        "jsCode": "// Decode the posted image into n8n binary data + a safe archive.org identifier.\nconst hook = $('Media Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst identifier = (String(body.identifier || 'npj-media').replace(/[^A-Za-z0-9._-]/g,'-').replace(/^-+|-+$/g,'').slice(0,90)) || 'npj-media';\nconst filename = (String(body.filename || ('img-'+Date.now()+'.webp')).replace(/[^A-Za-z0-9._-]/g,'')) || ('img-'+Date.now()+'.webp');\nconst b64 = String(body.contentBase64 || '');\nconst mime = String(body.mimetype || 'image/webp');\nconst title = String(body.title || '').replace(/[^\\x20-\\x7E]/g,'').slice(0,180);\nreturn [{ json: { identifier, filename, title, mime, hasBytes: !!b64 }, binary: { data: { data: b64, mimeType: mime, fileName: filename } } }];"
-      },
-      "id": "media-build-0001",
-      "name": "Media Build",
+      "id": "15f23ff2-54f3-42ae-a4c8-60b605d59ae1",
+      "name": "Mirror Prep",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -608,
-        480
+        4528,
+        3312
       ]
     },
     {
       "parameters": {
         "method": "PUT",
-        "url": "={{ 'https://s3.us.archive.org/' + $json.identifier + '/' + $json.filename }}",
-        "sendBody": true,
-        "contentType": "binaryData",
-        "inputDataFieldName": "data",
+        "url": "={{ 'https://s3.us.archive.org/' + $json.mirror_identifier + '/' + $json.mirror_filename }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
             {
-              "name": "authorization",
-              "value": "={{ 'LOW ' + $env.IA_S3_ACCESS + ':' + $env.IA_S3_SECRET }}"
+              "name": "Authorization",
+              "value": "=LOW {{ $env.IA_S3_ACCESS }}:{{ $env.IA_S3_SECRET }}"
             },
             {
-              "name": "x-amz-auto-make-bucket",
+              "name": "x-archive-auto-make-bucket",
               "value": "1"
             },
             {
               "name": "x-archive-meta-mediatype",
-              "value": "image"
-            },
-            {
-              "name": "x-archive-meta-subject",
-              "value": "npj-media"
+              "value": "texts"
             },
             {
               "name": "x-archive-meta-title",
-              "value": "={{ $json.title }}"
+              "value": "={{ $json.mirror_title }}"
+            },
+            {
+              "name": "x-archive-meta-subject",
+              "value": "npj-article"
+            },
+            {
+              "name": "x-archive-meta01-collection",
+              "value": "opensource"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/x-ndjson"
             }
           ]
         },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "snapshot",
         "options": {
           "response": {
             "response": {
-              "neverError": true,
-              "fullResponse": true
+              "fullResponse": true,
+              "neverError": true
             }
-          }
+          },
+          "timeout": 120000
         }
       },
-      "id": "media-iaput-0001",
-      "name": "IA Put",
+      "id": "10372abd-f035-47a2-8fc5-a2784fe8b28b",
+      "name": "Mirror to Archive.org",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        -384,
-        480
+        4736,
+        3312
       ],
-      "continueOnFail": true,
-      "notes": "PUTs the image to archive.org S3. Needs IA_S3_ACCESS and IA_S3_SECRET in the n8n environment (archive.org/account/s3.php)."
+      "continueOnFail": true
     },
     {
       "parameters": {
-        "jsCode": "// Surface the real archive.org result; build the public download URL on success.\nconst r = $input.first().json || {};\nconst built = $('Media Build').first().json || {};\nconst status = Number(r.statusCode || (r.error && (r.error.httpCode || r.error.status || r.error.statusCode)) || 0) || null;\nconst errored = !!r.error || (!built.hasBytes) || (status && status >= 400);\nconst ok = !errored && (!status || status < 400);\nconst url = ok ? ('https://archive.org/download/' + built.identifier + '/' + built.filename) : null;\nconst errMsg = !built.hasBytes ? 'no image bytes received'\n  : (errored ? ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org upload failed (' + (status || '?') + ')')) : null);\nreturn [{ json: { ok, statusCode: ok ? 200 : (status || 502), url, error: errMsg, identifier: built.identifier, filename: built.filename } }];"
+        "jsCode": "const r = $input.first().json || {};\nconst d = $('Check GH Result').first().json || {};\nconst status = Number(r.statusCode || 0) || null;\nconst ok = !r.error && (!status || status < 400);\nreturn [{ json: {\n  ok: d.gh_ok, statusCode: 200,\n  filename: d.filename, bytes: d.bytes, user: d.user_id, role: d.role,\n  commit_sha: d.commit_sha, gh_status: d.gh_status, error: d.gh_error,\n  mirror: { ok, url: ok ? ('https://archive.org/details/' + d.mirror_identifier) : null,\n    identifier: d.mirror_identifier, filename: d.mirror_filename,\n    error: ok ? null : ((typeof r.error==='string'?r.error:(r.error&&r.error.message))||('archive.org mirror failed (' + (status||'?') + ')')) }\n} }];"
       },
-      "id": "media-result-0001",
-      "name": "Media Result",
+      "id": "9ca4b59c-99b4-4f1c-95fc-4fa68bd01bf4",
+      "name": "Mirror Result",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        -160,
-        480
+        4944,
+        3312
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// No mirror requested (or GH failed): respond with GitHub result only.\nconst d = $input.first().json || {};\nreturn [{ json: {\n  ok: d.gh_ok, statusCode: d.gh_ok ? 200 : (d.gh_status || 502),\n  filename: d.filename, bytes: d.bytes, user: d.user_id, role: d.role,\n  commit_sha: d.commit_sha, gh_status: d.gh_status, error: d.gh_error,\n  mirror: { ok: false, url: null, skipped: true }\n} }];"
+      },
+      "id": "60e277dd-f0dc-42f4-99c9-6af05a3b0788",
+      "name": "No Mirror",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4528,
+        3520
       ]
     },
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: $json.ok, url: $json.url, error: $json.error, identifier: $json.identifier, filename: $json.filename }) }}",
+        "responseBody": "={{ JSON.stringify($json) }}",
         "options": {
           "responseCode": "={{ $json.statusCode }}",
           "responseHeaders": {
@@ -961,279 +1415,328 @@
           }
         }
       },
-      "id": "media-ok-0001",
-      "name": "Media OK",
+      "id": "f20d9054-908f-4b5b-bf9a-200aa0730bed",
+      "name": "Publish OK",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
       "position": [
-        64,
-        480
+        5152,
+        3408
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "chain-head-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "e799ff0f-fcb0-4b02-974e-7a917e87f83b",
+      "name": "Chain Head Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        2032,
+        4112
+      ],
+      "webhookId": "chain-head-publish"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-token",
+              "leftValue": "={{ String(($json.body ? $json.body.token : $json.token) || '') }}",
+              "rightValue": "={{ $env.CHAIN_HEAD_TOKEN }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "bcde0930-6a4b-4ac7-83d8-df621434b3e3",
+      "name": "Auth Check",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: 'unauthorized' }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "c1879d0a-0ed5-4b23-9485-18903fedb846",
+      "name": "Respond Unauthorized (Chain)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        4304
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "additionalParameters": {
+          "reference": "main"
+        }
+      },
+      "id": "04154aec-6d88-4258-88d2-aff207dfc555",
+      "name": "GH Get Chain",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        2448,
+        4112
+      ],
+      "webhookId": "gh-get-chain",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const hook = $('Chain Head Webhook').first().json;\nconst body = hook.body || hook;\nif(!body || !body.head_id) return [{ json: { __invalid:true, error:'missing head_id in body' } }];\nconst text = JSON.stringify({ head_id:body.head_id, head_hash:body.head_hash||null, next_index:body.next_index||0, last_block_date:body.last_block_date||null, last_aggregate:body.last_aggregate||null, published_at:new Date().toISOString() }, null, 2) + '\\n';\nconst ghResp = $input.first().json || {};\nconst existingSha = (ghResp && ghResp.sha && !ghResp.error) ? ghResp.sha : '';\nreturn [{ json: { filename:'chain_head.json', message:`chain head -> ${body.head_id} (block ${(body.next_index||1)-1})`, contentBase64:Buffer.from(text,'utf8').toString('base64'), sha:existingSha, bytes:text.length } }];"
+      },
+      "id": "38419322-7c4e-46b8-8a0e-e4069a405f89",
+      "name": "Build Chain Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2656,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-invalid",
+              "leftValue": "={{ String($json.__invalid === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "76af2c64-e1b6-4e06-b735-68d1191268a3",
+      "name": "Invalid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2864,
+        4112
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.error }) }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "0d8c361a-82af-472e-892a-e2cff09b5f37",
+      "name": "Respond Invalid (Chain)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3072,
+        3984
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-exists-chain",
+              "leftValue": "={{ String(!!($json.sha && String($json.sha).length > 0 && $json.sha !== 'null')) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "5c26a137-67f7-4fc6-943a-9a5c667197ca",
+      "name": "Chain Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        3072,
+        4224
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {
+            "branch": "main"
+          }
+        }
+      },
+      "id": "d619c7cd-5260-45fd-aab2-885b912fff3a",
+      "name": "GH Update Chain",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        3280,
+        4112
+      ],
+      "webhookId": "gh-update-chain",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "chain_head.json",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {
+            "branch": "main"
+          }
+        }
+      },
+      "id": "c1f6f40e-f75b-424c-87ed-73f656b6df25",
+      "name": "GH Create Chain",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        3280,
+        4320
+      ],
+      "webhookId": "gh-create-chain",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: true, filename: 'chain_head.json', head_id: ($('Chain Head Webhook').first().json.body || $('Chain Head Webhook').first().json).head_id, raw_url: 'https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/chain_head.json' }) }}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "4b3a58f7-f3d8-455c-a4be-3acac793c9f5",
+      "name": "Chain OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        3520,
+        4224
       ]
     }
   ],
   "connections": {
-    "Whoami": {
-      "main": [
-        [
-          {
-            "node": "Fetch Roles",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fetch Roles": {
-      "main": [
-        [
-          {
-            "node": "Authorize",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Authorize": {
-      "main": [
-        [
-          {
-            "node": "Authorized?1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Auth Check1": {
-      "main": [
-        [
-          {
-            "node": "GH Get File1",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond Unauthorized1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Get File1": {
-      "main": [
-        [
-          {
-            "node": "Build Content1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Content1": {
-      "main": [
-        [
-          {
-            "node": "Invalid?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Invalid?": {
-      "main": [
-        [
-          {
-            "node": "Respond Invalid",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Exists?1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Exists?1": {
-      "main": [
-        [
-          {
-            "node": "GH Update1",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "GH Create1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Update1": {
-      "main": [
-        [
-          {
-            "node": "OK1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Create1": {
-      "main": [
-        [
-          {
-            "node": "OK1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Forbidden?": {
-      "main": [
-        [
-          {
-            "node": "Respond Forbidden",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Exists?2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Publish Webhook1": {
-      "main": [
-        [
-          {
-            "node": "Whoami",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Authorized?1": {
-      "main": [
-        [
-          {
-            "node": "GH Get File2",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Respond Unauthorized",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Get File2": {
-      "main": [
-        [
-          {
-            "node": "Build Content2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build Content2": {
-      "main": [
-        [
-          {
-            "node": "Forbidden?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Exists?2": {
-      "main": [
-        [
-          {
-            "node": "GH Update2",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "GH Create2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Update2": {
-      "main": [
-        [
-          {
-            "node": "Check GH Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "GH Create2": {
-      "main": [
-        [
-          {
-            "node": "Check GH Result",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Check GH Result": {
-      "main": [
-        [
-          {
-            "node": "OK2",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Chain Head Webhook1": {
-      "main": [
-        [
-          {
-            "node": "Auth Check1",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Media Webhook": {
       "main": [
         [
@@ -1282,7 +1785,7 @@
       "main": [
         [
           {
-            "node": "Media Build",
+            "node": "Matrix Media Build",
             "type": "main",
             "index": 0
           }
@@ -1296,18 +1799,18 @@
         ]
       ]
     },
-    "Media Build": {
+    "Matrix Media Build": {
       "main": [
         [
           {
-            "node": "IA Put",
+            "node": "Matrix Media Upload",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "IA Put": {
+    "Matrix Media Upload": {
       "main": [
         [
           {
@@ -1323,6 +1826,560 @@
         [
           {
             "node": "Media OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Media Archive Webhook": {
+      "main": [
+        [
+          {
+            "node": "MArc Whoami",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Whoami": {
+      "main": [
+        [
+          {
+            "node": "MArc Fetch Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Fetch Roles": {
+      "main": [
+        [
+          {
+            "node": "MArc Authorize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Authorize": {
+      "main": [
+        [
+          {
+            "node": "MArc Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Authorized?": {
+      "main": [
+        [
+          {
+            "node": "MArc Fetch Bytes",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond MArc Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Fetch Bytes": {
+      "main": [
+        [
+          {
+            "node": "MArc Prep",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Prep": {
+      "main": [
+        [
+          {
+            "node": "MArc IA Put",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc IA Put": {
+      "main": [
+        [
+          {
+            "node": "MArc Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MArc Result": {
+      "main": [
+        [
+          {
+            "node": "MArc OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Webhook": {
+      "main": [
+        [
+          {
+            "node": "Source Whoami",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Whoami": {
+      "main": [
+        [
+          {
+            "node": "Source Fetch Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Fetch Roles": {
+      "main": [
+        [
+          {
+            "node": "Source Authorize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Authorize": {
+      "main": [
+        [
+          {
+            "node": "Source Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Authorized?": {
+      "main": [
+        [
+          {
+            "node": "Validate & Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Source Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Normalize": {
+      "main": [
+        [
+          {
+            "node": "Validation Failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validation Failed?": {
+      "main": [
+        [
+          {
+            "node": "Respond: Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Apply Redactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Apply Redactions": {
+      "main": [
+        [
+          {
+            "node": "Upload Source to Archive.org",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload Source to Archive.org": {
+      "main": [
+        [
+          {
+            "node": "Source Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Source Result": {
+      "main": [
+        [
+          {
+            "node": "Source OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Publish Webhook": {
+      "main": [
+        [
+          {
+            "node": "Whoami",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whoami": {
+      "main": [
+        [
+          {
+            "node": "Fetch Roles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Roles": {
+      "main": [
+        [
+          {
+            "node": "Authorize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorize": {
+      "main": [
+        [
+          {
+            "node": "Authorized?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Authorized?": {
+      "main": [
+        [
+          {
+            "node": "GH Get File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Get File": {
+      "main": [
+        [
+          {
+            "node": "Build Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Content": {
+      "main": [
+        [
+          {
+            "node": "Forbidden?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Forbidden?": {
+      "main": [
+        [
+          {
+            "node": "Respond Forbidden",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Exists?": {
+      "main": [
+        [
+          {
+            "node": "GH Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GH Create",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Update": {
+      "main": [
+        [
+          {
+            "node": "Check GH Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Create": {
+      "main": [
+        [
+          {
+            "node": "Check GH Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check GH Result": {
+      "main": [
+        [
+          {
+            "node": "Mirror?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mirror?": {
+      "main": [
+        [
+          {
+            "node": "Mirror Prep",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Mirror",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mirror Prep": {
+      "main": [
+        [
+          {
+            "node": "Mirror to Archive.org",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mirror to Archive.org": {
+      "main": [
+        [
+          {
+            "node": "Mirror Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mirror Result": {
+      "main": [
+        [
+          {
+            "node": "Publish OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Mirror": {
+      "main": [
+        [
+          {
+            "node": "Publish OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chain Head Webhook": {
+      "main": [
+        [
+          {
+            "node": "Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Auth Check": {
+      "main": [
+        [
+          {
+            "node": "GH Get Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Unauthorized (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Get Chain": {
+      "main": [
+        [
+          {
+            "node": "Build Chain Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Chain Content": {
+      "main": [
+        [
+          {
+            "node": "Invalid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invalid?": {
+      "main": [
+        [
+          {
+            "node": "Respond Invalid (Chain)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chain Exists?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chain Exists?": {
+      "main": [
+        [
+          {
+            "node": "GH Update Chain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "GH Create Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Update Chain": {
+      "main": [
+        [
+          {
+            "node": "Chain OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Create Chain": {
+      "main": [
+        [
+          {
+            "node": "Chain OK",
             "type": "main",
             "index": 0
           }
