@@ -233,10 +233,15 @@ function ProfileCard({ session, me }) {
     if (isAdmin && window.NpjLayout && window.MatrixAuth) {
       const token = window.MatrixAuth.token();
       try {
-        await window.NpjLayout.publishLayout({ matrixToken: token, layout: nextLayout, author: me, message: "update contributor profile: " + me });
+        await window.NpjLayout.publishLayout({
+          matrixToken: token, layout: nextLayout, author: me, message: "update contributor profile: " + me,
+          onRetry: ({ attempt }) => setMsg({ ok: true, text: "Saved to your account. The publishing service is busy — retrying the public push (" + attempt + ")…" })
+        });
         setMsg({ ok: true, text: "Saved and published to the site — your byline is live." });
       } catch (e) {
-        setMsg({ ok: false, text: "Saved to your account, but the public publish failed: " + (e.message || "network error") + "." });
+        setMsg({ ok: false, text: e && e.transient
+          ? "Saved to your account, but the public push couldn't reach the site (" + (e.status || "network error") + ") after several tries. Your byline is safe here — press Save & publish to try again."
+          : "Saved to your account, but the public publish failed: " + (e.message || "network error") + "." });
       }
     } else {
       setMsg({ ok: true, text: "Saved to your Matrix account. It shows in your byline here now, and goes public when an admin next publishes the site layout." });
