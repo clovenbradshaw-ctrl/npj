@@ -188,6 +188,89 @@ function ProjectSources({ groups, roomId, titleOf, onOpen, onOpenArticle, onOpen
    An admin's save also commits it to the PUBLIC layout.json (the world-readable
    store); a non-admin's save is durable on their account and goes public when an
    admin next publishes the layout. */
+
+/* The "About me" editor — a small rich field. Links show INLINE as embedded,
+   non-editable chips (label shown, URL on hover and stored, never typed); the
+   value we keep is the SAME [label](url) markdown the public renderer already
+   understands. The DOM is seeded imperatively and only re-seeded on EXTERNAL
+   value changes (profile load / "pull"), never on the user's own keystrokes, so
+   the caret never jumps. The popover drives it through apiRef. */
+function BioEditor({ value, onChange, apiRef, placeholder, maxRaw }) {
+  const ref = useRef(null);
+  const mine = useRef(null);     // the last markdown WE emitted — to skip self re-seeds
+  const range = useRef(null);    // last selection made inside the editor
+
+  const buildChip = (href, label) => {
+    const a = document.createElement("a");
+    a.href = href; a.setAttribute("data-href", href); a.title = href;
+    a.setAttribute("contenteditable", "false"); a.textContent = label;
+    a.style.color = "var(--ink)"; a.style.textDecorationLine = "underline";
+    a.style.textDecorationColor = "var(--ink-soft)"; a.style.textUnderlineOffset = "2px"; a.style.cursor = "text";
+    return a;
+  };
+  const seed = (md) => {
+    const el = ref.current; if (!el) return;
+    el.textContent = "";
+    const toks = (window.NpjProfiles && window.NpjProfiles.linkTokens) ? window.NpjProfiles.linkTokens(md) : [{ type: "text", text: String(md || "") }];
+    toks.forEach(t => el.appendChild(t.type === "link" ? buildChip(t.href, t.label) : document.createTextNode(t.text)));
+  };
+  const serialize = () => {
+    const el = ref.current; if (!el) return "";
+    const mk = (window.NpjProfiles && window.NpjProfiles.linkMarkdown) || ((l, u) => "[" + l + "](" + u + ")");
+    let out = "";
+    (function walk(node) {
+      node.childNodes.forEach(n => {
+        if (n.nodeType === 3) out += n.nodeValue;
+        else if (n.nodeType === 1) {
+          if (n.tagName === "A" && n.getAttribute("data-href")) out += mk(n.textContent || "", n.getAttribute("data-href"));
+          else { if (/^(DIV|P|BR)$/.test(n.tagName)) out += " "; walk(n); }
+        }
+      });
+    })(el);
+    return out.replace(/\xa0/g, " ").replace(/[ \t]+/g, " ").replace(/^ | $/g, "");
+  };
+  const saveRange = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && ref.current && ref.current.contains(sel.anchorNode)) range.current = sel.getRangeAt(0).cloneRange();
+  };
+  const emit = () => { saveRange(); const md = serialize(); mine.current = md; onChange(md.slice(0, maxRaw || 1500)); };
+
+  useEffect(() => { if (value !== mine.current) seed(value || ""); }, [value]);
+
+  if (apiRef) apiRef.current = {
+    // the words the user has highlighted inside the editor (to prefill the label)
+    selectionText: () => (range.current && !range.current.collapsed && ref.current && ref.current.contains(range.current.commonAncestorContainer)) ? range.current.toString() : "",
+    insertLink: (href, label) => {
+      const el = ref.current; if (!el) return;
+      el.focus();
+      let r = range.current;
+      if (!r || !el.contains(r.commonAncestorContainer)) { r = document.createRange(); r.selectNodeContents(el); r.collapse(false); }
+      r.deleteContents();
+      const chip = buildChip(href, label);
+      r.insertNode(chip);
+      const after = document.createRange(); after.setStartAfter(chip); after.collapse(true);
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(after);
+      range.current = after.cloneRange();
+      emit();
+    }
+  };
+
+  const onPaste = (e) => {
+    e.preventDefault();
+    const t = ((e.clipboardData || window.clipboardData).getData("text/plain") || "").replace(/\s+/g, " ");
+    document.execCommand("insertText", false, t);
+  };
+  return (
+    <div style={{ position: "relative" }}>
+      <div ref={ref} contentEditable suppressContentEditableWarning
+        onInput={emit} onKeyUp={saveRange} onMouseUp={saveRange}
+        onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }} onPaste={onPaste}
+        style={{ width: "100%", boxSizing: "border-box", minHeight: 64, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "8px 10px", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, outline: "none", whiteSpace: "pre-wrap", wordBreak: "break-word" }} />
+      {!value && <div aria-hidden="true" style={{ position: "absolute", top: 9, left: 11, right: 11, color: "var(--ink-soft)", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, pointerEvents: "none", opacity: .75 }}>{placeholder}</div>}
+    </div>
+  );
+}
+
 function ProfileCard({ session, me }) {
   const ctx = React.useContext(window.LayoutCtx);
   const { layout, setLayout, isAdmin } = ctx;
@@ -199,9 +282,7 @@ function ProfileCard({ session, me }) {
   const [busy, setBusy] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [msg, setMsg] = useState(null);
-  const taRef = useRef(null);
-  const selRef = useRef(null);                          // latest textarea selection (null until focused)
-  const linkRangeRef = useRef({ start: 0, end: 0 });    // selection captured when the Link popover opened
+  const bioApi = useRef(null);                          // imperative handle into the BioEditor
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
   const [linkLabel, setLinkLabel] = useState("");
@@ -256,34 +337,29 @@ function ProfileCard({ session, me }) {
     setBusy(false);
   };
 
-  // ----- the "Link" button: turn the selected words into a link without typing
-  // markdown. It writes the same [label](url) the renderer already understands,
-  // so the bio stays plain text and the live preview shows the result. -----
+  // ----- the "Link" button: wrap the selected words in an inline link, no
+  // markdown to type. The editor inserts an embedded chip and stores the same
+  // [label](url) the renderer already understands. -----
   const openLink = () => {
     if (linkOpen) { setLinkOpen(false); return; }
-    const r = selRef.current || { start: bio.length, end: bio.length };
-    linkRangeRef.current = { start: r.start, end: r.end };
-    setLinkLabel(bio.slice(r.start, r.end));
+    setLinkLabel(bioApi.current ? bioApi.current.selectionText() : "");
     setLinkUrl(""); setLinkErr(false); setLinkOpen(true);
   };
   const applyLink = () => {
     const safe = window.NpjProfiles && window.NpjProfiles.safeHref;
     const href = safe ? safe(linkUrl) : null;
     if (!href) { setLinkErr(true); return; }
-    const { start, end } = linkRangeRef.current;
-    let label = linkLabel.trim().replace(/[\[\]]/g, "");                       // a [ or ] would break the label
+    let label = (linkLabel || "").trim().replace(/[\[\]]/g, "");
     if (!label) { try { label = new URL(href).hostname.replace(/^www\./, ""); } catch (e) { label = "link"; } }
-    const u = linkUrl.trim().replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29"); // keep (…) parseable
-    const md = "[" + label + "](" + u + ")";
-    const next = (bio.slice(0, start) + md + bio.slice(end)).slice(0, BIO_MAX + 40);
-    setBio(next);
+    if (bioApi.current) bioApi.current.insertLink(href, label);
     setLinkOpen(false); setLinkUrl(""); setLinkLabel("");
-    const caret = Math.min(start + md.length, next.length);
-    requestAnimationFrame(() => { const ta = taRef.current; if (ta) { ta.focus(); ta.setSelectionRange(caret, caret); selRef.current = { start: caret, end: caret }; } });
   };
 
   const field = { width: "100%", boxSizing: "border-box", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "8px 10px", fontFamily: "var(--serif)", fontSize: 14.5, outline: "none" };
-  const over = bio.length > BIO_MAX;
+  const PRO = window.NpjProfiles;
+  const BIO_RAW_MAX = (PRO && PRO.BIO_RAW_MAX) || 1500;
+  const vlen = (PRO && PRO.visibleLength) ? PRO.visibleLength(bio) : (bio || "").length;  // URLs/markup don't count
+  const over = vlen > BIO_MAX;
 
   return (
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper-2)", boxShadow: "4px 4px 0 rgba(22,20,13,.10)", marginBottom: 16 }}>
@@ -328,16 +404,10 @@ function ProfileCard({ session, me }) {
             </div>
           </div>
           <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, margin: "0 0 5px" }}>
-            Select a word, then press <b style={{ color: "var(--ink)" }}>Link</b> — or paste a full https:// address. Only http(s) links are kept.
+            Select a word and press <b style={{ color: "var(--ink)" }}>Link</b> — it shows inline; the address is tucked away (hover to see it) and doesn't count toward the limit.
           </div>
-          <textarea ref={taRef} value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} onSelect={e => { selRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; }} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
-          <div className="np-mono" style={{ fontSize: 10, color: over ? "var(--reject)" : "var(--ink-soft)", marginTop: 4, textAlign: "right" }}>{bio.length} / {BIO_MAX}</div>
-          {window.NpjProfiles && window.NpjProfiles.hasLink && window.NpjProfiles.hasLink(bio) && (
-            <div style={{ marginTop: 8 }}>
-              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 3 }}>Byline preview</div>
-              <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)", border: "1px dashed var(--rule)", padding: "8px 10px" }}>{window.npjRichText(bio)}</div>
-            </div>
-          )}
+          <BioEditor apiRef={bioApi} value={bio} onChange={setBio} maxRaw={BIO_RAW_MAX} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting." />
+          <div className="np-mono" style={{ fontSize: 10, color: over ? "var(--reject)" : "var(--ink-soft)", marginTop: 4, textAlign: "right" }}>{vlen} / {BIO_MAX}</div>
 
           {msg && <div className="np-mono" style={{ fontSize: 11, lineHeight: 1.5, margin: "6px 0 0", color: msg.ok ? "var(--verified)" : "var(--reject)", border: "1px solid " + (msg.ok ? "var(--verified)" : "var(--reject)"), padding: "8px 10px" }}>{msg.text}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>

@@ -51,7 +51,8 @@ function AdminEditor() {
   const setContributor = (mx, p) => {
     const c = { ...(layout.contributors || {}) };
     const cur = c[mx] || {};
-    const next = { name: ((p.name != null ? p.name : cur.name) || "").trim(), bio: ((p.bio != null ? p.bio : cur.bio) || "").slice(0, 250) };
+    const RAW = (window.NpjProfiles && window.NpjProfiles.BIO_RAW_MAX) || 1500; // cap the markdown source, not the 250 visible chars
+    const next = { name: ((p.name != null ? p.name : cur.name) || "").trim(), bio: ((p.bio != null ? p.bio : cur.bio) || "").slice(0, RAW) };
     if (!next.name && !next.bio) delete c[mx]; else c[mx] = next;
     patch({ contributors: c });
   };
@@ -62,8 +63,8 @@ function AdminEditor() {
     return (
       <div style={{ margin: "5px 0 4px", paddingLeft: 8, borderLeft: "2px solid " + AE.line }}>
         <input value={cur.name || ""} onChange={(e) => setContributor(mx, { name: e.target.value })} placeholder="Display name" style={{ ...fld, marginBottom: 5 }} />
-        <textarea value={cur.bio || ""} onChange={(e) => setContributor(mx, { bio: e.target.value.slice(0, 250) })} rows={2} placeholder="About me — ≤250 characters, shown on every byline" style={{ ...fld, resize: "vertical" }} />
-        <div className="np-mono" style={{ fontSize: 9, color: AE.soft, textAlign: "right", marginTop: 2 }}>{(cur.bio || "").length} / 250</div>
+        <textarea value={cur.bio || ""} onChange={(e) => setContributor(mx, { bio: e.target.value.slice(0, (window.NpjProfiles && window.NpjProfiles.BIO_RAW_MAX) || 1500) })} rows={2} placeholder="About me — ≤250 visible chars; [text](https://…) for links" style={{ ...fld, resize: "vertical" }} />
+        <div className="np-mono" style={{ fontSize: 9, color: AE.soft, textAlign: "right", marginTop: 2 }}>{window.NpjProfiles && window.NpjProfiles.visibleLength ? window.NpjProfiles.visibleLength(cur.bio || "") : (cur.bio || "").length} / {(window.NpjProfiles && window.NpjProfiles.BIO_MAX) || 250}</div>
       </div>
     );
   };
