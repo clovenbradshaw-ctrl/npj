@@ -199,6 +199,13 @@ function ProfileCard({ session, me }) {
   const [busy, setBusy] = useState(false);
   const [pulling, setPulling] = useState(false);
   const [msg, setMsg] = useState(null);
+  const taRef = useRef(null);
+  const selRef = useRef(null);                          // latest textarea selection (null until focused)
+  const linkRangeRef = useRef({ start: 0, end: 0 });    // selection captured when the Link popover opened
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkLabel, setLinkLabel] = useState("");
+  const [linkErr, setLinkErr] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -249,6 +256,32 @@ function ProfileCard({ session, me }) {
     setBusy(false);
   };
 
+  // ----- the "Link" button: turn the selected words into a link without typing
+  // markdown. It writes the same [label](url) the renderer already understands,
+  // so the bio stays plain text and the live preview shows the result. -----
+  const openLink = () => {
+    if (linkOpen) { setLinkOpen(false); return; }
+    const r = selRef.current || { start: bio.length, end: bio.length };
+    linkRangeRef.current = { start: r.start, end: r.end };
+    setLinkLabel(bio.slice(r.start, r.end));
+    setLinkUrl(""); setLinkErr(false); setLinkOpen(true);
+  };
+  const applyLink = () => {
+    const safe = window.NpjProfiles && window.NpjProfiles.safeHref;
+    const href = safe ? safe(linkUrl) : null;
+    if (!href) { setLinkErr(true); return; }
+    const { start, end } = linkRangeRef.current;
+    let label = linkLabel.trim().replace(/[\[\]]/g, "");                       // a [ or ] would break the label
+    if (!label) { try { label = new URL(href).hostname.replace(/^www\./, ""); } catch (e) { label = "link"; } }
+    const u = linkUrl.trim().replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29"); // keep (…) parseable
+    const md = "[" + label + "](" + u + ")";
+    const next = (bio.slice(0, start) + md + bio.slice(end)).slice(0, BIO_MAX + 40);
+    setBio(next);
+    setLinkOpen(false); setLinkUrl(""); setLinkLabel("");
+    const caret = Math.min(start + md.length, next.length);
+    requestAnimationFrame(() => { const ta = taRef.current; if (ta) { ta.focus(); ta.setSelectionRange(caret, caret); selRef.current = { start: caret, end: caret }; } });
+  };
+
   const field = { width: "100%", boxSizing: "border-box", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "8px 10px", fontFamily: "var(--serif)", fontSize: 14.5, outline: "none" };
   const over = bio.length > BIO_MAX;
 
@@ -273,11 +306,31 @@ function ProfileCard({ session, me }) {
           </div>
           <input value={name} onChange={e => setName(e.target.value)} placeholder={me ? me.replace(/^@/, "").split(":")[0] : "Your name"} style={field} />
 
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "13px 0 4px" }}>About me</div>
-          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, margin: "0 0 5px" }}>
-            Link a word with <code style={{ background: "rgba(22,20,13,.06)", padding: "0 3px" }}>[text](https://…)</code> — or just paste a full https:// address. Only http(s) links are kept.
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "13px 0 4px", display: "flex", alignItems: "center", gap: 8 }}>
+            <span>About me</span>
+            <span style={{ flex: 1 }} />
+            <div style={{ position: "relative" }}>
+              <button type="button" className="btn btn-sm btn-ghost" onMouseDown={e => e.preventDefault()} onClick={openLink} title="Turn the selected words into a link" style={{ fontSize: 11, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px" }}>
+                <I.link style={{ fontSize: 12 }} /> Link
+              </button>
+              {linkOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 248, zIndex: 6, background: "var(--card)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(22,20,13,.18)", padding: 9, textAlign: "left" }}>
+                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Add a link</div>
+                  <input value={linkLabel} onChange={e => setLinkLabel(e.target.value)} onKeyDown={e => { if (e.key === "Enter") applyLink(); if (e.key === "Escape") setLinkOpen(false); }} placeholder="Text to show (optional)" style={{ ...field, fontSize: 12.5, padding: "6px 8px", marginBottom: 6 }} />
+                  <input autoFocus value={linkUrl} onChange={e => { setLinkUrl(e.target.value); setLinkErr(false); }} onKeyDown={e => { if (e.key === "Enter") applyLink(); if (e.key === "Escape") setLinkOpen(false); }} placeholder="https://…" className="np-mono" style={{ ...field, fontSize: 12, padding: "6px 8px" }} />
+                  {linkErr && <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", marginTop: 5 }}>Enter a valid http(s) link.</div>}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                    <button type="button" className="btn btn-sm btn-ghost" onClick={() => setLinkOpen(false)} style={{ fontSize: 11 }}>Cancel</button>
+                    <button type="button" className="btn btn-sm btn-primary" onClick={applyLink} style={{ fontSize: 11 }}>Add link</button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting. Bylines in [Truthout](https://truthout.org)." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
+          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, margin: "0 0 5px" }}>
+            Select a word, then press <b style={{ color: "var(--ink)" }}>Link</b> — or paste a full https:// address. Only http(s) links are kept.
+          </div>
+          <textarea ref={taRef} value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} onSelect={e => { selRef.current = { start: e.target.selectionStart, end: e.target.selectionEnd }; }} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
           <div className="np-mono" style={{ fontSize: 10, color: over ? "var(--reject)" : "var(--ink-soft)", marginTop: 4, textAlign: "right" }}>{bio.length} / {BIO_MAX}</div>
           {window.NpjProfiles && window.NpjProfiles.hasLink && window.NpjProfiles.hasLink(bio) && (
             <div style={{ marginTop: 8 }}>
