@@ -338,8 +338,13 @@ function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", st
   const tip = signedIn
     ? "Everything in this draft — " + what + " — autosaves to this browser as you type, then backs up to your Matrix account (" + (user || "signed in") + ") a moment later. Sign out, wipe the browser or switch devices: the account copy survives."
     : "This draft autosaves to this browser as you type (" + what + ") — but it is NOT backed up to an account. Sign in with Matrix and it will be.";
+  // Fixed footprint: the status text cycles through very different widths
+  // ("saving…" → "backing up to your account…" → "✓ saved · this browser +
+  // your account") on every autosave. A reserved width keeps those changes from
+  // reflowing — and re-wrapping — the toolbar buttons to its right. Longer edge
+  // states ellipsize; the full text always lives in the hover tooltip.
   return (
-    <span className="np-mono" role="status" aria-live="polite" title={tip} style={{ fontSize: 10.5, color, border: "1px solid var(--nr-line-strong, rgba(22,20,13,.44))", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
+    <span className="np-mono" role="status" aria-live="polite" title={tip} style={{ display: "inline-block", boxSizing: "border-box", width: 276, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", verticalAlign: "middle", fontSize: 10.5, color, border: "1px solid var(--nr-line-strong, rgba(22,20,13,.44))", padding: "1px 6px", whiteSpace: "nowrap", cursor: "help", ...style }}>{text}</span>
   );
 }
 

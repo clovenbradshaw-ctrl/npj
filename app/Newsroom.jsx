@@ -38,6 +38,25 @@ const START_DOC =
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
+// The media-census thumbnails are plain <img>s, so they miss the resolution an
+// <image-slot> does for itself. Mirror that fallback chain on error: try the
+// archive.org copy (data-alt the slot carries), then resolve an auth-gated
+// media-store URL to a renderable blob. Without this, a banner whose primary
+// URL needs auth (or has lapsed to its archive copy) shows a broken image.
+function mediaThumbFallback(e, m) {
+  const img = e.currentTarget;
+  if (img.dataset.fbDone) return;
+  const cur = img.getAttribute("src") || "";
+  if (m && m.alt && m.alt !== cur && img.dataset.triedAlt !== m.alt) { img.dataset.triedAlt = m.alt; img.src = m.alt; return; }
+  const media = window.NpjMedia;
+  if (media && media.isStoreUrl && media.isStoreUrl(cur)) {
+    img.dataset.fbDone = "1";
+    media.resolveDisplay(cur).then(u => { if (u && u !== cur) img.src = u; }).catch(() => {});
+    return;
+  }
+  img.dataset.fbDone = "1";
+}
+
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me, isAdmin } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -223,10 +242,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!f.dataset.mid) f.dataset.mid = "m" + Date.now().toString(36) + i;
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
+      const alt = slot ? slot.getAttribute("data-alt") : null;   // archive.org copy the slot falls back to
       const embed = f.getAttribute("data-embed-url");
       const cap = f.querySelector("figcaption");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
-      if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
+      if (url) found.push({ kind: "image", url, alt, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
     });
     setMedia(found);
@@ -1143,7 +1163,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {media.map(m => m.kind === "image"
                 ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
-                    <img src={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <img src={m.url} alt={m.caption || ""} onError={e => mediaThumbFallback(e, m)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                   </button>
                 : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
             </div>
