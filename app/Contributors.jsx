@@ -59,7 +59,7 @@ function ContributorsPage({ onHome, onNewsroom }) {
                 </div>
                 <div><RoleBadge p={p} /></div>
                 {p.bio
-                  ? <p style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.5, margin: 0, color: "var(--ink)" }}>{p.bio}</p>
+                  ? <p style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.5, margin: 0, color: "var(--ink)" }}>{window.npjRichText ? window.npjRichText(p.bio) : p.bio}</p>
                   : <p className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", margin: 0, fontStyle: "italic" }}>No About me yet.</p>}
               </div>
             ))}

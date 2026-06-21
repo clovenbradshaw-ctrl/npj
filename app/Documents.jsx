@@ -274,8 +274,17 @@ function ProfileCard({ session, me }) {
           <input value={name} onChange={e => setName(e.target.value)} placeholder={me ? me.replace(/^@/, "").split(":")[0] : "Your name"} style={field} />
 
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "13px 0 4px" }}>About me</div>
-          <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
+          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, margin: "0 0 5px" }}>
+            Link a word with <code style={{ background: "rgba(22,20,13,.06)", padding: "0 3px" }}>[text](https://…)</code> — or just paste a full https:// address. Only http(s) links are kept.
+          </div>
+          <textarea value={bio} onChange={e => setBio(e.target.value.slice(0, BIO_MAX + 40))} rows={3} placeholder="A sentence or two — your beat, your background, why readers can trust your reporting. Bylines in [Truthout](https://truthout.org)." style={{ ...field, fontFamily: "var(--serif)", resize: "vertical", lineHeight: 1.5 }} />
           <div className="np-mono" style={{ fontSize: 10, color: over ? "var(--reject)" : "var(--ink-soft)", marginTop: 4, textAlign: "right" }}>{bio.length} / {BIO_MAX}</div>
+          {window.NpjProfiles && window.NpjProfiles.hasLink && window.NpjProfiles.hasLink(bio) && (
+            <div style={{ marginTop: 8 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 3 }}>Byline preview</div>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)", border: "1px dashed var(--rule)", padding: "8px 10px" }}>{window.npjRichText(bio)}</div>
+            </div>
+          )}
 
           {msg && <div className="np-mono" style={{ fontSize: 11, lineHeight: 1.5, margin: "6px 0 0", color: msg.ok ? "var(--verified)" : "var(--reject)", border: "1px solid " + (msg.ok ? "var(--verified)" : "var(--reject)"), padding: "8px 10px" }}>{msg.text}</div>}
           <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
