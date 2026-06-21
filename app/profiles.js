@@ -17,11 +17,16 @@
 (function () {
   const LS_KEY = "npj_profiles_v1";        // { "@mxid": { name, bio, updated } }
   const ACCOUNT_DATA_TYPE = "press.npj.profile"; // per-account, server-side, private until published
-  const BIO_MAX = 250, NAME_MAX = 80;
+  // BIO_MAX is the VISIBLE budget — what a reader sees rendered (link labels +
+  // plain text), the number the editor counts against. BIO_RAW_MAX bounds the
+  // stored markdown source, which also carries the [..](..) syntax and the URLs
+  // (those don't count toward BIO_MAX), so it's roomier. Storage clamps to the
+  // raw cap so a link is never cut in half on save.
+  const BIO_MAX = 250, NAME_MAX = 80, BIO_RAW_MAX = 1500;
 
   function clamp(v, max) { return String(v == null ? "" : v).replace(/\s+/g, " ").trim().slice(0, max); }
   function clean(p) {
-    const out = { name: clamp(p && p.name, NAME_MAX), bio: clamp(p && p.bio, BIO_MAX) };
+    const out = { name: clamp(p && p.name, NAME_MAX), bio: clamp(p && p.bio, BIO_RAW_MAX) };
     out.updated = (p && p.updated) || new Date().toISOString();
     return out;
   }
@@ -96,8 +101,24 @@
     if (last < src.length) pushPlain(src.slice(last));
     return out;
   }
-  // Does this bio contain at least one renderable link? (drives the editor preview)
+  // Does this bio contain at least one renderable link?
   function hasLink(text) { return linkTokens(text).some(function (t) { return t.type === "link"; }); }
+  // The VISIBLE length — what a reader sees rendered. A link counts as its label
+  // only; the URL and the [..](..) syntax are free. This is the number the
+  // editor's counter shows and caps at BIO_MAX.
+  function visibleLength(text) {
+    return linkTokens(text).reduce(function (n, t) {
+      return n + (t.type === "link" ? (t.label || "").length : (t.text || "").length);
+    }, 0);
+  }
+  // Build one [label](url) token, encoding the few chars that would otherwise
+  // break the markdown ( ] in the label, ()/space in the URL). Shared by the
+  // editor so the button and the DOM serialiser agree on the exact syntax.
+  function linkMarkdown(label, url) {
+    const L = String(label == null ? "" : label).replace(/[\[\]]/g, "");
+    const U = String(url == null ? "" : url).trim().replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+    return "[" + L + "](" + U + ")";
+  }
 
   /* ---------- localStorage ---------- */
   function readAllLocal() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch (e) { return {}; } }
@@ -156,7 +177,7 @@
     if (!mxid) return { name: "", bio: "", source: "none" };
     const fromAccount = await fetchAccountData(session);
     if (fromAccount && (fromAccount.name || fromAccount.bio)) {
-      const prof = { name: clamp(fromAccount.name, NAME_MAX), bio: clamp(fromAccount.bio, BIO_MAX) };
+      const prof = { name: clamp(fromAccount.name, NAME_MAX), bio: clamp(fromAccount.bio, BIO_RAW_MAX) };
       saveLocal(mxid, prof); reflect(mxid, prof);
       return Object.assign({ source: "account" }, prof);
     }
@@ -201,9 +222,9 @@
   }
 
   window.NpjProfiles = {
-    BIO_MAX, NAME_MAX, ACCOUNT_DATA_TYPE,
+    BIO_MAX, NAME_MAX, BIO_RAW_MAX, ACCOUNT_DATA_TYPE,
     colorFor, clamp,
-    safeHref, linkTokens, hasLink,
+    safeHref, linkTokens, hasLink, visibleLength, linkMarkdown,
     loadLocal, saveLocal, loadPublic,
     loadMine, saveMine, hydrateMine, intoLayout,
     accountDisplayName, reflect

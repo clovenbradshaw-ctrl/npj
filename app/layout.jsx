@@ -63,9 +63,13 @@ const LAYOUT_DEFAULTS = {
 
 const LAYOUT_LS_KEY = "npj_layout_v1";
 
-// Byline / profile limits — the "About me" caps at 250 characters (the ask),
-// the display name at a sane headline width.
+// Byline / profile limits — the "About me" caps at 250 VISIBLE characters (the
+// ask): link labels + plain text. The committed markdown source also carries
+// the [..](..) syntax and the URLs (which don't count toward the 250), so the
+// stored string is clamped to the roomier BIO_RAW_MAX — clamping to 250 here
+// would cut a trailing link in half. The display name caps at a headline width.
 const BIO_MAX = 250;
+const BIO_RAW_MAX = 1500;
 const NAME_MAX = 80;
 
 // Length-clamp only — NOT a trim. This runs on every keystroke (the layout is
@@ -84,7 +88,7 @@ function normalizeContributors(raw) {
       if (!/^@[^:]+:[^:]+$/.test(k)) continue;
       const p = raw[k] || {};
       const name = clampStr(p.name, NAME_MAX);
-      const bio = clampStr(p.bio, BIO_MAX);
+      const bio = clampStr(p.bio, BIO_RAW_MAX);
       if (!name.trim() && !bio.trim()) continue;
       out[k] = { name, bio };
       if (p.updated) out[k].updated = String(p.updated).slice(0, 40);
