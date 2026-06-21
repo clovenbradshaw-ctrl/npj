@@ -141,6 +141,23 @@ function npjPerson(mxid) {
   return { mxid, name, bio: p.bio || "", color };
 }
 
+/* ---------- bio rich text ----------
+   Render a contributor's "About me" with safe inline links. Tokenising +
+   URL-sanitising is headless in app/profiles.js (linkTokens/safeHref); here we
+   only map tokens to React nodes. Labels and plain text are React children, so
+   React escapes them; every href already cleared safeHref (http(s)/mailto only)
+   and links carry rel="noopener noreferrer nofollow" + target=_blank. There is
+   no innerHTML anywhere on this path. Falls back to the raw string if the
+   profiles module hasn't loaded. */
+function npjRichText(text) {
+  const P = window.NpjProfiles;
+  const toks = (P && P.linkTokens) ? P.linkTokens(text) : [{ type: "text", text: String(text == null ? "" : text) }];
+  return toks.map((t, i) => t.type === "link"
+    ? <a key={i} href={t.href} target="_blank" rel="noopener noreferrer nofollow"
+         style={{ color: "inherit", textDecorationLine: "underline", textUnderlineOffset: 2 }}>{t.label}</a>
+    : <React.Fragment key={i}>{t.text}</React.Fragment>);
+}
+
 /* ---------- MXID handle ---------- */
 function Handle({ mxid, showName = false, size = 18 }) {
   const p = npjPerson(mxid);
@@ -227,7 +244,7 @@ function Byline({ authors = [], editors = [], byline = "" }) {
             <span style={{ flex: 1 }} />
             <button onClick={() => setOpenId(null)} aria-label="Close" style={{ background: "none", border: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 13, lineHeight: 1 }}><I.x /></button>
           </div>
-          <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)" }}>{openP.bio}</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)" }}>{npjRichText(openP.bio)}</div>
           <button onClick={goContributors} className="np-mono" style={{ marginTop: 7, background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 10.5, textDecoration: "underline", textUnderlineOffset: 2 }}>About the contributors →</button>
         </div>
       )}
@@ -367,4 +384,4 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });

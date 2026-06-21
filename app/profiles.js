@@ -35,6 +35,70 @@
     return PALETTE[h % PALETTE.length];
   }
 
+  /* ---------- bio rich text: safe inline links ----------
+     The "About me" is plain text the contributor authors and we render to every
+     visitor (public, world-readable), so links are PARSED but never TRUSTED.
+     safeHref is the gate: it strips chars a browser ignores mid-scheme (so
+     "java\tscript:…" can't sneak past), then accepts a URL only if it parses to
+     http(s) — or a validated mailto. The renderer (window.npjRichText, in
+     shared.jsx) puts the label/plain text in React text nodes (auto-escaped) and
+     only ever sets an href that cleared this function — never innerHTML.
+     Syntax: [label](https://example.com); bare https://… and www.… auto-link. */
+  function safeHref(raw) {
+    let u = String(raw == null ? "" : raw).trim();
+    if (!u) return null;
+    u = u.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+    if (!u) return null;
+    if (/^mailto:/i.test(u)) return /^mailto:[^\s@]+@[^\s@]+\.[^\s@]{2,}$/i.test(u) ? u : null;
+    // No scheme → assume https, so [label](example.com) and www.x.com work.
+    if (!/^[a-z][a-z0-9+.\-]*:/i.test(u)) u = "https://" + u.replace(/^\/+/, "");
+    let parsed;
+    try { parsed = new URL(u); } catch (e) { return null; }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    if (!parsed.hostname || parsed.hostname.indexOf(".") === -1) return null; // need a dotted host
+    return parsed.href;
+  }
+
+  // Split a bio into plain-text + link tokens: [{type:'text',text} | {type:'link',href,label}].
+  // Pure + headless (no React) so it's unit-testable and reusable. Markdown
+  // [label](url) is parsed first; bare http(s)/www URLs in the gaps auto-link.
+  // A link whose URL fails safeHref is left as the literal text the user typed —
+  // mxids like @a:b.c carry no scheme, so they never become links.
+  function linkTokens(text) {
+    const src = String(text == null ? "" : text);
+    const out = [];
+    const AUTO = /(https?:\/\/[^\s<>()]+|www\.[^\s<>()]+)/gi;
+    function pushPlain(s) {
+      if (!s) return;
+      let l = 0, m; AUTO.lastIndex = 0;
+      while ((m = AUTO.exec(s))) {
+        let url = m[0], trail = "";
+        const tm = url.match(/[.,;:!?'")]+$/); // don't swallow sentence punctuation into the link
+        if (tm) { trail = tm[0]; url = url.slice(0, -trail.length); }
+        if (m.index > l) out.push({ type: "text", text: s.slice(l, m.index) });
+        const href = safeHref(url);
+        if (href) out.push({ type: "link", href: href, label: url.replace(/^https?:\/\//i, "") });
+        else out.push({ type: "text", text: url });
+        if (trail) out.push({ type: "text", text: trail });
+        l = m.index + m[0].length;
+      }
+      if (l < s.length) out.push({ type: "text", text: s.slice(l) });
+    }
+    const MD = /\[([^\]\n]+)\]\(\s*([^)\s]+)\s*\)/g;
+    let last = 0, mm;
+    while ((mm = MD.exec(src))) {
+      if (mm.index > last) pushPlain(src.slice(last, mm.index));
+      const href = safeHref(mm[2]);
+      if (href) out.push({ type: "link", href: href, label: mm[1] });
+      else out.push({ type: "text", text: mm[0] });
+      last = mm.index + mm[0].length;
+    }
+    if (last < src.length) pushPlain(src.slice(last));
+    return out;
+  }
+  // Does this bio contain at least one renderable link? (drives the editor preview)
+  function hasLink(text) { return linkTokens(text).some(function (t) { return t.type === "link"; }); }
+
   /* ---------- localStorage ---------- */
   function readAllLocal() { try { return JSON.parse(localStorage.getItem(LS_KEY) || "{}") || {}; } catch (e) { return {}; } }
   function writeAllLocal(map) { try { localStorage.setItem(LS_KEY, JSON.stringify(map)); } catch (e) {} }
@@ -139,6 +203,7 @@
   window.NpjProfiles = {
     BIO_MAX, NAME_MAX, ACCOUNT_DATA_TYPE,
     colorFor, clamp,
+    safeHref, linkTokens, hasLink,
     loadLocal, saveLocal, loadPublic,
     loadMine, saveMine, hydrateMine, intoLayout,
     accountDisplayName, reflect
