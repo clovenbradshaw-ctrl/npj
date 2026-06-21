@@ -1436,16 +1436,27 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const liveUnpublished = isRepublish && liveMeta.status === "unpublished";
 
   // ---- byline: who the piece is credited to (outward-facing) ----
-  // Authors default to you (pulled from your account/profile). Editors are an
-  // optional separate "Edited by" credit. "Publish unsigned" ships with no author.
+  // You type the name readers see (defaults to your own); your account id is what
+  // gets stored on the record. Editors are an optional separate "Edited by"
+  // credit. "Publish unsigned" ships with no author.
   const meMx = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || "";
-  const [unsigned, setUnsigned] = useState(false);
-  const [authorsInput, setAuthorsInput] = useState(meMx);
-  const [editorsInput, setEditorsInput] = useState("");
   const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
-  const bylineAuthors = parseMx(authorsInput);
-  const bylineEditors = parseMx(editorsInput);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
+  const [unsigned, setUnsigned] = useState(false);
+  // Byline is a plain name now — type how you want to be credited. It defaults
+  // to your profile display name. Whatever name you show, your Matrix id (meMx)
+  // is recorded as the author on the committed record, so attribution survives.
+  const defaultName = meMx ? nameOfMx(meMx) : "";
+  const [nameInput, setNameInput] = useState(defaultName);
+  const [editorsInput, setEditorsInput] = useState("");
+  const bylineEditors = parseMx(editorsInput);
+  // the userid stored on the backend record — you, the signed-in publisher
+  const bylineAuthors = meMx ? [meMx] : [];
+  // Publishing under your own name keeps the rich contributor chip (the byline
+  // resolves from your id); a free-text override is stored only when you type a
+  // name different from your own — either way the userid above is what's saved.
+  const typedName = nameInput.trim();
+  const bylineOverride = typedName && typedName !== defaultName ? typedName : "";
 
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {
@@ -1612,7 +1623,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     const gen = window.NpjArticles.genesisFromContent(flight.content, {
       slug, headline: title, actor,
-      authors: bylineAuthors, editors: bylineEditors, byline: unsigned ? "Unsigned" : ""
+      // authors carries the userid (meMx); byline overrides the shown name only
+      // when it was customized away from the contributor's own resolved name
+      authors: bylineAuthors, editors: bylineEditors,
+      byline: unsigned ? "Unsigned" : bylineOverride
     });
     // move any media-store images onto archive.org (download + reupload, or the
     // Wayback fallback), then rebuild the genesis line from the mutated operand
@@ -1705,19 +1719,20 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
-            {/* Byline — outward-facing credit. Defaults to you; editors optional; can be Unsigned. */}
+            {/* Byline — type the name readers see; your account id is recorded
+                on the backend either way. Editors optional; can be Unsigned. */}
             <div style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
               <span className="np-eyebrow" style={{ color: NR.muted, flex: "0 0 86px" }}>Byline</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5, color: NR.text }}>
-                  {unsigned || !bylineAuthors.length ? "Unsigned" : "By " + bylineAuthors.map(nameOfMx).join(", ")}
+                  {unsigned || (!typedName && !defaultName) ? "Unsigned" : "By " + (typedName || defaultName)}
                   {bylineEditors.length ? <span style={{ color: NR.muted }}>{"  ·  Edited by " + bylineEditors.map(nameOfMx).join(", ")}</span> : null}
                 </div>
                 {!unsigned && (
                   <React.Fragment>
-                    <input value={authorsInput} onChange={e => setAuthorsInput(e.target.value)} placeholder="@you:server" className="np-mono" spellCheck={false}
-                      style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
-                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Authors · Matrix IDs, comma-separated. Defaults to you; the name comes from each contributor's profile.</div>
+                    <input value={nameInput} onChange={e => setNameInput(e.target.value)} placeholder="Your name"
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 13, fontFamily: "var(--cond)", outline: "none" }} />
+                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>The name readers see. {meMx ? "Recorded on the record as " + meMx + "." : "Sign in so your account is recorded with the byline."}</div>
                   </React.Fragment>
                 )}
                 <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:server  (optional)" className="np-mono" spellCheck={false}
