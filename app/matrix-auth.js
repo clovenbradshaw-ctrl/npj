@@ -137,6 +137,15 @@
     }
     return v;
   }
+  // Accept an invite / join a room. A newcomer who followed an invite link is
+  // already invited to the project; joining is what makes joinedRooms() surface
+  // it, so they land inside the project instead of an empty workspace.
+  async function joinRoom(roomIdOrAlias) {
+    if (!session) { const e = new Error("Sign in first"); e.code = "noauth"; throw e; }
+    const v = String(roomIdOrAlias || "").trim(); if (!v) return null;
+    const out = await api(session.base_url, "/_matrix/client/v3/join/" + encodeURIComponent(v), { method: "POST", token: session.access_token, body: {} });
+    return out.room_id || v;
+  }
   async function invite(roomIdOrAlias, userInput) {
     if (!session) { const e = new Error("Sign in with Matrix first"); e.code = "noauth"; throw e; }
     const id = parseMxid(userInput);
@@ -348,11 +357,146 @@
     return { roomId: out.room_id, alias: out.room_alias || null };
   }
 
+  /* ---- invite someone who has NO Matrix account yet ----
+     The inviter (signed in) mints a brand-new account on the homeserver, then
+     hands the newcomer a single link that logs them in, lets them pick a display
+     name and set their own password. Three pieces live here; the UI is in
+     app/Invite.jsx.
+
+       register()        — create the account (runs in the inviter's browser)
+       setDisplayName()  — the newcomer names themselves (step 1 of the link)
+       changePassword()  — the newcomer replaces the temp password (step 2)
+
+     register() never touches the inviter's own session: inhibit_login means the
+     homeserver brings the account into being but mints NO device or token for it,
+     so the inviter stays signed in as themselves. The newcomer logs in fresh with
+     the temp password carried in the link, then immediately changes it — so the
+     password in the link (URL fragment, never sent to a server) is single-use. */
+  function randomLocalpart(seed) {
+    const base = String(seed || "").toLowerCase().replace(/[^a-z0-9._=\-/]+/g, "").replace(/^[._\-/]+/, "").slice(0, 16);
+    return (base || "npj") + "-" + Math.random().toString(36).slice(2, 7);
+  }
+  function randomPassword() {
+    // 18 CSPRNG bytes → ~24 url-safe chars. Strong, and short-lived: the link's
+    // first run forces a replacement, so this is never a credential the user keeps.
+    const a = new Uint8Array(18); crypto.getRandomValues(a);
+    let s = ""; for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+    return btoa(s).replace(/\+/g, "A").replace(/\//g, "B").replace(/=+$/, "");
+  }
+  // Matrix registration is user-interactive (UIA): the server answers the first
+  // request with the auth "flows" it demands. We satisfy the two stages a browser
+  // can complete unaided — m.login.dummy (open registration) and
+  // m.login.registration_token (an admin-issued token pasted into the widget).
+  // CAPTCHA / email / phone stages can't be automated, so we say so plainly.
+  function pickRegisterFlow(flows, hasToken) {
+    const can = (s) => s === "m.login.dummy" || (s === "m.login.registration_token" && hasToken);
+    const usable = (flows || []).map(f => (f && f.stages) || []).filter(st => st.length && st.every(can));
+    usable.sort((a, b) => a.length - b.length);
+    return usable[0] || null;
+  }
+  function registerFlowMessage(flows) {
+    const all = new Set(); (flows || []).forEach(f => ((f && f.stages) || []).forEach(s => all.add(s)));
+    if (all.has("m.login.registration_token")) return "This homeserver needs a registration token. Paste one (from your Synapse admin) and try again.";
+    if (all.has("m.login.recaptcha")) return "This homeserver requires a CAPTCHA to register, which can't be completed from here.";
+    if (all.has("m.login.email.identity") || all.has("m.login.msisdn")) return "This homeserver requires email/phone verification to register.";
+    return "This homeserver doesn't allow creating accounts from the browser.";
+  }
+  async function register({ domain, username, password, registrationToken, deviceName } = {}) {
+    // accept a bare domain ("hyphae.social") or a full mxid (":server" is split off)
+    const raw = String(domain || "").trim();
+    const dom = (raw.indexOf(":") >= 0 ? raw.split(":").pop() : raw).replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
+    if (!dom) { const e = new Error("Need a homeserver to register on"); e.code = "badmxid"; throw e; }
+    const base = await discover(dom);
+    const localpart = String(username || "").trim() || randomLocalpart();
+    const pw = password || randomPassword();
+    const base_body = { username: localpart, password: pw, inhibit_login: true, initial_device_display_name: deviceName || "People's Journalism (web)" };
+    let uiaSession = null;   // the homeserver's UIA session id, echoed back each stage
+    let flows = null;        // the auth flows the server last advertised
+    let serverDone = [];     // stages the server says are already cleared this session
+    for (let i = 0; i < 8; i++) {
+      let auth;
+      if (uiaSession) {
+        const flow = pickRegisterFlow(flows, !!registrationToken);
+        if (!flow) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
+        // send the first stage the server hasn't cleared yet (the server, not us,
+        // is the source of truth for progress); fall back to the last stage so a
+        // server that returns no `completed` still gets a satisfying auth dict
+        const next = flow.find(s => serverDone.indexOf(s) < 0) || flow[flow.length - 1];
+        auth = next === "m.login.registration_token"
+          ? { type: "m.login.registration_token", token: registrationToken, session: uiaSession }
+          : { type: "m.login.dummy", session: uiaSession };
+      }
+      let res, data = {};
+      try {
+        res = await fetch(base + "/_matrix/client/v3/register", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(auth ? { ...base_body, auth } : base_body)
+        });
+      } catch (e) { const err = new Error("network/cors error reaching the homeserver"); err.code = "network"; throw err; }
+      try { data = await res.json(); } catch (e) { data = {}; }
+      if (res.ok) return { mxid: "@" + localpart + ":" + dom, localpart, domain: dom, password: pw, base_url: base, user_id: data.user_id || ("@" + localpart + ":" + dom) };
+      if (res.status === 401 && data && Array.isArray(data.flows)) {
+        flows = data.flows; uiaSession = data.session; serverDone = data.completed || [];
+        if (!pickRegisterFlow(flows, !!registrationToken)) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
+        continue;
+      }
+      const err = new Error((data && (data.error || data.errcode)) || ("registration failed (" + res.status + ")"));
+      err.status = res.status; err.errcode = data && data.errcode; err.data = data;
+      if (err.errcode === "M_FORBIDDEN") err.message = "This homeserver has registration closed.";
+      if (err.errcode === "M_USER_IN_USE") err.message = "That username is taken — try generating again.";
+      throw err;
+    }
+    const e = new Error("Registration didn't complete on this homeserver."); e.code = "uia"; throw e;
+  }
+
+  async function setDisplayName(name) {
+    if (!session) { const e = new Error("Sign in first"); e.code = "noauth"; throw e; }
+    await api(session.base_url, "/_matrix/client/v3/profile/" + encodeURIComponent(session.user_id) + "/displayname", {
+      method: "PUT", token: session.access_token, body: { displayname: String(name || "") }
+    });
+  }
+
+  // Replace the current password. logout_devices:false keeps THIS token alive, so
+  // the newcomer stays signed in straight through the change. UIA again: the first
+  // call may 401 with a session id to echo back inside the m.login.password auth.
+  async function changePassword(oldPassword, newPassword) {
+    if (!session) { const e = new Error("Sign in first"); e.code = "noauth"; throw e; }
+    const id = parseMxid(session.user_id);
+    const auth = { type: "m.login.password", identifier: { type: "m.id.user", user: id ? id.localpart : session.user_id }, password: String(oldPassword) };
+    const body = { new_password: String(newPassword), logout_devices: false, auth };
+    try {
+      await api(session.base_url, "/_matrix/client/v3/account/password", { method: "POST", token: session.access_token, body });
+    } catch (e) {
+      if (e.status === 401 && e.data && e.data.session) {
+        await api(session.base_url, "/_matrix/client/v3/account/password", {
+          method: "POST", token: session.access_token, body: { ...body, auth: { ...auth, session: e.data.session } }
+        });
+      } else throw e;
+    }
+  }
+
+  /* ---- the single invite link ----
+     Everything the newcomer needs rides in the URL fragment (#welcome=…), which
+     browsers never send to a server. The token is base64url(JSON):
+       { v, hs: domain, u: localpart, p: tempPassword, r: roomId?, by: inviter } */
+  function b64urlEncode(str) { return btoa(unescape(encodeURIComponent(str))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+  function b64urlDecode(str) { return decodeURIComponent(escape(atob(String(str).replace(/-/g, "+").replace(/_/g, "/")))); }
+  function buildInviteLink(payload) {
+    const token = b64urlEncode(JSON.stringify(payload || {}));
+    return location.origin + location.pathname + "#welcome=" + token;
+  }
+  function parseInviteToken(token) {
+    try { const p = JSON.parse(b64urlDecode(token)); if (p && p.u && p.p && p.hs) return p; } catch (e) {}
+    return null;
+  }
+
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
   window.MatrixAuth = {
     ADMIN_MXID, CONTROL_ALIAS, APP_ROOM_TYPE, parseMxid, discover, login, logout, restore, current, token,
-    isSignedIn, isAdmin, resolveRoom, invite, tagRoom, ensureControlRoom, readPermissions, writePermissions, getProfile,
+    isSignedIn, isAdmin, resolveRoom, invite, joinRoom, tagRoom, ensureControlRoom, readPermissions, writePermissions, getProfile,
+    // invite someone who has no account yet: mint it, name it, re-key it
+    register, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, roomMembers, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange

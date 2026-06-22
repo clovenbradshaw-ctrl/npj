@@ -146,6 +146,9 @@
 <script type="text/babel" src="app/Submit.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
 <script type="text/babel" src="app/Documents.jsx"></script>
+<!-- invite-by-link: mint a new account on the homeserver + the welcome wizard
+     (window.NewAccountInvite, window.WelcomeInvite) the single link opens -->
+<script type="text/babel" src="app/Invite.jsx"></script>
 <script type="text/babel" src="app/Citey.jsx"></script>
 <!-- Citey's PII review + hard-redaction surface (the archive.org gate) -->
 <script type="text/babel" src="app/CiteyRedact.jsx"></script>
@@ -200,6 +203,13 @@ function App() {
     });
   }, []);
   const [session, setSession] = useState(() => window.MatrixAuth.restore());
+  // a #welcome=<token> link drops a brand-new contributor into the onboarding
+  // wizard (sign in → name → password) before the rest of the app exists for them
+  const welcomePayload = useRef((() => {
+    const m = (location.hash || "").match(/(?:^#|[;&])welcome=([^;&]+)/);
+    return m ? window.MatrixAuth.parseInviteToken(m[1]) : null;
+  })()).current;
+  const [welcomeDone, setWelcomeDone] = useState(false);
   const me = (session && session.user_id) || "@you:guest";
   const role = window.roleOf(layout, session && session.user_id);
   const isAdmin = role === "admin";
@@ -442,6 +452,16 @@ function App() {
 
   window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
+
+  // a valid invite link owns the whole screen until the newcomer finishes; then
+  // we drop the #welcome token and sign them into the workspace like anyone else
+  if (welcomePayload && !welcomeDone) {
+    return <WelcomeInvite payload={welcomePayload} onDone={(sess) => {
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+      setWelcomeDone(true);
+      if (sess) signIn(sess);
+    }} />;
+  }
 
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
