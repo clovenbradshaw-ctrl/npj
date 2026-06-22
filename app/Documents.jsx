@@ -721,6 +721,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     <MemberChips list={members[p.roomId]} me={me} />
                     <span style={{ flex: 1 }} />
                     <InviteControl roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
+                    <NewAccountInvite roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
                   </div>
                   <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 5, display: "flex", alignItems: "center", gap: 5 }}>
                     <I.shield style={{ fontSize: 11 }} /> Everyone invited can open and edit every article and source in this project.

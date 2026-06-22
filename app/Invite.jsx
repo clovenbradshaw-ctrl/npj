@@ -1,0 +1,271 @@
+/* NPJ — Invite someone who has no Matrix account yet.
+ *
+ * Two halves of one flow:
+ *   NewAccountInvite — the editor-side widget. The signed-in inviter mints a
+ *     fresh account on their own homeserver (hyphae.social) and gets a single
+ *     link to hand over. If a project room is in scope, the new account is
+ *     invited into it at the same time, so the newcomer lands with access.
+ *   WelcomeInvite — what that link opens. It logs the newcomer in with the
+ *     one-time password baked into the link, asks them to pick a display name,
+ *     then makes them set their own password before anything else. After that
+ *     the temp password is dead and they're a normal signed-in contributor.
+ *
+ * The credentials only ever travel in the URL fragment (#welcome=…), which the
+ * browser never sends to a server, and the password is replaced on first run.
+ */
+
+function InviteSpinner({ size }) {
+  const s = size || 12;
+  return <span style={{ width: s, height: s, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-1px" }} />;
+}
+
+/* clipboard with a select-and-copy fallback for insecure contexts / old browsers */
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    const ok = document.execCommand("copy"); document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
+}
+
+/* ---- the editor-side widget ----
+   props:
+     roomId    — invite the new account into this project room (optional)
+     ensureRoom— async () => roomId, used when the room isn't created yet
+                 (the Newsroom only spins up a project on first invite)
+     onInvited — (mxid) => void, so the caller can show a pending chip */
+function NewAccountInvite({ roomId, ensureRoom, onInvited }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [needToken, setNeedToken] = useState(false);
+  const [token, setToken] = useState("");
+  const [link, setLink] = useState(null);   // { url, mxid }
+  const [copied, setCopied] = useState(false);
+
+  const me = window.MatrixAuth.current();
+  const domain = (me && me.user_id && (window.MatrixAuth.parseMxid(me.user_id) || {}).domain) || "";
+
+  const create = async () => {
+    if (busy || !domain) { if (!domain) setErr("Sign in with Matrix first."); return; }
+    setBusy(true); setErr(""); setLink(null);
+    try {
+      const acct = await window.MatrixAuth.register({ domain, registrationToken: token.trim() || undefined });
+      // bring the newcomer into the project room (best-effort; account already exists)
+      let r = roomId || null;
+      try { if (!r && ensureRoom) r = await ensureRoom(); } catch (e) { r = null; }
+      if (r) { try { await window.MatrixAuth.invite(r, acct.mxid); onInvited && onInvited(acct.mxid); } catch (e) {} }
+      const url = window.MatrixAuth.buildInviteLink({ v: 1, hs: acct.domain, u: acct.localpart, p: acct.password, r: r || undefined, by: me.user_id });
+      setLink({ url, mxid: acct.mxid }); setNeedToken(false);
+    } catch (e) {
+      if (e && e.code === "uia" && /registration token/i.test(e.message || "")) { setNeedToken(true); setErr(e.message); }
+      else setErr((e && e.message) || "Couldn't create the account.");
+    }
+    setBusy(false);
+  };
+
+  const doCopy = async () => { if (link && await copyText(link.url)) { setCopied(true); setTimeout(() => setCopied(false), 1600); } };
+  const reset = () => { setLink(null); setErr(""); setCopied(false); };
+
+  if (!open) return (
+    <button className="btn btn-sm btn-ghost" onClick={() => setOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }}>
+      <I.link style={{ fontSize: 11 }} /> Invite by link
+    </button>
+  );
+
+  return (
+    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--rule-strong)", width: "100%" }}>
+      <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span>Invite someone with no account</span>
+        <button className="btn btn-sm btn-ghost" onClick={() => { setOpen(false); reset(); }} style={{ padding: 2 }}><I.x style={{ fontSize: 10 }} /></button>
+      </div>
+
+      {!link && (
+        <>
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.45 }}>
+            Creates a new account on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, pick a display name and set their own password — no sign-up needed.
+          </div>
+          {needToken && (
+            <input value={token} onChange={e => setToken(e.target.value)} placeholder="registration token" className="np-mono"
+              style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 6 }} />
+          )}
+          <button className="btn btn-sm btn-primary" disabled={busy} onClick={create} style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: busy ? .6 : 1 }}>
+            {busy ? <InviteSpinner /> : <I.link style={{ fontSize: 12 }} />}{busy ? "Creating account…" : "Create invite link"}
+          </button>
+        </>
+      )}
+
+      {link && (
+        <>
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginBottom: 6, lineHeight: 1.4 }}>
+            Account created: <strong>{link.mxid}</strong>{roomId || ensureRoom ? " · invited to this project" : ""}. Send them this link:
+          </div>
+          <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+            <input readOnly value={link.url} onFocus={e => e.target.select()} className="np-mono"
+              style={{ flex: 1, minWidth: 0, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 10.5, outline: "none" }} />
+            <button className="btn btn-sm btn-primary" onClick={doCopy} style={{ display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" }}>
+              {copied ? <I.check style={{ fontSize: 12 }} /> : <I.copy style={{ fontSize: 12 }} />}{copied ? "Copied" : "Copy"}
+            </button>
+          </div>
+          <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>
+            The link carries a one-time password — it stops working once they set their own. Share it privately.
+          </div>
+          <button className="btn btn-sm btn-ghost" onClick={reset} style={{ marginTop: 6, fontSize: 10.5 }}>Invite another</button>
+        </>
+      )}
+
+      {err && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)", marginTop: 7, lineHeight: 1.4 }}>{err}</div>}
+    </div>
+  );
+}
+
+/* ---- the link's landing page ----
+   Full-screen, branded, owns the whole viewport while a newcomer onboards.
+   props: payload (parsed token), onDone(session) */
+function WelcomeInvite({ payload, onDone }) {
+  const [phase, setPhase] = useState("signing"); // signing | name | password | finishing | used | error
+  const [err, setErr] = useState("");
+  const [name, setName] = useState("");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [busy, setBusy] = useState(false);
+  const mxid = "@" + payload.u + ":" + payload.hs;
+
+  // auto-login with the one-time password from the link
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        await window.MatrixAuth.login(mxid, payload.p);
+        // accept the room invite so they land already inside the project (the
+        // inviter invited this account when minting the link); best-effort
+        if (payload.r) { try { await window.MatrixAuth.joinRoom(payload.r); } catch (e) {} }
+        if (alive) setPhase("name");
+      } catch (e) {
+        if (!alive) return;
+        // a 403 on a fresh link almost always means it's already been redeemed
+        if (e && (e.errcode === "M_FORBIDDEN" || e.status === 403)) setPhase("used");
+        else { setErr((e && e.message) || "We couldn't open this invite."); setPhase("error"); }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const saveName = async () => {
+    if (busy) return;
+    const n = name.trim(); if (!n) { setErr("Pick a name people will see."); return; }
+    setBusy(true); setErr("");
+    try { await window.MatrixAuth.setDisplayName(n); setPhase("password"); }
+    catch (e) { setErr((e && e.message) || "Couldn't save that name. Try again."); }
+    setBusy(false);
+  };
+
+  const savePassword = async () => {
+    if (busy) return;
+    if (pw.length < 8) { setErr("Use at least 8 characters."); return; }
+    if (pw !== pw2) { setErr("The two passwords don't match."); return; }
+    setBusy(true); setErr("");
+    try {
+      await window.MatrixAuth.changePassword(payload.p, pw);
+      setPhase("finishing");
+      // re-read the live session so the app picks up the verified identity
+      const sess = window.MatrixAuth.current();
+      onDone && onDone(sess);
+    } catch (e) { setErr((e && e.message) || "Couldn't set your password. Try again."); setBusy(false); }
+  };
+
+  const card = (children) => (
+    <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" }}>
+      <div style={{ width: "min(440px, 100%)" }}>
+        <div style={{ background: "var(--yellow)", padding: "14px 28px", borderRadius: 4, marginBottom: 24, textAlign: "center", boxShadow: "0 1px 0 rgba(22,20,13,.4)" }}>
+          <img src="assets/npj-logo-wide.png" alt="People's Journalism" style={{ width: "min(320px, 70vw)", height: "auto", display: "inline-block" }} />
+        </div>
+        <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", boxShadow: "6px 6px 0 rgba(22,20,13,.12)", padding: "26px 24px 28px" }}>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+
+  const errBox = err ? (
+    <div style={{ marginTop: 14, padding: "9px 11px", background: "color-mix(in srgb, var(--reject) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--reject) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, color: "var(--reject)" }}>{err}</div>
+  ) : null;
+
+  if (phase === "signing") return card(
+    <div style={{ textAlign: "center", padding: "16px 0" }}>
+      <InviteSpinner size={26} />
+      <div style={{ fontFamily: "var(--serif)", fontSize: 16, color: "var(--ink-soft)", marginTop: 16 }}>Opening your invite…</div>
+    </div>
+  );
+
+  if (phase === "used") return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 10 }}>Already set up</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 12px" }}>This invite is done.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 20px" }}>
+        Looks like <strong style={{ color: "var(--ink)" }}>{mxid}</strong> already chose a password. Sign in with it instead.
+      </p>
+      <button className="btn btn-primary" onClick={() => { location.hash = "submit"; location.reload(); }}>Go to sign in</button>
+    </>
+  );
+
+  if (phase === "error") return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Something went wrong</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 36, lineHeight: 1, margin: "0 0 12px" }}>We couldn't open this.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 8px" }}>{err}</p>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>Ask whoever sent it for a fresh link.</p>
+    </>
+  );
+
+  if (phase === "finishing") return card(
+    <div style={{ textAlign: "center", padding: "16px 0" }}>
+      <I.check style={{ fontSize: 34, color: "var(--verified)" }} />
+      <div style={{ fontFamily: "var(--display)", fontSize: 30, margin: "12px 0 6px" }}>You're all set.</div>
+      <div style={{ fontFamily: "var(--serif)", fontSize: 15, color: "var(--ink-soft)" }}>Taking you to the newsroom…</div>
+    </div>
+  );
+
+  if (phase === "name") return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>Welcome · step 1 of 2</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 40, lineHeight: .98, margin: "0 0 10px" }}>What should we call you?</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        This is your display name — the byline people see on what you contribute. You can change it later.
+      </p>
+      <input autoFocus value={name} onChange={e => { setName(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && saveName()}
+        placeholder="e.g. Sam Rivera" style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 16, padding: "11px 12px", fontFamily: "var(--serif)", outline: "none" }} />
+      {errBox}
+      <button className="btn btn-primary" disabled={busy} onClick={saveName} style={{ marginTop: 16, display: "inline-flex", alignItems: "center", gap: 7, opacity: busy ? .6 : 1 }}>
+        {busy ? <InviteSpinner /> : <I.arrow style={{ fontSize: 14 }} />}{busy ? "Saving…" : "Continue"}
+      </button>
+      <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 14 }}>Signed in as {mxid}</div>
+    </>
+  );
+
+  // phase === "password"
+  return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>Welcome · step 2 of 2</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 40, lineHeight: .98, margin: "0 0 10px" }}>Set your password.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        Your invite came with a temporary password. Choose your own now — only you will know it.
+      </p>
+      <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 6 }}>New password</label>
+      <input autoFocus type="password" value={pw} onChange={e => { setPw(e.target.value); setErr(""); }}
+        style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 15, padding: "10px 12px", fontFamily: "var(--mono)", outline: "none", marginBottom: 10 }} />
+      <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 6 }}>Confirm password</label>
+      <input type="password" value={pw2} onChange={e => { setPw2(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && savePassword()}
+        style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 15, padding: "10px 12px", fontFamily: "var(--mono)", outline: "none" }} />
+      {errBox}
+      <button className="btn btn-primary" disabled={busy} onClick={savePassword} style={{ marginTop: 16, display: "inline-flex", alignItems: "center", gap: 7, opacity: busy ? .6 : 1 }}>
+        {busy ? <InviteSpinner /> : <I.lock style={{ fontSize: 13 }} />}{busy ? "Setting…" : "Finish & enter"}
+      </button>
+    </>
+  );
+}
+
+Object.assign(window, { NewAccountInvite, WelcomeInvite });

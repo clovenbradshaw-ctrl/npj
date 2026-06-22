@@ -1045,6 +1045,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
               </div>
               {inviteMsg && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.4 }}>{inviteMsg}</div>}
+              {/* invite someone with no Matrix account — mint one + a single link,
+                  and put them in the same project the typed-mxid invite would use */}
+              <NewAccountInvite
+                roomId={room ? room.roomId : null}
+                ensureRoom={async () => {
+                  let rm = room;
+                  if (!rm) {
+                    const existing = projPick && (projects || []).find(p => p.roomId === projPick);
+                    if (existing) rm = { roomId: existing.roomId, title: existing.title || "Untitled project" };
+                    else { const made = await window.MatrixAuth.createDraftRoom(title || "Untitled draft"); rm = { ...made, title: title || "Untitled draft" }; }
+                    setRoom(rm);
+                  }
+                  return rm.roomId;
+                }}
+                onInvited={(mx) => setCollabs(c => c.includes(mx) ? c : [...c, mx])} />
               {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>{room.alias}</div>}
             </div>
           )}
