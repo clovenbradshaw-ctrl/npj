@@ -55,26 +55,45 @@ function CitedSpanList({ claims, onJump, currentId }) {
   );
 }
 
-/* ---- floating source hover card ---- */
-function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSource, onJump }) {
+/* ---- source citation card ---- */
+// On a pointer device this floats next to the hovered claim. On a phone there's
+// no hover and no room to pin a card to a tapped word, so it opens instead as a
+// dismissible bottom sheet (tap the backdrop or ✕ to close) — thumb-reachable
+// and full-width, which is how a touch reader actually opens the receipts.
+function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
+  const isPhone = window.useIsMobile(760);
   React.useEffect(() => setTab(0), [data && data.claim && data.claim.id]);
   if (!data) return null;
   const { claim, x, y, srcKeys } = data;
   const vw = window.innerWidth, vh = window.innerHeight;
-  // never wider than the viewport (340 on a phone overflows the right edge)
-  const w = Math.min(340, vw - 24);
-  let left = Math.min(Math.max(12, x), vw - w - 12);
-  let top = y + 8;
-  const flip = top > vh - 260;
   // the other passages this same source backs — so you can hop between them
   const spans = spansForSource ? spansForSource(srcKeys[tab]) : [];
-  return (
-    <div className="srccard" role="dialog" aria-label="Citation for this claim"
-      style={{ left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w }}
+
+  const sheet = isPhone;
+  // never wider than the viewport (340 on a phone overflows the right edge)
+  const w = sheet ? "100%" : Math.min(340, vw - 24);
+  const left = sheet ? 0 : Math.min(Math.max(12, x), vw - w - 12);
+  const top = y + 8;
+  const flip = !sheet && top > vh - 260;
+  const cardStyle = sheet
+    ? { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "72vh", overflowY: "auto",
+        borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" }
+    : { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+
+  const inner = (
+    <div className="srccard np-scroll" role="dialog" aria-label="Citation for this claim"
+      style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onEnter} onBlur={onLeave}>
+      {sheet && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 12px", borderBottom: "1.5px solid var(--ink)",
+          position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
+          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 14 }} /> Citation</span>
+          <button onClick={onClose} aria-label="Close citation" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "2px 6px" }}><I.x /></button>
+        </div>
+      )}
       {srcKeys.length > 1 && (
         <div style={{ display: "flex", borderBottom: "1.5px solid var(--ink)" }}>
           {srcKeys.map((k, i) => (
@@ -87,17 +106,26 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, suggCount, spansForSourc
       <SourceCard srcKey={srcKeys[tab]} quote={claim.q && claim.q[srcKeys[tab]]} />
       {spans.length > 1 && (
         <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: 124, overflowY: "auto" }} className="np-scroll">
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — click to jump</div>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — {sheet ? "tap" : "click"} to jump</div>
           <CitedSpanList claims={spans} onJump={onJump} currentId={claim.id} />
         </div>
       )}
-      <div style={{ display: "flex", borderTop: "1.5px solid var(--ink)" }}>
-        <button onClick={() => onSuggest(claim.id)} className="np-cond" style={{ flex: 1, padding: "8px", border: 0, background: "var(--card)",
+      <div style={{ display: "flex", borderTop: "1.5px solid var(--ink)", position: sheet ? "sticky" : "static", bottom: 0, background: "var(--card)" }}>
+        <button onClick={() => onSuggest(claim.id)} className="np-cond" style={{ flex: 1, padding: sheet ? "13px" : "8px", border: 0, background: "var(--card)",
           fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
           <span style={{ fontFamily: "var(--mono)" }}>⊨</span> Suggest edit{suggCount ? ` · ${suggCount} open` : ""}
         </button>
       </div>
     </div>
+  );
+
+  if (!sheet) return inner;
+  return (
+    <React.Fragment>
+      <div onClick={onClose} aria-hidden="true" className="fade-in"
+        style={{ position: "fixed", inset: 0, zIndex: 3990, background: "rgba(8,7,5,.35)" }} />
+      {inner}
+    </React.Fragment>
   );
 }
 
@@ -254,6 +282,10 @@ function ArticleRead(props) {
   // below this width the source rail stacks under the article instead of
   // squeezing the reading column
   const isNarrow = window.useIsMobile(900);
+  // a true phone: the side rails overlay the page (rather than pushing the
+  // reading column off-screen), and tapping a claim opens its citation as a
+  // bottom sheet, since there's no hover on touch
+  const isPhone = window.useIsMobile(760);
   // edit-after-publish: the admin always; otherwise only the article's
   // assignees (the publisher is one by default — see genesisFromContent)
   const canEditArticle = isAdmin || (Array.isArray(A.assignees) && A.assignees.includes(me));
@@ -411,7 +443,7 @@ function ArticleRead(props) {
         tabIndex={0} role="button" aria-haspopup="dialog"
         aria-expanded={hover && hover.claim.id === t.id ? "true" : "false"}
         aria-label={claimAria(claim)}
-        onMouseEnter={(e) => enterClaim(e, claim)} onMouseLeave={scheduleLeave}
+        onMouseEnter={isPhone ? undefined : (e) => enterClaim(e, claim)} onMouseLeave={isPhone ? undefined : scheduleLeave}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -421,7 +453,7 @@ function ArticleRead(props) {
             e.stopPropagation(); setHover(null); setActiveSrc(null); e.currentTarget.focus();
           }
         }}
-        onClick={() => { setShowSugg(true); }}>
+        onClick={(e) => { if (isPhone) enterClaim({ currentTarget: e.currentTarget }, claim); else setShowSugg(true); }}>
         {ent ? markEntities(t.c, ent, "c" + i) : t.c}
         {showMarkers && <sup className="claim-marker">{claim.num}</sup>}
       </span>
@@ -553,8 +585,8 @@ function ArticleRead(props) {
         canEdit: canEditArticle, onEdit: () => setEditing(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
-      <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: "30px 22px 80px",
-        marginLeft: entityOpen ? 372 : "auto", marginRight: showSugg ? 408 : "auto", transition: "margin .28s" }}
+      <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
+        marginLeft: (!isPhone && entityOpen) ? 372 : "auto", marginRight: (!isPhone && showSugg) ? 408 : "auto", transition: "margin .28s" }}
         className={audit ? "read-audit" : "read-clean"}>
 
         {hasRail ? (
@@ -574,6 +606,7 @@ function ArticleRead(props) {
       </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
+        onClose={() => { setHover(null); setActiveSrc(null); }}
         suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} />
 
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
@@ -604,10 +637,11 @@ function ArticleRead(props) {
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
 function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
+  const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: "9px 22px", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <span style={{ flex: 1 }} />
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
+        {!isPhone && <span style={{ flex: 1 }} />}
 
         {canEdit && (
           <button className="btn btn-sm" onClick={onEdit} title="Edit this published article — your change is appended to its EO event log" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
@@ -688,6 +722,7 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
 }
 
 function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
+  const isPhone = window.useIsMobile(760);
   return (
     <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
@@ -698,7 +733,7 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
         Every figure above resolves to an archive.org snapshot taken the day we pulled it. The live URL is secondary and may rot; the snapshot is canonical.
         A broken <span className="np-mono">src:</span> reference fails the build, so this page cannot deploy with a citation that points nowhere.
       </p>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 24px", marginTop: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: "12px 24px", marginTop: 10 }}>
         {sourceList.map(({ key, num }) => {
           const s = srcOf(key); const spans = spansForSource ? spansForSource(key) : [];
           return (

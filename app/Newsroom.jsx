@@ -981,14 +981,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* top bar */}
       <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center",
         ...(isMobile
-          ? { display: "flex", flexWrap: "wrap", gap: 14 }
+          ? { display: "flex", flexWrap: "wrap", gap: 10 }
           : { display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", columnGap: 14 }) }}>
         {/* LEFT zone: exit + wordmark + document name. The view tabs live in the
             centered middle column, so a longer document name truncates HERE
             instead of shoving the tabs sideways. */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
         <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
-          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
+          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> <span className="npj-hide-sm">Public site</span>
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <button onClick={onDocs || onExit} title="Newsroom home — your document explorer" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
@@ -996,36 +996,38 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
           {/* clipped so a long headline can't widen the bar and shove the controls */}
-          <span className="np-mono" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
+          <span className="np-mono npj-hide-sm" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileSlug || slugify(title) || "untitled"}</span>/
           </span>
         </div>
         </div>{/* end LEFT zone */}
         {/* CENTER zone: the four pivoting views — centered in the bar and fixed
             in place, so they never shift when the document name changes. */}
-        <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
+        <div style={{ display: isMobile ? "flex" : "inline-flex", width: isMobile ? "100%" : undefined, border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
           {[["prose", "Prose", "The prose editor"],
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
             ["sources", "Sources", "Read the source documents and grab the words that back a claim"]].map(([k, label, ti]) => (
-            <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
+            <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
         {/* RIGHT zone: autosave status + tools + publish */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, justifySelf: "end", flexWrap: "wrap", minWidth: 0 }}>
-        <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
-          what="text, title, tags, column and bound sources" />
+        <span className="npj-hide-sm" style={{ display: "inline-flex" }}>
+          <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
+            what="text, title, tags, column and bound sources" />
+        </span>
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} {theme === "dark" ? "Light" : "Dark"}
+          {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} <span className="npj-hide-sm">{theme === "dark" ? "Light" : "Dark"}</span>
         </button>
         <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark={theme === "dark"} />
-        {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> Docs</button>}
+        {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Docs</span></button>}
         <div style={{ position: "relative" }}>
-          <button onClick={openRooms} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> Projects</button>
+          <button onClick={openRooms} title="Your projects" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Projects</span></button>
           {showRooms && <ProjectsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
         </div>
         <div style={{ position: "relative" }}>
-          <button onClick={() => setInvite(v => !v)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> Invite</button>
+          <button onClick={() => setInvite(v => !v)} title="Invite a collaborator" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Invite</span></button>
           {invite && (
             <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 300, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Invite to the project</div>
@@ -1047,7 +1049,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             </div>
           )}
         </div>
-        <div style={{ display: "flex" }}>
+        <div className="npj-hide-sm" style={{ display: "flex" }}>
           {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
         {statusErr && <span className="np-mono" title={statusErr} style={{ fontSize: 10.5, color: NR.warn, maxWidth: 240, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{statusErr}</span>}
@@ -1064,8 +1066,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       </div>
 
       {/* formatting toolbar */}
-      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-        <span className="np-eyebrow" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
+      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "6px 8px" : "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+        <span className="np-eyebrow npj-hide-sm" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
         <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
         <TB onClick={() => exec("redo")} title="Redo"><I.redo /></TB>
         <Sep />
