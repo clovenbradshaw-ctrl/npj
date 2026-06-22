@@ -73,19 +73,23 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
       {route !== "article" && (
         <nav style={{ background: "var(--ink)", color: "var(--paper)" }}>
           <div className="npj-nav-inner" style={{ width: tight ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: tight ? "0" : "0 72px", display: "flex", alignItems: "stretch", height: 58 }}>
-            {sections.map((s, i) => {
-              const on = activeColumn ? activeColumn === s : i === 0;
-              return (
-                <button key={s + i} onClick={() => clickColumn(s)} style={{
-                  flexShrink: 0, display: "flex", alignItems: "center", padding: "0 26px",
-                  background: on ? "var(--yellow)" : "none",
-                  color: on ? "var(--ink)" : "var(--paper)",
-                  border: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17,
-                  letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer"
-                }}>{s}</button>
-              );
-            })}
-            <div style={{ flex: 1 }} />
+            {/* the section columns — on phones this strip scrolls sideways on its
+                own (swipeable tabs) so it never widens the page past the viewport */}
+            <div className="npj-nav-cols" style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
+              {sections.map((s, i) => {
+                const on = activeColumn ? activeColumn === s : i === 0;
+                return (
+                  <button key={s + i} onClick={() => clickColumn(s)} style={{
+                    flexShrink: 0, display: "flex", alignItems: "center", padding: "0 26px",
+                    background: on ? "var(--yellow)" : "none",
+                    color: on ? "var(--ink)" : "var(--paper)",
+                    border: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17,
+                    letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer"
+                  }}>{s}</button>
+                );
+              })}
+            </div>
+            <div className="npj-nav-spacer" style={{ flex: 1 }} />
             <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 70 }}>
               <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "#8c8676" }}>⌕</span>
               <input type="text" placeholder="Search records, snapshots…" style={{ width: "100%", minWidth: 0, border: 0, borderBottom: "1px solid rgba(255,255,255,.35)", background: "transparent", fontFamily: "var(--mono)", fontSize: 13, color: "var(--paper)", outline: "none", padding: "4px 0" }} />
