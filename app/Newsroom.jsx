@@ -38,6 +38,38 @@ const START_DOC =
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
+// Show an image that may still live on the Matrix media store. A bare <img>
+// can't load such a URL on an authenticated-media homeserver (Matrix 1.11+):
+// the unauthenticated GET is refused, so a freshly dropped/uploaded photo that
+// hasn't been frozen to archive.org yet renders broken — the media census
+// thumbnail and the lightbox used to show exactly that. Resolve it the same way
+// the reader (MediaImg) and <image-slot> do — fetch the bytes with the session
+// token and hand back a blob: URL — before display; non-store URLs (archive.org,
+// author src, data:) pass straight through.
+function NrMediaImg({ url, alt, style, ...rest }) {
+  const [resolved, setResolved] = useState(null);
+  useEffect(() => {
+    let alive = true, made = null;
+    setResolved(null);
+    if (!url) return;
+    const media = window.NpjMedia;
+    if (media && media.isStoreUrl && media.isStoreUrl(url) && media.resolveDisplay) {
+      media.resolveDisplay(url).then(u => {
+        if (!alive) { if (u && u !== url && u.indexOf("blob:") === 0) URL.revokeObjectURL(u); return; }
+        if (u && u !== url && u.indexOf("blob:") === 0) made = u;
+        setResolved(u || url);
+      }).catch(() => { if (alive) setResolved(url); });
+    } else {
+      setResolved(url);
+    }
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [url]);
+  // hold a neutral box while an authenticated store fetch is in flight rather
+  // than flashing a doomed unauthenticated <img> GET
+  if (resolved == null) return <div aria-hidden="true" style={{ ...style, background: NR.field }} {...rest} />;
+  return <img src={resolved} alt={alt || ""} style={style} {...rest} />;
+}
+
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me, isAdmin } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -1143,7 +1175,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {media.map(m => m.kind === "image"
                 ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
-                    <img src={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                   </button>
                 : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
             </div>
@@ -1342,7 +1374,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
         <div className="fade-in" onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 5600, background: "rgba(8,7,5,.93)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 26 }}>
-          <img src={mediaImages[viewer].url} alt={mediaImages[viewer].caption || ""} onClick={e => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", border: "1.5px solid rgba(255,255,255,.25)", background: "#000" }} />
+          <NrMediaImg url={mediaImages[viewer].url} alt={mediaImages[viewer].caption || ""} onClick={e => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", border: "1.5px solid rgba(255,255,255,.25)", background: "#000" }} />
           <div className="np-mono" onClick={e => e.stopPropagation()} style={{ color: "#cfc8b6", fontSize: 11.5, marginTop: 12, maxWidth: 720, textAlign: "center", lineHeight: 1.5 }}>
             {mediaImages[viewer].caption || "untitled image"} · {viewer + 1} / {mediaImages.length}
           </div>
