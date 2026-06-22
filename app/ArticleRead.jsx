@@ -276,6 +276,7 @@ function ArticleRead(props) {
   const [bubble, setBubble] = useState(null);
   const bodyRef = useRef(null);
   const [showVersions, setShowVersions] = useState(false);
+  const [showExport, setShowExport] = useState(false);
   const [editing, setEditing] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusErr, setStatusErr] = useState(null);
@@ -582,7 +583,7 @@ function ArticleRead(props) {
       <ControlBar {...{ audit, setAudit, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
-        canEdit: canEditArticle, onEdit: () => setEditing(true),
+        canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
@@ -626,6 +627,7 @@ function ArticleRead(props) {
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
         onCancelCompose={() => setCompose(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)} />}
+      {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
       {editing && window.ArticleEdit && (
         <window.ArticleEdit article={A} me={me} isAdmin={isAdmin}
           onClose={() => setEditing(false)}
@@ -636,12 +638,17 @@ function ArticleRead(props) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
         {!isPhone && <span style={{ flex: 1 }} />}
+
+        <button className="btn btn-sm" onClick={onExport} title="Export for Substack — copy with images, headings & sourcing intact, or download a .md"
+          style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+          <I.ext style={{ fontSize: 14 }} /> Export
+        </button>
 
         {canEdit && (
           <button className="btn btn-sm" onClick={onEdit} title="Edit this published article — your change is appended to its EO event log" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
