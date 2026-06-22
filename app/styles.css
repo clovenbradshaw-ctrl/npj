@@ -451,6 +451,17 @@ a { color: inherit; }
   .npj-nav-inner { padding: 0 8px !important; }
   .npj-nav-inner button { padding: 0 14px !important; font-size: 14px !important; }
   .npj-search { display: none !important; }
+  /* The section nav is too wide for a phone (4 columns + the Submit CTA). Instead
+     of letting it shove the whole page wider than the viewport — which forced a
+     sideways scroll on every route and pushed "Submit a story" off-screen — the
+     columns become a self-contained swipeable strip and the CTA stays pinned. */
+  .npj-nav-cols { flex: 1 1 auto; overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: none;
+    /* a soft right-edge fade signals "swipe for more columns" and keeps the last
+       partly-shown column from butting hard against the pinned Submit button */
+    -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(90deg, #000 calc(100% - 24px), transparent); }
+  .npj-nav-cols::-webkit-scrollbar { display: none; }
+  .npj-nav-spacer { display: none !important; }
   .npj-strip-inner { padding: 8px 16px !important; }
   .npj-footer-inner { padding: 18px 16px !important; }
 
