@@ -43,8 +43,9 @@
  *                whole image (matching what the reader publishes) rather than a
  *                fixed-height letterbox crop. A saved crop's aspect wins over the
  *                image's natural ratio. Empty slots keep the declared height as
- *                the drop target. Used by the NPJ banner; reframe (cover) still
- *                zoom-crops within the image's own ratio.
+ *                the drop target. Used by the NPJ banner and inline article
+ *                images; reframe (cover) still zoom-crops within the image's
+ *                own ratio.
  *   placeholder  Empty-state caption.                      (default 'Drop an image')
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
