@@ -144,12 +144,30 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
 // framing on the read side. The frame takes the author's saved aspect ratio
 // (crop.ar) so the cover pan/zoom (s,x,y) lands exactly where it did in the
 // editor, at any display width. Falls back to a plain object-fit while the
-// natural dimensions aren't known yet.
+// natural dimensions aren't known yet. "Contain" is special-cased to hug the
+// image at its natural ratio (see below) rather than letterboxing it.
 function CropFrame({ src, alt, style, fit, crop, onError }) {
   const [nat, setNat] = useState(null);
   React.useEffect(() => { setNat(null); }, [src]);
-  const ar = (crop && crop.ar) || (16 / 9);
   const f = fit || "cover";
+
+  // "Contain" means show the WHOLE image. Unless the host pins a fixed height
+  // (a front-page thumbnail does; the article hero/inline images don't), let the
+  // box hug the image at its natural aspect ratio — centered, never wider than
+  // the column — instead of letterboxing it into the editor frame's ratio, which
+  // strands a portrait/odd-ratio photo in a wide box with empty side margins. The
+  // border rides the image itself, so the frame adjusts to the image's size.
+  const fixedH = style && style.height != null && style.height !== "auto" && style.height !== "";
+  if (f === "contain" && !fixedH) {
+    const { width, height, aspectRatio, objectFit, ...rest } = style || {};
+    return (
+      <img src={src} alt={alt || ""} loading="lazy"
+        style={{ ...rest, display: "block", maxWidth: "100%", height: "auto", margin: "0 auto" }}
+        onError={onError} />
+    );
+  }
+
+  const ar = (crop && crop.ar) || (16 / 9);
   const wrap = { position: "relative", overflow: "hidden", width: "100%", aspectRatio: String(ar), display: "block", ...style };
   let imgStyle;
   if (f === "cover" && nat && nat.w && nat.h) {
@@ -225,7 +243,8 @@ function MediaImg({ srcs, alt, style, fit, crop }) {
   // rather than flashing a doomed unauthenticated <img> request
   if (resolved == null) return <div style={{ ...style, background: "var(--paper-2)" }} aria-hidden="true" />;
   const onError = () => setI(n => (n < list.length - 1 ? n + 1 : n));
-  // a saved crop (or a non-cover fit) renders in an aspect-locked frame
+  // a saved crop (or a non-cover fit) renders through CropFrame — aspect-locked
+  // for cover/fill, hugged to the image's natural ratio for contain
   if ((crop && crop.ar) || fit === "contain" || fit === "fill") {
     return <CropFrame src={resolved} alt={alt} style={style} fit={fit} crop={crop} onError={onError} />;
   }
