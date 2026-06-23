@@ -592,6 +592,16 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     );
     const SV = window.NpjSourceView;
     const fileKind = SV ? SV.kindOf(rec) : "text";
+    // An uploaded image is shown as the actual picture — even once OCR has put its
+    // words on record. Without this the reader fell straight through to the flat
+    // text below and the source you cited was invisible; now you SEE the screenshot
+    // (or scan), and its recognized text renders under it as the citable, selectable
+    // body. hideOcr suppresses SourceViewer's own text reveal — the doctext is it.
+    const imageBanner = (SV && SV.hasFile(rec) && fileKind === "image" && window.SourceViewer) ? (
+      <div style={{ padding: compact ? "9px 11px 1px" : "11px 14px 2px", background: "#f6f1e4" }}>
+        <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 200 : 300} frameless hideOcr />
+      </div>
+    ) : null;
     // A PDF is shown as the REAL document — rendered pages with a selectable text
     // layer — never flattened into a wall of text. Drag-selecting words on the
     // page stages them as the citation span (quote, verbatim).
@@ -612,9 +622,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       return (
         <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 300 : 440, overflowY: "auto" }}>
           {letterhead}
-          {hasImage && window.SourceViewer && (
-            <div style={{ padding: "10px 12px 0" }}><window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 220 : 340} /></div>
-          )}
+          {hasImage && imageBanner}
           <SeedBox onSeed={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
         </div>
       );
@@ -680,6 +688,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       <div ref={refObj} onMouseUp={() => onSrcMouseUp(refObj)} className="np-scroll"
         style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, fontFamily: "var(--serif)", fontSize: compact ? 13 : 14.5, lineHeight: 1.62, userSelect: "text", cursor: modal ? "text" : "default", maxHeight: compact ? 300 : 440, overflowY: "auto", boxShadow: modal ? "inset 0 0 0 2px var(--yellow)" : "none" }}>
         {letterhead}
+        {imageBanner}
         <div data-doctext="1" style={{ whiteSpace: "pre-wrap", padding: compact ? "10px 12px 12px" : "12px 16px 16px" }}>{kids}</div>
       </div>
     );

@@ -24,7 +24,7 @@
    after a PDF's text is extracted (the host decides whether to seed rec.text).
    Publishes window.SourceViewer.
    ============================================================ */
-function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless }) {
+function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hideOcr }) {
   const SV = window.NpjSourceView;
   rec = rec || (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || {};
   const key = (rec && (rec.id || rec.key)) || srcKey || "";
@@ -114,7 +114,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless }) 
           <img src={url} alt={rec.title || "uploaded image"} style={{ maxWidth: "100%", maxHeight: H - 16, objectFit: "contain", display: "block" }} />
         </div>
         {linkRow}
-        {ocr ? (
+        {ocr && !hideOcr ? (
           <div style={{ marginTop: 8 }}>
             <button onClick={() => setShowOcr(v => !v)} className="np-mono" title="Text read from the image by OCR" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--data)", fontSize: 10.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
               {showOcr ? "▾" : "▸"} Recognized text (OCR)

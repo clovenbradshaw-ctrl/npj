@@ -713,6 +713,34 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
+  // A footnote attaches to a WORD, so the marker must land against text. If the
+  // collapsed caret is on an empty line — a trailing/blank <p> you drop into when
+  // you click just past the end of a line — or it isn't in a prose block at all,
+  // snap it to the very end of the nearest paragraph above that actually has text,
+  // so a footnote never ends up as a lone "¹" stranded on its own line. With the
+  // caret already in text (end of a line, or mid-sentence) this is a no-op and the
+  // marker drops exactly where you put it. Updates the saved range insertHTML restores.
+  const anchorFootnoteCaret = () => {
+    const root = ed.current; if (!root) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return;                              // a real selection — footnote that exact spot
+    const BLOCK = "p,li,h1,h2,h3,blockquote,figcaption";
+    const hasText = (el) => !!(el && (el.textContent || "").trim());
+    const start = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    let blk = start && start.closest ? start.closest(BLOCK) : null;
+    if (blk && blk.closest("ol.nr-fnotes")) blk = null;   // inside a note, not the prose
+    if (blk && root.contains(blk) && hasText(blk)) return; // already against text — leave it
+    // walk back to the nearest prose block with text (skip empty lines, code, figures, the notes list)
+    let prev = blk ? blk.previousElementSibling : root.lastElementChild;
+    while (prev && ((prev.matches && prev.matches("ol.nr-fnotes,pre,figure")) || !hasText(prev))) prev = prev.previousElementSibling;
+    if (!prev || !root.contains(prev) || !hasText(prev)) return; // nothing better above — leave as-is
+    const nr = document.createRange();
+    nr.selectNodeContents(prev); nr.collapse(false);      // caret at the very end of that block
+    sel.removeAllRanges(); sel.addRange(nr);
+    selRange.current = nr.cloneRange();
+  };
   // A footnote, Substack-style: drop a numbered marker at the caret and open a
   // real, editable note for it in the "Footnotes" list at the foot of the page —
   // no raw "[^fn1]:" syntax in the prose. The marker carries a stable, unique
@@ -721,6 +749,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // everything live, exactly like Substack.
   const insertFootnote = () => {
     const key = "fn" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+    ed.current && ed.current.focus(); restore();   // bring the saved caret live so we can anchor it
+    anchorFootnoteCaret();                          // never strand the marker on an empty line
     // the bullet is a placeholder glyph; renumberFootnotes overwrites it with the number
     insertHTML(`<sup class="md-cite" data-fn="1" data-cite="${key}" contenteditable="false" title="footnote">•</sup>&nbsp;`);
     renumberFootnotes();
