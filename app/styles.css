@@ -597,6 +597,11 @@ a { color: inherit; }
 /* ============ grounding workspace (GroundingWorkspace.jsx) ============ */
 /* Citey, drawn: the bent-wire operator's idle motion + the table's row flash */
 @keyframes rowflash { 0%, 28% { background-color: rgba(255,236,1,.22); } 100% { background-color: rgba(255,236,1,0); } }
+
+/* DataTable: a clickable row (e.g. a source you can open) gets a hover cue so
+   "click a row to open it below" reads as interactive on a pointer device. */
+.npj-rrow { transition: background-color .12s ease; }
+.npj-rrow:hover { background-color: rgba(255,236,1,.08) !important; }
 @keyframes citey-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
 @keyframes citey-blink { 0%, 93%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.12); } }
 @keyframes citey-pop { 0% { transform: scale(.55) rotate(-7deg); } 60% { transform: scale(1.12) rotate(2.5deg); } 100% { transform: scale(1) rotate(0); } }
