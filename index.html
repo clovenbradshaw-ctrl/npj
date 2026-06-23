@@ -101,6 +101,9 @@
 <!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
      (paste into Substack keeps headings, images, links & the sourcing). -->
 <script src="app/substack-export.js"></script>
+<!-- Fact-check export: the draft's ungrounded claims (⊥ needs source, ¬ conflict)
+     → a worksheet (markdown / CSV) others can help verify. Pure shaping. -->
+<script src="app/fact-check-export.js"></script>
 <!-- grounding model: reusable citation records (spans of a source) + sentence
      segmentation for the table view. Plain scripts; require window.NPJ. -->
 <script src="app/citations.js"></script>
@@ -138,6 +141,8 @@
 <script type="text/babel" src="app/FrontPage.jsx"></script>
 <!-- "Export for Substack" panel (window.SubstackExport), opened from the reader -->
 <script type="text/babel" src="app/SubstackExport.jsx"></script>
+<!-- "Export for fact-check" panel (window.FactCheckExport), opened from the grounding workspace -->
+<script type="text/babel" src="app/FactCheckExport.jsx"></script>
 <script type="text/babel" src="app/ArticleRead.jsx"></script>
 <script type="text/babel" src="app/ArticleEdit.jsx"></script>
 <script type="text/babel" src="app/SourcePicker.jsx"></script>

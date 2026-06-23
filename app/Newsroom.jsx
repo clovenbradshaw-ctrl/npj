@@ -1040,6 +1040,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // the live editor node — the workspace observes it so the grounding table
     // imports every prose sentence the moment it lands (survives the restore race)
     editorEl: () => ed.current,
+    // the draft's title (the Title field, mirroring the body <h1>) — names the
+    // fact-check worksheet export
+    draftTitle: () => title,
     rev,
     toProse: () => setView("prose"),
     // scroll the (hidden) editor to a row and select it, then flip to prose
