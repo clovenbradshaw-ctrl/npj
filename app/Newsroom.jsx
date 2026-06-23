@@ -118,7 +118,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
-  const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) — same draft
+  const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) | graph — same draft
+  const [graphText, setGraphText] = useState("");      // plain text fed to the eoreader4 proposition graph (refreshed on entering the Graph view)
+  const [structMode, setStructMode] = useState("nested"); // CONTENTS rail: nested outline (holonic) | graph
+  const [activeId, setActiveId] = useState(null);      // heading the reader is currently scrolled into (outline "you are here")
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
   const restored = useRef(false);                      // gate autosave until the first restore lands
@@ -407,6 +410,56 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     cont.scrollTop += (er.top - cr.top) - 18;
   };
 
+  // Refresh the text the proposition graph reads. The editor is only editable in
+  // prose view, so a debounced refresh on input keeps the rail's compact graph
+  // live; entering either graph surface (the Graph view, or the rail in graph
+  // mode) refreshes at once. docFor() caches by text, so unchanged prose is free.
+  const graphTimer = useRef(null);
+  const refreshGraphText = useCallback(() => { setGraphText(ed.current ? (ed.current.innerText || "") : ""); }, []);
+  const scheduleGraphText = useCallback(() => { clearTimeout(graphTimer.current); graphTimer.current = setTimeout(refreshGraphText, 700); }, [refreshGraphText]);
+  useEffect(() => { if (view === "graph" || structMode === "graph") refreshGraphText(); }, [view, structMode, refreshGraphText]);
+
+  // Outline "you are here": track the heading the reader is currently scrolled
+  // into (the last heading above the top of the viewport) and highlight its row.
+  useEffect(() => {
+    const cont = scroller.current; if (!cont || view !== "prose") return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0; const root = ed.current; if (!root) return;
+        const hs = Array.from(root.querySelectorAll("h1,h2,h3")).filter(h => h.id);
+        const top = cont.getBoundingClientRect().top + 60;
+        let cur = null;
+        for (let i = 0; i < hs.length; i++) { if (hs[i].getBoundingClientRect().top <= top) cur = hs[i].id; else break; }
+        setActiveId(cur || (hs[0] && hs[0].id) || null);
+      });
+    };
+    cont.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => { cont.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [toc, view]);
+
+  // Clicking a node/edge in the graph jumps back to where that proposition sits
+  // in the prose: switch to the editor, find the block holding the sentence (or
+  // the entity name), scroll to it and flash it.
+  const jumpToProse = useCallback((info) => {
+    setView("prose");
+    setTimeout(() => {
+      const root = ed.current, cont = scroller.current; if (!root || !cont) return;
+      const needle = String((info && (info.text || info.label)) || "").trim().slice(0, 60).toLowerCase();
+      if (!needle) return;
+      const blocks = Array.from(root.querySelectorAll("h1,h2,h3,p,li,blockquote"));
+      let target = blocks.find(b => (b.innerText || "").toLowerCase().includes(needle));
+      if (!target && info && info.label) { const lb = String(info.label).toLowerCase(); target = blocks.find(b => (b.innerText || "").toLowerCase().includes(lb)); }
+      if (!target) return;
+      const cr = cont.getBoundingClientRect(), er = target.getBoundingClientRect();
+      cont.scrollTop += (er.top - cr.top) - 40;
+      target.classList.add("nr-jump-flash");
+      setTimeout(() => { try { target.classList.remove("nr-jump-flash"); } catch (e) {} }, 1200);
+    }, 50);
+  }, []);
+
   // the api the structure rail (app/PostStructure.jsx) drives. Every mutation
   // goes through dispatchStruct → append-only log → fold → (reflow) → persist.
   const structApi = useMemo(() => {
@@ -421,6 +474,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       removeType: () => dispatchStruct(lib.ops.removeType(), { reflow: true }),
       saveType: (name) => { const t = lib.saveFrom(structure, name); lib.types.save(t); setStructTypes(lib.types.all()); dispatchStruct(lib.ops.saveType(structure, t.id)); },
       addSlot: (slotId) => { const sl = lib.slotById(structure, slotId); if (sl) dispatchStruct(lib.ops.addSlot(structure, sl)); },
+      // "Start →": lay this slot's section into the page so the prompt guides
+      // writing in context. An H2 carrying the slot label (selected, so the first
+      // keystroke replaces it) + a ghost prompt paragraph that publishes nothing
+      // while empty (the .nr-dek mechanism). The section is created bound to this
+      // slot, then reflowed into place; reconcile keeps it bound as you type.
+      startSlot: (slotId) => {
+        const sl = lib.slotById(structure, slotId); if (!sl || !ed.current) return;
+        const label = sl.label || "New section";
+        const evs = lib.ops.createSection(slotId, 1e6, { heading: label });
+        const secId = evs[0] && evs[0].id; if (!secId) return;
+        const h = document.createElement("h2"); h.setAttribute("data-sec", secId); h.textContent = label;
+        const p = document.createElement("p"); p.className = "nr-prompt"; if (sl.prompt) p.setAttribute("data-ph", sl.prompt); p.innerHTML = "<br>";
+        ed.current.appendChild(h); ed.current.appendChild(p);
+        dispatchStruct(evs, { reflow: true });
+        setTimeout(() => {
+          scanHeadings();
+          try { const sel = window.getSelection(); const r = document.createRange(); r.selectNodeContents(h); sel.removeAllRanges(); sel.addRange(r); } catch (e) {}
+          if (h.id) scrollToId(h.id);
+          if (ed.current) ed.current.focus();
+        }, 0);
+      },
       moveSection: (id, parent, order) => dispatchStruct(lib.ops.moveSection(id, parent, order), { reflow: true }),
       moveBulk: (ids, parent, order) => dispatchStruct(lib.ops.moveBulk(ids, parent, order), { reflow: true }),
       reorderSlot: (id, order) => dispatchStruct(lib.ops.reorderSlot(id, order), { reflow: true }),
@@ -1445,7 +1519,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {[["prose", "Prose", "The prose editor"],
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
-            ["sources", "Sources", "Read the source documents and grab the words that back a claim"]].map(([k, label, ti]) => (
+            ["sources", "Sources", "Read the source documents and grab the words that back a claim"],
+            ["graph", "Graph", "The document as a graph of its propositions — entities and the relations between them"]].map(([k, label, ti]) => (
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -1623,7 +1698,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               (labeled containers showing their prompt when empty) + orphan
               sections, draggable. Editing-only; none of it reaches a reader. */}
           {structApi && window.StructureRail
-            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} />
+            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} mode={structMode} setMode={setStructMode} graphText={graphText} onSelectSentence={jumpToProse} onExpand={() => setView("graph")} activeId={activeId} />
             : (toc.length === 0
                 ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>
                 : toc.map(h => <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>))}
@@ -1668,7 +1743,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
@@ -1677,7 +1752,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
           <div style={{ flex: isMobile ? 1 : undefined, background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0, overflow: "hidden" }}>
-            <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />
+            {view === "graph"
+              ? (window.GraphView
+                  ? <window.GraphView text={graphText} onSelectSentence={jumpToProse} NR={NR} isMobile={isMobile} />
+                  : null)
+              : <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />}
           </div>
         )}
 
