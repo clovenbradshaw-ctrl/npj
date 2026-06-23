@@ -142,16 +142,115 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
   );
 }
 
+/* ---- the last step: lock sign-in behind a passkey ----
+   A guest account is a real account, and the password they just set is its only
+   key. On a device that supports it, we offer to wrap that password in a platform
+   passkey (Face ID / fingerprint, via WebAuthn PRF) so getting back in is one
+   touch — stored encrypted in this browser, nothing leaving the device. It's a
+   convenience, never the only way in: the password still works anywhere, so
+   "skip and remember it" is always a first-class choice. */
+function PasskeyStep({ creds, onEnter, card }) {
+  const [supported, setSupported] = useState(null); // null = still checking
+  const [state, setState] = useState("idle");       // idle | working | done | error
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (window.PasskeyVault ? window.PasskeyVault.supported() : Promise.resolve(false))
+      .then(s => { if (alive) setSupported(!!s); }).catch(() => { if (alive) setSupported(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const enroll = async () => {
+    if (state === "working") return;
+    setState("working"); setErr("");
+    try {
+      await window.PasskeyVault.enroll({ mxid: creds.mxid, password: creds.password, label: creds.displayName || creds.mxid });
+      setState("done");
+    } catch (e) {
+      if (e && e.name === "NotAllowedError") setErr("Passkey setup was cancelled — you can still sign in with your password.");
+      else if (e && e.code === "noprf") setErr("This device's passkey can't store a sign-in. Just remember your password.");
+      else setErr((e && e.message) || "Couldn't set up your passkey.");
+      setState("error");
+    }
+  };
+
+  const fieldRow = (label, value, mono) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--rule)" }}>
+      <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontFamily: mono ? "var(--mono)" : "var(--serif)", fontSize: 13, textAlign: "right", wordBreak: "break-all" }}>{value || "—"}</span>
+    </div>
+  );
+  const errBox = err ? (
+    <div style={{ marginTop: 12, padding: "9px 11px", background: "color-mix(in srgb, var(--reject) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--reject) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, color: "var(--reject)" }}>{err}</div>
+  ) : null;
+
+  const summary = (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "4px 12px", marginBottom: 16 }}>
+      {fieldRow("Name", creds.displayName, false)}
+      {fieldRow("Address", creds.mxid, true)}
+    </div>
+  );
+
+  // device can't do passkeys → there's nothing to set up; remembering the password
+  // IS the plan, so say so plainly and let them in.
+  if (supported === false) return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>You&rsquo;re all set.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        Your account is real and it&rsquo;s yours. <strong style={{ color: "var(--ink)" }}>Remember the password you just set</strong> — it&rsquo;s your key to signing back in from any device. The server only keeps a hash, so no one can recover it for you.
+      </p>
+      {summary}
+      <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        Enter the newsroom<I.arrow style={{ fontSize: 13 }} />
+      </button>
+    </>
+  );
+
+  const done = state === "done";
+  return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now · last step</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>{done ? "Passkey saved." : "Make getting back in easy."}</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        {done
+          ? <>Next time on this device, just use Face&nbsp;ID or your fingerprint — no password to type. Your password still works anywhere as a backup.</>
+          : <>Lock your sign-in to this device with <strong style={{ color: "var(--ink)" }}>Face&nbsp;ID or a fingerprint</strong>, so you never have to type your password here. It&rsquo;s stored encrypted on this device — or skip it and just remember your password, which works from anywhere.</>}
+      </p>
+      {summary}
+      {done ? (
+        <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+          <I.check style={{ fontSize: 14 }} />Enter the newsroom
+        </button>
+      ) : (
+        <>
+          <button className="btn btn-primary" disabled={supported === null || state === "working"} onClick={enroll}
+            style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (supported === null || state === "working") ? .6 : 1 }}>
+            {state === "working" ? <InviteSpinner /> : <I.lock style={{ fontSize: 13 }} />}{state === "working" ? "Setting up…" : "Set up passkey sign-in"}
+          </button>
+          <button className="btn btn-ghost" onClick={onEnter} style={{ marginTop: 10, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            Skip — I&rsquo;ll remember my password<I.arrow style={{ fontSize: 13 }} />
+          </button>
+        </>
+      )}
+      {errBox}
+    </>
+  );
+}
+
 /* ---- the link's landing page ----
    Full-screen, branded, owns the whole viewport while a newcomer onboards.
    props: payload (parsed token), onDone(session) */
 function WelcomeInvite({ payload, onDone }) {
-  const [phase, setPhase] = useState("signing"); // signing | name | password | finishing | used | error
+  const [phase, setPhase] = useState("signing"); // signing | name | password | secure | finishing | used | error
   const [err, setErr] = useState("");
   const [name, setName] = useState(payload.n || ""); // pre-filled with who the inviter named
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState(null);          // {mxid,password,displayName} carried into the passkey step
+  const sessRef = useRef(null);                      // the live session, surfaced once they secure the account
   const mxid = "@" + payload.u + ":" + payload.hs;
 
   // auto-login with the one-time password from the link
@@ -196,12 +295,18 @@ function WelcomeInvite({ payload, onDone }) {
     setBusy(true); setErr("");
     try {
       await window.MatrixAuth.changePassword(payload.p, pw);
-      setPhase("finishing");
-      // re-read the live session so the app picks up the verified identity
-      const sess = window.MatrixAuth.current();
-      onDone && onDone(sess);
+      // re-read the live session so the app picks up the verified identity, but
+      // hold it until they've had the chance to lock sign-in behind a passkey —
+      // a guest account is a real account, and the password they just set is the
+      // only key to it, so we offer to make returning easy before whisking them off.
+      sessRef.current = window.MatrixAuth.current();
+      setCreds({ mxid, password: pw, displayName: name.trim() || payload.n || "" });
+      setBusy(false);
+      setPhase("secure");
     } catch (e) { setErr((e && e.message) || "Couldn't set your password. Try again."); setBusy(false); }
   };
+
+  const enterNewsroom = () => { setPhase("finishing"); onDone && onDone(sessRef.current || window.MatrixAuth.current()); };
 
   const card = (children) => (
     <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" }}>
@@ -246,6 +351,8 @@ function WelcomeInvite({ payload, onDone }) {
       <p style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: 0 }}>Ask whoever sent it for a fresh link.</p>
     </>
   );
+
+  if (phase === "secure") return <PasskeyStep creds={creds} onEnter={enterNewsroom} card={card} />;
 
   if (phase === "finishing") return card(
     <div style={{ textAlign: "center", padding: "16px 0" }}>
