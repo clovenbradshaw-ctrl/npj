@@ -310,6 +310,13 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     return () => { obs.disconnect(); if (raf) cancelAnimationFrame(raf); };
   }, []); // eslint-disable-line
 
+  // Name every still-generic web source from its URL the moment this view opens,
+  // so a draft loaded before titling existed reads cleanly (no network — the slug
+  // + host guess; the per-source "Guess" button fetches the real <title>).
+  useEffect(() => {
+    if (api.autoTitleSources && api.autoTitleSources()) bump();
+  }, []); // eslint-disable-line
+
   // ---- mutations (all route through the Newsroom api → same DOM + autosave) ----
   const attachExisting = (row, citeId) => {
     api.attachExisting(row, citeId);
@@ -400,6 +407,15 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     const t = renameText.trim();
     if (t && api.renameSource) { api.renameSource(key, t); say("Renamed to “" + clip(t, 40) + "”"); }
     cancelRename(); bump();
+  };
+  // (re)guess a web source's title + outlet — the mechanical read now, the real
+  // <title>/og: tags off the archived page when reachable. Best-effort; honors a
+  // manual rename. The promise resolves once the network upgrade (if any) lands.
+  const guessTitle = (key) => {
+    if (!api.guessSourceTitle) return;
+    say("Guessing the title…");
+    Promise.resolve(api.guessSourceTitle(key)).then(() => bump());
+    bump();
   };
   // delete a source from the draft — confirm first, and spell out the blast
   // radius when sentences are grounded in it (their words stay; the source goes).
@@ -988,52 +1004,86 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     </section>
   );
 
-  // ============ main stage · SOURCES (the library + the reader) ============
+  // ============ main stage · SOURCES (the library TABLE + the reader) ============
+  // The library is a table: every source a row — where it's from, our best guess
+  // at its title, how many citations rest on it, whether it's archived, and the
+  // housekeeping (guess the name / rename / delete). Pick a row to read + cite it.
+  const th = { textAlign: "left", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".09em", textTransform: "uppercase", color: NR.muted, fontWeight: 600, padding: "0 10px 7px", whiteSpace: "nowrap" };
+  const td = { padding: "8px 10px", borderTop: "1px solid " + NR.line, verticalAlign: "middle", color: NR.text };
+  const rowBtn = (extra) => Object.assign({ border: "1px solid " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 11.5, padding: "3px 8px", whiteSpace: "nowrap" }, extra || {});
   const sourcesMain = (
-    <section style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-      <div style={{ width: 250, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-        <div className="np-eyebrow" style={{ color: NR.muted }}>Source library · {srcList.length}</div>
-        <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginTop: -2 }}>In the order they appear in the draft</div>
-        {srcList.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view) and it shows here to read and cite.</div>}
-        {srcList.map(({ key, rec }) => {
-          const nC = allC.filter(c => c.srcKey === key).length;
-          const active = selSrc === key;
-          const isRenaming = renameKey === key;
-          return (
-            <div key={key} style={{ border: "1.5px solid " + (active ? "var(--yellow)" : NR.line), background: active ? "rgba(255,236,1,.06)" : NR.field, borderRadius: 8, overflow: "hidden" }}>
-              {isRenaming ? (
-                <div style={{ padding: "9px 11px", display: "flex", flexDirection: "column", gap: 6 }}>
-                  <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
-                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(key); } else if (e.key === "Escape") { e.preventDefault(); cancelRename(); } }}
-                    placeholder="Source title" className="np-cond"
-                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13, padding: "6px 8px", outline: "none" }} />
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button onClick={() => commitRename(key)} style={chipBtn({ flex: 1, background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save</button>
-                    <button onClick={cancelRename} style={chipBtn({ flex: 1 })}>Cancel</button>
-                  </div>
-                </div>
-              ) : (
-                <React.Fragment>
-                  <button onClick={() => pickSource(key)} title="Open this source to read and cite"
-                    style={{ textAlign: "left", width: "100%", boxSizing: "border-box", border: 0, background: "none", color: "inherit", cursor: "pointer", padding: "9px 11px", display: "flex", flexDirection: "column", gap: 4 }}>
-                    <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, letterSpacing: ".08em", color: NR.muted }}>{kindOf(rec)}</span>
-                    <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, color: NR.text, lineHeight: 1.2 }}>{rec.title || key}</span>
-                    <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>{nC + " CITATION" + (nC === 1 ? "" : "S") + " MINTED" + (rec.archive_url ? " · ARCHIVED" : "")}</span>
-                  </button>
-                  <div style={{ display: "flex", borderTop: "1px solid " + NR.line }}>
-                    <button onClick={() => startRename(key, rec.title || key)} title="Rename this source"
-                      style={{ flex: 1, border: 0, borderRight: "1px solid " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "6px 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>✎ Rename</button>
-                    <button onClick={() => deleteSource(key)} title="Delete this source from the draft"
-                      style={{ flex: 1, border: 0, background: "transparent", color: "#b3261e", cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "6px 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>✕ Delete</button>
-                  </div>
-                </React.Fragment>
-              )}
+    <section style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 2 }}>Source library · {srcList.length}</div>
+        <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginBottom: 9 }}>In the order they appear in the draft · titles + outlets are our best guess — rename any that's off</div>
+        {srcList.length === 0
+          ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view) and it shows here to read and cite.</div>
+          : (
+            <div style={{ overflowX: "auto", border: "1px solid " + NR.line, borderRadius: 8, background: NR.field }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--cond)" }}>
+                <thead>
+                  <tr style={{ background: NR.bg }}>
+                    <th style={Object.assign({}, th, { paddingTop: 8 })}>Where from</th>
+                    <th style={Object.assign({}, th, { paddingTop: 8, width: "100%" })}>Source</th>
+                    <th style={Object.assign({}, th, { paddingTop: 8, textAlign: "center" })}>Cites</th>
+                    <th style={Object.assign({}, th, { paddingTop: 8 })}>Status</th>
+                    <th style={Object.assign({}, th, { paddingTop: 8, textAlign: "right" })}>·</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {srcList.map(({ key, rec }) => {
+                    const nC = allC.filter(c => c.srcKey === key).length;
+                    const active = selSrc === key;
+                    const isRenaming = renameKey === key;
+                    const isWeb = !!rec.original_url;
+                    if (isRenaming) return (
+                      <tr key={key} style={{ background: "rgba(255,236,1,.06)" }}>
+                        <td style={td} colSpan={5}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                            <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
+                              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(key); } else if (e.key === "Escape") { e.preventDefault(); cancelRename(); } }}
+                              placeholder="Source title" className="np-cond"
+                              style={{ flex: 1, boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13, padding: "6px 8px", outline: "none" }} />
+                            <button onClick={() => commitRename(key)} style={chipBtn({ background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save</button>
+                            <button onClick={cancelRename} style={chipBtn({})}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                    return (
+                      <tr key={key} style={{ background: active ? "rgba(255,236,1,.07)" : "transparent" }}>
+                        <td style={Object.assign({}, td, { borderLeft: "3px solid " + (active ? "var(--yellow)" : "transparent") })}>
+                          <span style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".05em", color: NR.muted, whiteSpace: "nowrap" }}>{clip(kindOf(rec), 22)}</span>
+                        </td>
+                        <td style={td}>
+                          <button onClick={() => pickSource(key)} title="Open this source to read and cite"
+                            style={{ textAlign: "left", border: 0, background: "none", color: NR.text, cursor: "pointer", padding: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, lineHeight: 1.25, textDecoration: active ? "underline" : "none", textUnderlineOffset: 3 }}>
+                            {rec.title || key}
+                          </button>
+                        </td>
+                        <td style={Object.assign({}, td, { textAlign: "center" })}>
+                          <span className="np-mono" style={{ fontSize: 11, color: nC ? NR.text : NR.muted }}>{nC}</span>
+                        </td>
+                        <td style={td}>
+                          <span className="np-mono" style={{ fontSize: 9, letterSpacing: ".04em", color: rec.archive_url ? NR.soft : "#c2724a", whiteSpace: "nowrap" }}>{rec.archive_url ? "ARCHIVED" : "NOT ARCHIVED"}</span>
+                        </td>
+                        <td style={Object.assign({}, td, { textAlign: "right" })}>
+                          <span style={{ display: "inline-flex", gap: 5, justifyContent: "flex-end" }}>
+                            {isWeb && <button onClick={() => guessTitle(key)} title="Guess the title & outlet from the page" style={rowBtn({})}>⟲ Guess</button>}
+                            <button onClick={() => startRename(key, rec.title || key)} title="Rename this source" style={rowBtn({})}>✎ Rename</button>
+                            <button onClick={() => deleteSource(key)} title="Delete this source from the draft" style={rowBtn({ color: "#c2724a" })}>✕</button>
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
+          )}
       </div>
-      {srcList.length > 0 && (
-        <div style={{ flex: 1, minWidth: 300 }}>
+      {srcList.length > 0 && selSrc && (
+        <div>
           {searchRow()}
           {readerBody(srcRefMain, false)}
           <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 8 }}>

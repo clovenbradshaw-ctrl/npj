@@ -511,7 +511,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (cs && cs.getAttribute("data-cid")) {
       const cid = cs.getAttribute("data-cid");
       const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + cid + '"]');
-      openPin(cid, cs.getAttribute("data-src") || cs.getAttribute("data-cite"), span ? (span.textContent || "").trim() : "");
+      // clicking a marker pins THAT source; clicking the span opens its first source
+      // (the popover lists the rest, and can add another) — a span can cite several
+      const key = cs.classList && cs.classList.contains("md-cite")
+        ? cs.getAttribute("data-cite")
+        : ((span && span.getAttribute("data-src")) || cs.getAttribute("data-src") || cs.getAttribute("data-cite") || "").split(/\s+/).filter(Boolean)[0] || "";
+      openPin(cid, key, span ? (span.textContent || "").trim() : "");
     }
   };
 
@@ -1024,8 +1029,57 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
     return cid;
   };
+  // The .claim-src that a selection sits inside — the span a NEW source should be
+  // ADDED to rather than nesting a fresh span within. Owned claims (data-stance,
+  // no citation) are left alone; they aren't sourced.
+  const claimHostOf = (r) => {
+    if (!r) return null;
+    const node = r.commonAncestorContainer;
+    const el = node && node.nodeType === 1 ? node : (node && node.parentElement);
+    const host = el && el.closest ? el.closest(".claim-src") : null;
+    return (host && ed.current && ed.current.contains(host) && !host.getAttribute("data-stance")) ? host : null;
+  };
+  // Give a claim span a citation marker for `key` if it doesn't have one yet — so
+  // a span backed by several sources carries one numbered sup per source (the
+  // publish path reads each sup as another source+quote on the same claim). The
+  // sup is created only when a source is actually pinned, never on a bare add.
+  const ensureCiteSup = (span, key) => {
+    if (!span || !key || !ed.current) return null;
+    const cid = span.getAttribute("data-cid"); if (!cid) return null;
+    const here = Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]'));
+    const found = here.find(s => s.getAttribute("data-cite") === key);
+    if (found) return found;
+    let order = citeOrderRef.current;
+    if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
+    const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
+    sup.setAttribute("data-cite", key); sup.setAttribute("data-cid", cid); sup.setAttribute("data-quote", ""); sup.title = key; sup.textContent = String(order.indexOf(key) + 1);
+    // sit it right after the span's existing markers, so a claim's cites stay together
+    let anchor = span, n = span.nextSibling;
+    while (n && n.nodeType === 1 && n.tagName === "SUP" && n.classList.contains("md-cite") && n.getAttribute("data-cid") === cid) { anchor = n; n = n.nextSibling; }
+    anchor.after(sup);
+    if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
+    return sup;
+  };
+  // Pull back the pinned quote for one specific source on a span (a span can hold
+  // several), so re-opening the picker shows the right words — not source #1's.
+  const quoteForKey = (span, key) => {
+    if (!span) return "";
+    if (window.NpjCitations) { const c = (window.NpjCitations.citationsFor(span) || []).find(c => c.srcKey === key); if (c) return c.quote || ""; }
+    try { const m = JSON.parse(span.getAttribute("data-quotes") || "null"); if (m && m[key] != null) return m[key]; } catch (e) {}
+    return span.getAttribute("data-quote") || "";
+  };
   const bindSource = (key) => {
     const r = spanRange();
+    // Citing words that are ALREADY inside a sourced claim → add this source to
+    // that span (a second citation), don't nest a new claim inside it.
+    const host = claimHostOf(r);
+    if (host) {
+      const cid = host.getAttribute("data-cid");
+      window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null);
+      if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
+      openPin(cid, key, (host.textContent || "").trim());
+      return;
+    }
     if (!r) { setArmSrc(key); setMenu(null); return; }
     const claimText = String(r.toString() || "").trim();
     const cid = bindRangeToSource(r, key);
@@ -1040,9 +1094,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [pinQuote, setPinQuote] = useState("");
   const pinLoc = useRef(null);                      // char offsets into the source, from the picker
   const openPin = (cid, key, claimText) => {
-    // re-opening an existing binding? read back whatever quote is on it
+    // re-opening an existing binding? read back this source's pinned quote (a span
+    // can carry several, so read the one for THIS key, not just source #1)
     let existing = "";
-    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
+    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = quoteForKey(el, key); }
     setPinQuote(existing); pinLoc.current = null;
     setPinTarget({ cid, key, claimText });
   };
@@ -1052,18 +1107,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const q = String(pinQuote || "").trim();
     if (!q) return;
     const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
+    if (span) ensureCiteSup(span, t.key);   // a source ADDED to an existing span gets its own marker now (on pin, not on add)
     if (window.NpjCitations && span) {
       // mint a reusable citation RECORD and attach it — projectAttrs re-derives
-      // data-src / data-quote / data-quotes and syncs the sup marker, so every
-      // downstream reader (CiteyBrain, publishGate, htmlToBlocks) is unchanged.
+      // data-src / data-quote / data-quotes and syncs every sup marker, so a
+      // multi-source span publishes each source+quote and every downstream reader
+      // (CiteyBrain, publishGate, htmlToBlocks) is unchanged.
       const id = window.NpjCitations.mint({ srcKey: t.key, quote: q, loc: loc || null });
       window.NpjCitations.attach(span, id);
       span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
     } else if (ed.current) {
-      // registry unavailable — fall back to the old inline behaviour
-      ed.current.querySelectorAll('[data-cid="' + t.cid + '"]').forEach(el => {
-        el.setAttribute("data-quote", q);
-        if (el.classList.contains("claim-src")) { el.classList.remove("needs-quote"); el.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”"); }
+      // registry unavailable — fall back to the inline behaviour, but only the
+      // marker for THIS source (so other sources on the span keep their quotes)
+      if (span) span.classList.remove("needs-quote");
+      if (span) span.setAttribute("data-quote", q);
+      if (span) span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
+      ed.current.querySelectorAll('sup.md-cite[data-cid="' + t.cid + '"]').forEach(el => {
+        if (el.getAttribute("data-cite") === t.key) el.setAttribute("data-quote", q);
       });
     }
     // remember the passage on the source record too, so the next claim off the
@@ -1073,6 +1133,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     closePin(); setRev(v => v + 1); scheduleSave();
     // let Citey flip ⊥→⊤ and re-cost the publish gate
     if (window.__citey) { if (span) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+  };
+  // Drop ONE source from a multi-source span: detach its citation record(s) and
+  // remove its marker; the span keeps every other source it cites. If it was the
+  // last one, NpjCitations.detach flags the span needs-quote (still bound, unpinned).
+  const removeSrcFromSpan = (span, key) => {
+    if (!span || !key) return;
+    if (window.NpjCitations) (window.NpjCitations.citationsFor(span) || []).filter(c => c.srcKey === key).forEach(c => window.NpjCitations.detach(span, c.id));
+    const cid = span.getAttribute("data-cid");
+    if (cid && ed.current) Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).filter(s => s.getAttribute("data-cite") === key).forEach(s => s.remove());
+    const left = (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean);
+    setRev(v => v + 1); scheduleSave(); renumberCites();
+    if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    // if the popover was editing the source we just removed, follow it to a survivor
+    if (pinTarget && pinTarget.key === key && pinTarget.cid === cid) {
+      if (left.length) openPin(cid, left[0], pinTarget.claimText); else closePin();
+    }
   };
   // The source-span ranking + paste flow now lives in the SourcePicker component
   // (app/SourcePicker.jsx), rendered inside the pin popover and the table.
@@ -1245,9 +1321,41 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     renameSource: (key, title) => {
       const rec = window.NPJ.SOURCES[key]; const t = String(title || "").trim();
       if (!rec || !t || rec.title === t) return false;
-      rec.title = t;
+      rec.title = t; rec.titleGuessed = false;   // an author's name is final — never re-guessed over
       setRev(v => v + 1); scheduleSave();
       return true;
+    },
+    // (re)guess a web source's title + outlet: the mechanical slug/host read right
+    // away, then the real <title>/og: tags off the archived page. Honors a manual
+    // rename (won't clobber a title the author set). Returns a promise for the UI.
+    guessSourceTitle: (key) => {
+      const rec = window.NPJ.SOURCES[key];
+      if (!rec || !rec.original_url) return Promise.resolve(false);
+      if (window.NpjSourceTitle && (rec.titleGuessed || !rec.title || /^web (snapshot|source)$/i.test(rec.title))) {
+        const g = window.NpjSourceTitle.guess(rec.original_url);
+        if (g.title && g.title !== rec.title) { rec.title = g.title; rec.titleGuessed = true; }
+        if (g.outlet && !rec.outlet) rec.outlet = g.outlet;
+        setRev(v => v + 1); scheduleSave();
+      }
+      return refineSourceTitle(key).then(() => true);
+    },
+    // a cheap, NETWORK-FREE pass: name every still-generic web source from its URL
+    // slug/host (so a draft loaded before titling existed gets readable names at
+    // once). Author-renamed titles are left alone. Returns how many it touched.
+    autoTitleSources: () => {
+      if (!window.NpjSourceTitle) return 0;
+      let n = 0;
+      Object.keys(window.NPJ.SOURCES || {}).forEach(key => {
+        const rec = window.NPJ.SOURCES[key];
+        if (!rec || !rec.original_url || rec.type === "interview") return;
+        if (rec.titleGuessed === false) return;                                 // author-named — keep
+        if (rec.title && !/^web (snapshot|source)$/i.test(rec.title)) return;    // already has a real title
+        const g = window.NpjSourceTitle.guess(rec.original_url);
+        if (g.title) { rec.title = g.title; rec.titleGuessed = true; n++; }
+        if (g.outlet && !rec.outlet) rec.outlet = g.outlet;
+      });
+      if (n) { setRev(v => v + 1); scheduleSave(); }
+      return n;
     },
     // delete a source from the draft: unbind every claim that cites it (unwrapping
     // any span left grounding nothing, and dropping its marker), discard the
@@ -1290,11 +1398,45 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
+  // ---- source identity: our best guess at the title + where it's from ----
+  // Mechanical first (slug + host, no network, no model), then upgraded from the
+  // page's own <title>/og: tags once the archived HTML is reachable. The guess
+  // never blocks the bind, and a guessed title is flagged so a manual Rename wins.
+  const guessWebRec = (u, key, fallbackTitle) => {
+    let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+    const g = window.NpjSourceTitle ? window.NpjSourceTitle.guess(u) : null;
+    return {
+      id: key, type: "primary",
+      outlet: (g && g.outlet) || host,
+      title: (g && g.title) || fallbackTitle,
+      titleGuessed: true,
+      original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10)
+    };
+  };
+  // Upgrade a web source's title/outlet from the page's own metadata. Only ever
+  // replaces a title we guessed (never one the author renamed). Best-effort: a
+  // blocked network or a missing capture just leaves the mechanical guess in place.
+  const refineSourceTitle = async (key) => {
+    const rec = window.NPJ.SOURCES[key];
+    if (!rec || rec.type === "interview" || !rec.original_url) return;
+    if (!window.NpjArchiveCDN || !window.NpjArchiveCDN.pageMeta || !window.NpjSourceTitle) return;
+    const meta = await window.NpjArchiveCDN.pageMeta({ archiveUrl: rec.archive_url, url: rec.original_url }).catch(() => ({}));
+    if (!meta) return;
+    let changed = false;
+    if (meta.title && rec.titleGuessed) {
+      const t = window.NpjSourceTitle.cleanTitle(meta.title, meta.site || rec.outlet);
+      if (t && t !== rec.title) { rec.title = t; changed = true; }
+    }
+    // og:site_name is the outlet's own name for itself — authoritative over the bare host
+    if (meta.site && meta.site !== rec.outlet) { rec.outlet = meta.site; changed = true; }
+    if (changed) { setRev(v => v + 1); scheduleSave(); }
+  };
   const bindNewUrl = () => {
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
     const key = "web-" + Date.now().toString(36);
-    window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: new URL(u).hostname.replace(/^www\./, ""), title: "Web source", original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10) };
+    window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web source");
     bindSource(key);
+    refineSourceTitle(key);
   };
   const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } setLinkUrl(""); setMenu(null); setSel(null); };
   const insertJump = (id, text) => { restore(); document.execCommand("insertHTML", false, `<a href="#${id}" class="jumplink">${text}</a>&nbsp;`); setMenu(null); setSel(null); };
@@ -1307,7 +1449,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!urls.length) return; setBusy(true);
     const made = urls.map((u, i) => {
       const key = "web-" + Date.now().toString(36) + i;
-      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: new URL(u).hostname.replace(/^www\./, ""), title: "Web snapshot", original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10) };
+      window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web snapshot");
       return { key, archived: false, snapshotting: true, url: u };
     });
     setSources(s => [...made, ...s]); setUrlInput("");
@@ -1317,6 +1459,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
       if (snap) window.NPJ.SOURCES[m.key].archive_url = snap;
       setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
+      refineSourceTitle(m.key);   // now that there may be an archived capture, read its real title
     })).then(() => setBusy(false));
   };
   // a conversation source (interview, named or anonymous) — built by the
@@ -1931,7 +2074,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* pin the source-span: the exact words IN the source that back the claim.
           A page is not a citation — this is what makes it one. */}
-      {pinTarget && (() => { const rec = window.NPJ.SOURCES[pinTarget.key] || {}; const ready = !!String(pinQuote || "").trim(); return (
+      {pinTarget && (() => {
+        const rec = window.NPJ.SOURCES[pinTarget.key] || {};
+        const ready = !!String(pinQuote || "").trim();
+        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
+        const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
+        const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;   // include the one being added
+        const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
+        const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
+        const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
+        return (
         <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
@@ -1944,6 +2096,24 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
             </div>
           )}
+          {/* every source on this span — one claim can rest on several. Click to edit
+              that one's pinned words; × drops it. The right-hand picker adds more. */}
+          {onSpan.length > 1 && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
+              <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
+              {onSpan.map(k => {
+                const cur = k === pinTarget.key;
+                return (
+                  <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
+                    <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
+                      style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
+                    <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
+                      style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
           <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
             style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
@@ -1953,6 +2123,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            {others.length > 0 && (
+              <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
+                title="Add another source to this same span — one claim can rest on several"
+                className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
+                <option value="">+ add a source…</option>
+                {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
+              </select>
+            )}
             <span style={{ flex: 1 }} />
             <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
             <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
