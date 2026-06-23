@@ -313,26 +313,27 @@ spacing, soft line breaks, images, the byline and the sources footer. Esc (or
 
 **Transparency — the grounding, painted onto the prose.** Both the **Preview**
 overlay and the published reader carry a **Transparency** toggle that colours
-every grounded span by *how* it stands, so a reader (or an author auditing a
-draft) can see the evidence behind each claim at a glance instead of hovering
-one by one:
+every grounded span by *how* it stands — the **same vocabulary the editor's
+Grounding workspace uses** (`proseShade`/`pillFor`), so a reader (or an author
+auditing a draft) sees the evidence behind each claim at a glance instead of
+hovering one by one:
 
-- **⊨ Cited — archived** (green): a passage pinned to a primary source captured
-  on archive.org.
-- **⊤ Cited — source** (blue): a passage pinned to a source with no archived
-  snapshot yet.
-- **⊢ Author's analysis** · **⊨ Author's account** · **⊩ Author's position**
-  (violet / teal / amber): claims the author *owns* — grounded by honest
-  declaration, not a citation.
-- **⊥ Unverified** (red, dashed): bound to a source but with no passage pinned —
-  the same claim the publish gate flags; normally only visible in Preview.
+- **⊤ Grounded** / **⊨ Multiple sources** (yellow): pinned to one — or more than
+  one — source passage that backs it.
+- **⊢ analysis · ⊨ account · ⊩ position** (violet): claims the author *owns* —
+  grounded by honest declaration, not a citation.
+- **⊥ Needs a source** (orange, dashed): bound to a source but with no passage
+  pinned — the same claim the publish gate flags; normally only visible in
+  Preview.
+- **¬ Sources disagree** (red): two pinned quotes pull opposite ways.
 
-A small legend keys the colours and tallies each kind; everything unmarked is
-uncited prose. The lens reads the body's own grounding, so it lights up the same
-way in Preview and on the live page. Owning a claim used to flatten to plain
-prose at publish — now the stance rides the published body (`{c, stance}` tokens
-through `htmlToBlocks`/`tokensToHtml`), so the record itself carries *which kind*
-of grounding each owned claim has, and the lens can show it.
+Each span also carries the small logic glyph the workspace uses, and a legend
+keys the colours and tallies each kind; everything unmarked is uncited prose.
+The lens reads the body's own grounding, so it lights up the same way in Preview
+and on the live page. Owning a claim used to flatten to plain prose at publish —
+now the stance rides the published body (`{c, stance}` tokens through
+`htmlToBlocks`/`tokensToHtml`), so the record itself carries *which kind* of
+grounding each owned claim has, and the lens can show it.
 
 **The page knows its own media.** The contents rail keeps a census of every
 image and embed in the piece; image thumbnails open a full-size viewer

@@ -30,30 +30,34 @@ function srcOf(key) {
 
 /* ---- the transparency lens: colour every grounded span by HOW it's grounded ----
    The reader (and the editor's Preview) can switch on a lens that tints each
-   claim by its grounding kind — cited to an archived snapshot, cited to a source,
-   or owned by the author as analysis (⊢) / account (⊨) / position (⊩). A
-   bound-but-unpinned claim (⊥, normally caught by the publish gate) shows red so
-   it's obvious in Preview. The hues mirror the editor's own grounding palette and
-   match the CSS in styles.css (.ground-lens …). */
+   claim by its grounding kind, using the SAME vocabulary as the editor's
+   Grounding workspace (app/GroundingWorkspace.jsx — proseShade / pillFor): a
+   yellow fill for a grounded/cited claim (⊤, or ⊨ for more than one source),
+   violet for a claim the author owns (analysis ⊢ / account ⊨ / position ⊩),
+   orange + dashed for one that still needs a source (⊥), red for sources that
+   disagree (¬). Colours + glyphs match styles.css (.ground-lens …). */
 const GROUND_KINDS = {
-  "cited-archived": { glyph: "⊨", label: "Cited — archived",  color: "#1f6f4a", note: "Pinned to a passage in a primary source captured on archive.org." },
-  "cited-source":   { glyph: "⊤", label: "Cited — source",    color: "#2b5f8a", note: "Pinned to a passage in a source (no archived snapshot yet)." },
-  "own-analysis":   { glyph: "⊢", label: "Author's analysis", color: "#7c74de", note: "The author's reasoning — owned, not cited." },
-  "own-account":    { glyph: "⊨", label: "Author's account",  color: "#138086", note: "First-hand: the author witnessed this." },
-  "own-position":   { glyph: "⊩", label: "Author's position", color: "#9a6a12", note: "The author's stated position." },
-  "cited-unpinned": { glyph: "⊥", label: "Unverified",        color: "#b23a26", note: "Bound to a source but no passage pinned — the publish gate flags this." }
+  grounded:        { glyph: "⊤", label: "Grounded",              color: "#d8c520", mark: "#9a8500", note: "Pinned to a source passage that backs it." },
+  multi:           { glyph: "⊨", label: "Multiple sources",      color: "#d8c520", mark: "#9a8500", note: "Backed by more than one pinned source." },
+  "own-analysis":  { glyph: "⊢", label: "The author's analysis", color: "#7C74DE", mark: "#6b5bd6", note: "Owned reasoning — grounded by declaration, not a citation." },
+  "own-account":   { glyph: "⊨", label: "The author's account",  color: "#7C74DE", mark: "#6b5bd6", note: "First-hand: the author witnessed this." },
+  "own-position":  { glyph: "⊩", label: "The author's position", color: "#7C74DE", mark: "#6b5bd6", note: "The author's stated position." },
+  needs:           { glyph: "⊥", label: "Needs a source",        color: "#D8632E", mark: "#b5701b", note: "Bound to a source but no passage pinned — the publish gate flags this." },
+  conflict:        { glyph: "¬", label: "Sources disagree",      color: "#D8412C", mark: "#b3261e", note: "Two pinned quotes pull opposite ways." }
 };
-const GROUND_ORDER = ["cited-archived", "cited-source", "own-analysis", "own-account", "own-position", "cited-unpinned"];
+const GROUND_ORDER = ["grounded", "multi", "own-analysis", "own-account", "own-position", "needs", "conflict"];
 const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position" };
-// The grounding kind of a claim token — owned (by its stance) or cited (by
-// whether a passage is pinned, and whether any source is an archived snapshot).
+// The grounding kind of a claim token, read the same mechanical way the
+// workspace's statusOf does — owned (by its declared stance), else by how many
+// of its sources carry a pinned quote (none → needs, one → grounded, more →
+// multi). No model, no guess; just the token's own grounding.
 function groundKind(claim) {
   if (!claim) return null;
   if (claim.stance) return STANCE_KIND[claim.stance] || "own-analysis";
   const q = claim.q || {};
-  const pinned = (claim.src || []).some(k => q[k] && String(q[k]).trim());
-  if (!pinned) return "cited-unpinned";
-  return (claim.src || []).some(k => srcOf(k).archive_url) ? "cited-archived" : "cited-source";
+  const pinned = (claim.src || []).filter(k => q[k] && String(q[k]).trim());
+  if (!pinned.length) return "needs";
+  return pinned.length > 1 ? "multi" : "grounded";
 }
 
 function useClaimModel(A) {
@@ -629,18 +633,21 @@ function ArticleRead(props) {
     // it (and names the stance on hover). No source card — there's no citation.
     if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
       const kind = STANCE_KIND[t.stance] || "own-analysis";
+      const gm = GROUND_KINDS[kind];
       return (
         <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind}
-          title={transparency ? GROUND_KINDS[kind].label : undefined}>
+          title={transparency ? gm.label : undefined}>
           {ent ? markEntities(t.c, ent, "o" + i) : t.c}
+          {transparency && <sup className="gmark" style={{ color: gm.mark }}>{gm.glyph}</sup>}
         </span>
       );
     }
     const claim = claimById[t.id];
     if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
+    const gk = groundKind(claim);
     return (
       <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
-        data-ground={groundKind(claim)}
+        data-ground={gk}
         data-active={claim.src.includes(activeSrc) ? "1" : "0"}
         tabIndex={0} role="button" aria-haspopup="dialog"
         aria-expanded={hover && hover.claim.id === t.id ? "true" : "false"}
@@ -658,6 +665,7 @@ function ArticleRead(props) {
         onClick={(e) => { if (isPhone) enterClaim({ currentTarget: e.currentTarget }, claim); else setShowSugg(true); }}>
         {ent ? markEntities(t.c, ent, "c" + i) : t.c}
         {showMarkers && <sup className="claim-marker">{claim.num}</sup>}
+        {transparency && gk && <sup className="gmark" style={{ color: GROUND_KINDS[gk].mark }}>{GROUND_KINDS[gk].glyph}</sup>}
       </span>
     );
   });
@@ -813,7 +821,7 @@ function ArticleRead(props) {
           </span>
           <span style={{ flex: 1 }} />
           <button className="btn btn-sm" onClick={() => setTransparency(v => !v)} aria-pressed={transparency}
-            title="Transparency — colour each claim by how it's grounded (cited / archived / the author's own)"
+            title="Transparency — colour each claim by how it's grounded: cited (⊤/⊨), the author's own (⊢/⊨/⊩), or needs a source (⊥)"
             style={{ display: "inline-flex", alignItems: "center", gap: 7, background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
             <I.swatches style={{ fontSize: 14 }} /> Transparency
           </button>
@@ -992,7 +1000,7 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, showSugg, 
         </button>
 
         <button className="btn btn-sm" onClick={() => setTransparency(!transparency)} aria-pressed={transparency}
-          title="Transparency — colour every claim by how it's grounded: cited to an archived snapshot, cited to a source, or owned by the author as analysis / account / position. Off: a clean read."
+          title="Transparency — colour every claim by how it's grounded: cited (⊤ grounded / ⊨ multiple sources), owned by the author (⊢ analysis / ⊨ account / ⊩ position), or still needs a source (⊥). Off: a clean read."
           style={{ display: "inline-flex", alignItems: "center", gap: 7,
             background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
           <I.swatches style={{ fontSize: 14 }} /> Transparency
