@@ -114,16 +114,39 @@
      CORS-open availability API confirms a capture exists. Saving goes through
      anonymous Save Page Now — that request is opaque to CORS (no-cors), so
      ensureSnapshot() requests, then polls availability for the confirmation. */
+  /* A stalled archive.org connection must never hang the caller — that's the
+     "snapshotting…" spinner that never stops. Every request below is raced
+     against a hard timeout (AbortController): on a slow/blocked network it
+     aborts and settles instead of waiting forever. The source is already saved
+     and citable by then; the snapshot is a best-effort enhancement on top. */
+  function fetchT(url, ms, opts) {
+    const o = Object.assign({ cache: "no-store" }, opts || {});
+    let ctl = null, timer = null;
+    if (typeof AbortController !== "undefined") {
+      ctl = new AbortController(); o.signal = ctl.signal;
+      timer = setTimeout(() => { try { ctl.abort(); } catch (e) {} }, ms || 8000);
+    }
+    const done = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    return fetch(url, o).then(r => { done(); return r; }, e => { done(); throw e; });
+  }
+
   async function waybackAvailable(url) {
-    const res = await fetch("https://archive.org/wayback/available?url=" + encodeURIComponent(url), { headers: { Accept: "application/json" } });
+    const res = await fetchT("https://archive.org/wayback/available?url=" + encodeURIComponent(url), 8000, { headers: { Accept: "application/json" } });
     if (!res.ok) return null;
     const j = await res.json();
     const c = j && j.archived_snapshots && j.archived_snapshots.closest;
     return (c && c.available && c.url) ? String(c.url).replace(/^http:/, "https:") : null;
   }
   function requestSnapshot(url) {
-    try { fetch("https://web.archive.org/save/" + url, { mode: "no-cors", cache: "no-store" }).catch(() => {}); } catch (e) {}
+    // Save Page Now is opaque to CORS (no-cors) and fire-and-forget; the timeout
+    // just keeps a stalled save from leaking an open connection.
+    try { fetchT("https://web.archive.org/save/" + url, 12000, { mode: "no-cors" }).catch(() => {}); } catch (e) {}
   }
+  // Confirm (or trigger, then confirm) a wayback capture. ALWAYS settles: every
+  // availability probe is time-bounded, so the worst case is a null "unconfirmed"
+  // — never a promise that hangs the "snapshotting…" row. SPN can be slow or
+  // rate-limited for anonymous saves; the caller degrades to "snapshot only" and
+  // the source stays fully usable + citable in the meantime (re-try via Archive).
   async function ensureSnapshot(url, tries = 2, waitMs = 3500) {
     let snap = await waybackAvailable(url).catch(() => null);
     if (snap) return snap;

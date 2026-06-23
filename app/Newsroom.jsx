@@ -251,7 +251,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (typeof d.slug === "string") setFileSlug(d.slug);
         if (Array.isArray(d.tags)) setTags(d.tags);
         if (d.column) setColumn(d.column);
-        if (Array.isArray(d.sources)) setSources(d.sources);
+        // Strip in-flight UI flags that may have been autosaved mid-operation:
+        // after a restore nothing is driving that async work, so a persisted
+        // snapshotting / uploading / ocr flag would spin its row forever. Re-derive
+        // "archived" from whether the rehydrated record actually has a snapshot.
+        if (Array.isArray(d.sources)) setSources(d.sources.map(s => {
+          const rec = (s && s.key && window.NPJ.SOURCES[s.key]) || null;
+          const { snapshotting, uploading, ocr, uploadErr, ...rest } = s || {};
+          return { ...rest, archived: !!(rec && rec.archive_url) };
+        }));
         if (Array.isArray(d.citeOrder)) { citeOrderRef.current = d.citeOrder; setCiteOrder(d.citeOrder); }
         if (d.room) setRoom(d.room);
         // rehydrate the structure log; the post-restore scanHeadings reconciles
