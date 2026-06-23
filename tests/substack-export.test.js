@@ -190,6 +190,45 @@ test("footnotes: HTML export keeps the number inline and an escaped Notes list",
   assert.match(h, /<p><strong>Notes<\/strong><\/p><ol><li>Per R&amp;D &lt;2026&gt;\.<\/li><\/ol>/);
 });
 
+test("footnotes: a marker stranded in its own paragraph attaches to the text above, not a lone line", () => {
+  // the bug: a <sup> alone in a <p> renders as a lone "1" on its own line. The
+  // marker references a word, so it must fold onto the END of the paragraph above.
+  const a = { headline: "T", body: [
+    { type: "p", tokens: ['…in respect to "Tactical Urbanism."'] },
+    { type: "p", tokens: [{ t: "sup", key: "fn1", num: 1, text: "1" }] },   // stranded
+    { type: "p", tokens: ["None of the community benches…"] },
+    { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "Metro Legal correspondence." }] }
+  ] };
+  const h = NS.toHtml(a, opts);
+  assert.match(h, /Tactical Urbanism\.&quot;<sup>1<\/sup><\/p>/, "marker sits inline at the end of the sentence");
+  assert.ok(!/<p><sup>1<\/sup><\/p>/.test(h), "no lone-marker paragraph");
+  const m = NS.toMarkdown(a, opts);
+  assert.match(m, /Tactical Urbanism\.\"\[\^fn1\]/, "markdown reference rides with the sentence");
+  assert.ok(!/^\[\^fn1\]$/m.test(m), "the reference is never alone on its own line");
+});
+
+test("mergeStrandedFootnotes is non-mutating and idempotent (shared body survives repeat export)", () => {
+  const a = { headline: "T", body: [
+    { type: "p", tokens: ["A fact."] },
+    { type: "p", tokens: [{ t: "sup", key: "fn1", num: 1, text: "1" }] }
+  ] };
+  const before = JSON.stringify(a.body);
+  // export twice on the SAME article — the second pass must not double the marker
+  const h1 = NS.toHtml(a, opts), m1 = NS.toMarkdown(a, opts);
+  const h2 = NS.toHtml(a, opts), m2 = NS.toMarkdown(a, opts);
+  assert.equal(h1, h2); assert.equal(m1, m2);
+  assert.ok(!/\[\^fn1\]\[\^fn1\]/.test(m1), "no duplicated reference");
+  assert.equal(JSON.stringify(a.body), before, "the article body is never mutated");
+});
+
+test("mergeStrandedFootnotes leaves a well-formed body untouched", () => {
+  const body = [
+    { type: "p", tokens: ["A fact", { t: "sup", key: "fn1", num: 1, text: "1" }, " holds."] },
+    { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "n" }] }
+  ];
+  assert.deepEqual(NS.mergeStrandedFootnotes(body), body);
+});
+
 /* ---- the evidence: sources as footnotes that open the snapshot on the cited
    words (a Text Fragment, #:~:text=…), showing precisely what backs the claim ---- */
 const EVID_SOURCES = {
