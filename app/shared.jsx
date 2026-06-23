@@ -60,6 +60,7 @@ const I = {
   alignRight:  phIcon("text-align-right"),
   highlighter: phIcon("highlighter"),
   palette: phIcon("palette"),
+  swatches: phIcon("swatches"),
   asterisk: phIcon("asterisk"),
   poll:    phIcon("chart-bar"),
   penNib:  phIcon("pen-nib"),

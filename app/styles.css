@@ -141,6 +141,32 @@ a { color: inherit; }
   100% { background: rgba(255,236,1,0); box-shadow: 0 0 0 4px rgba(255,236,1,0); }
 }
 .claim-flash { animation: claimflash 1.7s ease-out; border-radius: 2px; }
+
+/* ---- the transparency lens ----
+   The reader (and the editor's Preview) can switch on a lens that colours every
+   grounded span by HOW it stands: cited to an archived snapshot, cited to a
+   source, or owned by the author as analysis (⊢) / account (⊨) / position (⊩) —
+   plus a red flag for a bound-but-unpinned claim (⊥). Off, the prose is clean;
+   the class only lands on the article while the lens is on, so these rules never
+   touch a normal read. The hues mirror the editor's own grounding palette. */
+.ground-lens .claim[data-ground],
+.ground-lens .gowned[data-ground] {
+  padding: 0 1px;
+  border-radius: 2px;
+  transition: background-color .15s ease, filter .15s ease;
+}
+.ground-lens .claim[data-ground="cited-archived"] { background: color-mix(in srgb, #1f6f4a 18%, transparent); border-bottom: 2px solid #1f6f4a; }
+.ground-lens .claim[data-ground="cited-source"]   { background: color-mix(in srgb, #2b5f8a 18%, transparent); border-bottom: 2px solid #2b5f8a; }
+.ground-lens .claim[data-ground="cited-unpinned"] { background: color-mix(in srgb, #b23a26 20%, transparent); border-bottom: 2px dashed #b23a26; }
+.ground-lens .gowned[data-ground="own-analysis"]  { background: color-mix(in srgb, #7c74de 20%, transparent); border-bottom: 2px solid #7c74de; }
+.ground-lens .gowned[data-ground="own-account"]   { background: color-mix(in srgb, #138086 20%, transparent); border-bottom: 2px solid #138086; }
+.ground-lens .gowned[data-ground="own-position"]  { background: color-mix(in srgb, #9a6a12 20%, transparent); border-bottom: 2px solid #9a6a12; }
+/* hovering a claim keeps its grounding colour (it doesn't flip to the yellow
+   citation-hint of audit/clean mode) — just a touch deeper so it still reads as
+   interactive. */
+.ground-lens .claim[data-ground]:hover,
+.ground-lens .gowned[data-ground]:hover { filter: brightness(.96) saturate(1.2); }
+
 /* a clickable passage snippet (source → its spans in the article) */
 .cite-span {
   display: flex; gap: 7px; align-items: baseline; width: 100%; text-align: left;
