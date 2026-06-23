@@ -249,14 +249,17 @@ can't diverge.
 
 **Export outstanding fact checks.** When some claims can't be sourced from the
 desk, hand them off: the **Export for fact-check** action turns every blocker
-(⊥ needs source · ¬ conflict) into a plain bullet list of *outstanding fact
-checks* you can paste straight into an email or a text. The bullets aren't raw
-sentences — the [eoreader4](https://github.com/clovenbradshaw-ctrl/eoreader4)
-reading engine parses each sentence into its **bare propositions** (subject →
-relation → object), so a single dense sentence becomes the few atomic claims a
-checker can actually verify (`app/propositions.js` → `app/fact-check-export.js`,
-no markdown scaffolding). The engine loads lazily and degrades to the sentence
-itself if it's unavailable, so the list always renders.
+(⊥ needs source · ¬ conflict) into a plain, paste-anywhere list of *outstanding
+fact checks* — one line per claim, each naming the **type of evidence** that
+would ground it (the negative space), e.g. `… → an official document (court
+filing, permit, or ordinance)`. The evidence type is read **mechanically** from
+cues in the claim (`app/evidence-needs.js` — quotation marks, legal/governmental
+verbs, figures, attribution, dates → a coarse evidence category; no model, never
+prescriptive about the specific document). A **Sharpen with local model** button
+upgrades the types through a local LLM when one is reachable (Ollama, or any
+`setLLM` hook — the same ladder as Citey's voice), falling back silently to the
+mechanical read. `app/fact-check-export.js` shapes the plain text; nothing here
+judges a claim, only what would let someone else judge it.
 
 ## Citey — every claim grounded before it ships
 

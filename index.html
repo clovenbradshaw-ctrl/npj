@@ -101,10 +101,11 @@
 <!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
      (paste into Substack keeps headings, images, links & the sourcing). -->
 <script src="app/substack-export.js"></script>
-<!-- Outstanding fact checks: the draft's ungrounded claims (⊥ needs source,
-     ¬ conflict), read into bare propositions (propositions.js → eoreader4) and
-     shaped into a plain bullet list to paste into an email/text. Pure shaping. -->
-<script src="app/propositions.js"></script>
+<!-- Outstanding fact checks: each ungrounded claim (⊥ needs source, ¬ conflict)
+     paired with the TYPE of evidence that would ground it — the negative space.
+     evidence-needs.js reads it mechanically (optionally sharpened by a local
+     LLM); fact-check-export.js shapes the plain, paste-anywhere list. -->
+<script src="app/evidence-needs.js"></script>
 <script src="app/fact-check-export.js"></script>
 <!-- grounding model: reusable citation records (spans of a source) + sentence
      segmentation for the table view. Plain scripts; require window.NPJ. -->
