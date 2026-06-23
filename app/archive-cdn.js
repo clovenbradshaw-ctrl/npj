@@ -159,5 +159,37 @@
     return null; // honestly unconfirmed — SPN can take a while; a later check may find it
   }
 
-  window.NpjArchiveCDN = { isMediaUrl, resolve, proxied, proxyBase, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot };
+  /* ---- best-effort page identity (the source's real title + outlet) ----
+     A web source ships with a generic "Web snapshot" title; this reads the
+     page's own <title>/og: tags so the library can name it. The Wayback Machine
+     serves archived captures with `Access-Control-Allow-Origin: *`, so the
+     archived HTML is fetchable from the browser even when the live site isn't.
+     ALWAYS settles: every fetch is time-bounded, parsing is handed to the pure
+     NpjSourceTitle pack, and any failure returns {} — never throws. */
+  function rawPageUrl(archiveUrl) {
+    const m = String(archiveUrl || "").match(/^(https:\/\/web\.archive\.org\/web\/\d{1,14})(?:[a-z]{2}_)?(\/.+)$/i);
+    return m ? m[1] + "id_" + m[2] : null;   // id_ = the raw capture, no Wayback toolbar
+  }
+  async function pageMeta(opts) {
+    opts = opts || {};
+    const T = window.NpjSourceTitle;
+    if (!T) return {};
+    const tries = [];
+    const raw = opts.archiveUrl ? rawPageUrl(opts.archiveUrl) : null;
+    if (raw) tries.push(raw);
+    if (opts.archiveUrl) tries.push(opts.archiveUrl);
+    if (opts.url) tries.push(opts.url);      // the live page last — often CORS-blocked, but cheap to try
+    for (const u of tries) {
+      try {
+        const res = await fetchT(u, 9000, { headers: { Accept: "text/html,application/xhtml+xml" } });
+        if (!res || !res.ok) continue;
+        const html = (await res.text()).slice(0, 300000);   // headers/og live up top; cap the read
+        const meta = T.metaFromHtml(html);
+        if (meta && (meta.title || meta.site)) return meta;
+      } catch (e) { /* try the next candidate */ }
+    }
+    return {};
+  }
+
+  window.NpjArchiveCDN = { isMediaUrl, resolve, proxied, proxyBase, waybackRaw, waybackAvailable, requestSnapshot, ensureSnapshot, rawPageUrl, pageMeta };
 })();

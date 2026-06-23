@@ -62,7 +62,11 @@
 <script src="app/data.js"></script>
 <!-- live sources: pulls archive.org items tagged "npj-source" into DATASETS/SOURCES -->
 <script src="app/archive-sources.js"></script>
-<!-- media CDN: resolves archive.org links to direct image URLs for <image-slot> -->
+<!-- best-effort source identity: guess a web source's title + outlet from its URL
+     slug/host, and read the real ones off the page's own <title>/og: tags. No model. -->
+<script src="app/source-title.js"></script>
+<!-- media CDN: resolves archive.org links to direct image URLs for <image-slot>,
+     and (pageMeta) reads a source's identity off the CORS-open archived HTML -->
 <script src="app/archive-cdn.js"></script>
 <!-- expose hooks globally so every babel file uses them bare without colliding -->
 <script>

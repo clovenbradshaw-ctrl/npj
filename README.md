@@ -26,7 +26,8 @@ founding admin curates the site and grows the network from there.
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
-| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation |
+| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation. One span can hold **several citations** (`data-cite-id`, one `md-cite` marker per source) |
+| `app/source-title.js` | best-effort **source identity** — guess a web source's title (URL slug) + outlet (host), and read the real ones off the page's own `<title>`/`og:` tags. No model; pure + tested |
 | `app/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
 | `app/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
 | `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩, or **⊪ in context** — continuing coverage that builds on prior articles), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
@@ -198,8 +199,13 @@ back the claim. Until it does, the span is flagged (⚑ `needs-quote`) and the
 publish build refuses it — right next to the "no source record" check. The pinned
 passage rides the article (`data-quote` → the claim token's `q` map) and shows in
 the reader's citation card as *"the cited passage — in the source."* One source can
-back **several spans**, each pinned to its own words. Sources are snapshotted to
-archive.org; a claim that points at a page but no span fails the build.
+back **several spans**, each pinned to its own words — and one span can rest on
+**several sources**: cite the same words again (or use the pin popover's **+ add a
+source**) and each source gets its own pinned passage, so a claim corroborated by
+two documents publishes as a single ⊨ claim carrying both (`data-cite-id` holds the
+records; the publish path reads one `md-cite` marker per source into the token's
+`src[]` + `q{}`). Sources are snapshotted to archive.org; a claim that points at a
+page but no span fails the build.
 
 **Citey finds the span — he never invents the citation.** When you bind a source,
 hit **📎 Find the line**: Citey takes your claim and the source's text, ranks the
@@ -232,12 +238,19 @@ that always shows a second view and **pivots** as you work:
   registry (best mechanical match first, but never hidden behind a threshold), so
   a citation you've already pinned attaches in one click instead of being hunted
   down in its source and re-grabbed.
-- **Sources** — the documents themselves, rendered as paper with a letterhead
-  (kind · title · archived-or-not). Search within the document, see every cited
-  span highlighted in place, and — from any "+ Cite" — go in **armed**: Citey
-  shades the passages he scents (mechanical word overlap, dotted, never a
-  one-click pin), and you drag-select the exact words. Grab two spans if the
-  support lives in two places; *⊕ Cite this span* mints the reusable record.
+- **Sources** — a **table** of the documents: where each is from, our best guess
+  at its title, how many citations rest on it, archived-or-not, and the
+  housekeeping (**⟲ Guess · ✎ Rename · ✕**). **The library names its own sources.**
+  A web source no longer lands as a generic *"Web snapshot"* — it's named
+  mechanically from its URL (the slug → a readable title, the host → the outlet),
+  then **upgraded from the page's own `<title>`/`og:` tags** when the CORS-open
+  archived HTML is reachable (`app/source-title.js` parses, `archive-cdn.pageMeta`
+  fetches — no model, best-effort, a manual Rename always wins). Pick a row to open
+  the document as paper with a letterhead: search within it, see every cited span
+  highlighted in place, and — from any "+ Cite" — go in **armed**: Citey shades the
+  passages he scents (mechanical word overlap, dotted, never a one-click pin), and
+  you drag-select the exact words. Grab two spans if the support lives in two
+  places; *⊕ Cite this span* mints the reusable record.
 
 A **Ground truth** strip keeps the running tally (grounded / yours / conflicts /
 needs sources) and the gate chip — **⚑ N blockers** until every sentence is
