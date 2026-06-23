@@ -23,6 +23,7 @@
   const CONTROL_ALIAS = "#npj-control:hyphae.social"; // Matrix room that stores permissioning
   const PERM_EVENT = "press.npj.permissions";          // state event type holding { roles }
   const APP_ROOM_TYPE = "press.npj.room";              // state event tagging a room as one of OURS
+  const GUEST_STATE = "press.npj.guests";              // state event: { guests: { mxid → {name,by,ts} } }
   const LS_KEY = "npj_matrix_session_v1";               // localStorage → survives tab close & refresh
 
   let session = null; // { user_id, access_token, base_url, device_id, verified, admin }
@@ -143,8 +144,21 @@
   async function joinRoom(roomIdOrAlias) {
     if (!session) { const e = new Error("Sign in first"); e.code = "noauth"; throw e; }
     const v = String(roomIdOrAlias || "").trim(); if (!v) return null;
-    const out = await api(session.base_url, "/_matrix/client/v3/join/" + encodeURIComponent(v), { method: "POST", token: session.access_token, body: {} });
-    return out.room_id || v;
+    // A brand-new account doing register → login → join in quick succession can
+    // trip the homeserver's rate limiter (M_LIMIT_EXCEEDED). That used to fail
+    // silently and leave a newcomer invited-but-never-joined — so honour the
+    // server's retry_after and try again a few times before giving up.
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const out = await api(session.base_url, "/_matrix/client/v3/join/" + encodeURIComponent(v), { method: "POST", token: session.access_token, body: {} });
+        return out.room_id || v;
+      } catch (e) {
+        const limited = e && (e.errcode === "M_LIMIT_EXCEEDED" || e.status === 429);
+        if (!limited || attempt >= 4) throw e;
+        const wait = Math.min((e.data && e.data.retry_after_ms) || (500 * Math.pow(2, attempt)), 5000);
+        await new Promise(r => setTimeout(r, wait));
+      }
+    }
   }
   async function invite(roomIdOrAlias, userInput) {
     if (!session) { const e = new Error("Sign in with Matrix first"); e.code = "noauth"; throw e; }
@@ -248,14 +262,27 @@
       room: { ephemeral: { types: [] }, account_data: { types: [] },
         state: { types: ROOM_STATE_TYPES }, timeline: { limit: 1, types: ROOM_STATE_TYPES } }
     };
-    let joined = null;
+    let out = null;
     try {
-      const out = await api(session.base_url, "/_matrix/client/v3/sync?timeout=0&set_presence=offline&filter=" + encodeURIComponent(JSON.stringify(filter)), { token: session.access_token });
-      joined = (out.rooms && out.rooms.join) || {};
+      out = await api(session.base_url, "/_matrix/client/v3/sync?timeout=0&set_presence=offline&filter=" + encodeURIComponent(JSON.stringify(filter)), { token: session.access_token });
     } catch (e) { /* sync unavailable → index-only fallback below */ }
+    const joined = out ? ((out.rooms && out.rooms.join) || {}) : null;
 
     const rooms = [];
     if (joined) {
+      // Self-heal: accept any pending invite to a room that's ours — one this
+      // account was invited to via a link (known through its own draft index) or
+      // any NPJ-tagged room the server shares in the invite's stripped state.
+      // THIS is what makes a guest who followed a link actually land INSIDE the
+      // project, instead of getting stuck as an invite they never accepted.
+      const invited = (out.rooms && out.rooms.invite) || {};
+      const accept = [];
+      for (const roomId of Object.keys(invited)) {
+        const stripped = (invited[roomId] && invited[roomId].invite_state && invited[roomId].invite_state.events) || [];
+        if (legacyIds.has(roomId) || stripped.some(ev => ev && ev.type === APP_ROOM_TYPE)) accept.push(roomId);
+      }
+      for (const roomId of accept) { try { await joinRoom(roomId); } catch (e) {} }
+
       for (const roomId of Object.keys(joined)) {
         const r = joined[roomId] || {};
         // recent state changes ride in the timeline section; merge them over state
@@ -268,6 +295,15 @@
           if (kind !== "control" || session.admin) tagRoom(roomId, kind).catch(() => {});
         }
         rooms.push(toRoom(roomId, c));
+      }
+      // Rooms we just accepted aren't in this (pre-join) sync — fetch their state
+      // so they surface immediately, without waiting for the next workspace load.
+      for (const roomId of accept) {
+        if (joined[roomId]) continue;
+        try {
+          const st = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state", { token: session.access_token });
+          rooms.push(toRoom(roomId, collect(st || [])));
+        } catch (e) { /* unreadable → skip */ }
       }
       return rooms;
     }
@@ -292,11 +328,35 @@
   async function roomMembers(roomId) {
     if (!session) return [];
     try {
-      const out = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/members?not_membership=leave", { token: session.access_token });
+      const [out, guests] = await Promise.all([
+        api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/members?not_membership=leave", { token: session.access_token }),
+        readGuests(roomId)
+      ]);
       return ((out && out.chunk) || [])
         .map(ev => ({ mxid: ev.state_key, membership: (ev.content && ev.content.membership) || "join" }))
-        .filter(m => m.mxid && (m.membership === "join" || m.membership === "invite"));
+        .filter(m => m.mxid && (m.membership === "join" || m.membership === "invite"))
+        .map(m => guests[m.mxid] ? { ...m, guest: true, guestName: guests[m.mxid].name || "" } : m);
     } catch (e) { return []; }
+  }
+  /* ---- guests: a project member minted via an invite link ----
+     The inviter records WHO a guest is for (a plain name) as room state, so the
+     label lives in the project for every member to see — not just in the
+     inviter's browser. One state event holds the whole { mxid → {name,by,ts} }
+     map (read-modify-write; a small newsroom won't race on it). */
+  async function readGuests(roomId) {
+    if (!session) return {};
+    try {
+      const st = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(GUEST_STATE) + "/", { token: session.access_token });
+      return (st && st.guests) || {};
+    } catch (e) { return {}; }
+  }
+  async function setGuestName(roomId, mxid, name, by) {
+    if (!session) return;
+    const id = parseMxid(mxid); if (!id) return;
+    const guests = { ...(await readGuests(roomId)), [id.mxid]: { name: String(name || ""), by: by || session.user_id, ts: new Date().toISOString() } };
+    try {
+      await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(GUEST_STATE) + "/", { method: "PUT", token: session.access_token, body: { guests } });
+    } catch (e) { /* labelling is best-effort; never block the invite on it */ }
   }
 
   /* ---- public profile (displayname + avatar) ----
@@ -401,13 +461,13 @@
     if (all.has("m.login.email.identity") || all.has("m.login.msisdn")) return "This homeserver requires email/phone verification to register.";
     return "This homeserver doesn't allow creating accounts from the browser.";
   }
-  async function register({ domain, username, password, registrationToken, deviceName } = {}) {
+  async function register({ domain, username, password, registrationToken, deviceName, seed } = {}) {
     // accept a bare domain ("hyphae.social") or a full mxid (":server" is split off)
     const raw = String(domain || "").trim();
     const dom = (raw.indexOf(":") >= 0 ? raw.split(":").pop() : raw).replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
     if (!dom) { const e = new Error("Need a homeserver to register on"); e.code = "badmxid"; throw e; }
     const base = await discover(dom);
-    const localpart = String(username || "").trim() || randomLocalpart();
+    const localpart = String(username || "").trim() || randomLocalpart(seed);
     const pw = password || randomPassword();
     const base_body = { username: localpart, password: pw, inhibit_login: true, initial_device_display_name: deviceName || "People's Journalism (web)" };
     let uiaSession = null;   // the homeserver's UIA session id, echoed back each stage
@@ -499,6 +559,6 @@
     register, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
-    joinedRooms, roomMembers, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
+    joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
   };
 })();

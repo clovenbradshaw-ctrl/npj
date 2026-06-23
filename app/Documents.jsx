@@ -32,15 +32,16 @@ function MemberChips({ list, me }) {
   return (
     <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
       {list.map(m => {
-        const name = m.mxid.replace(/^@/, "").split(":")[0];
+        const name = (m.guest && m.guestName) ? m.guestName : m.mxid.replace(/^@/, "").split(":")[0];
         const invited = m.membership === "invite";
+        const tag = (m.guest ? " · guest" : "") + (invited ? " · invited" : "");
         return (
-          <span key={m.mxid} title={m.mxid + (invited ? " — invited, hasn't joined yet" : m.mxid === me ? " — you" : " — member")}
+          <span key={m.mxid} title={m.mxid + (m.guest ? " — guest" : "") + (invited ? " · invited, hasn't joined yet" : m.mxid === me ? " — you" : " — member")}
             className="np-mono" style={{ fontSize: 9.5, padding: "1px 7px", whiteSpace: "nowrap",
               border: invited ? "1px dashed var(--ink-soft)" : "1px solid var(--ink)",
               background: invited ? "transparent" : (m.mxid === me ? "var(--yellow)" : "var(--card)"),
               color: invited ? "var(--ink-soft)" : "var(--ink)" }}>
-            {invited ? "◌ " : "● "}{name}{invited ? " · invited" : ""}
+            {invited ? "◌ " : "● "}{name}{tag}
           </span>
         );
       })}
@@ -593,10 +594,11 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
 
   // optimistic UI: a just-sent invite shows pending immediately; a new project
   // appears without waiting on the next homeserver sync
-  const addPendingMember = (roomId, mxid) => setMembers(m => {
+  const addPendingMember = (roomId, mxid, name) => setMembers(m => {
     const cur = m[roomId] || [];
     if (cur.some(x => x.mxid === mxid)) return m;
-    return { ...m, [roomId]: [...cur, { mxid, membership: "invite" }] };
+    const chip = name ? { mxid, membership: "invite", guest: true, guestName: name } : { mxid, membership: "invite" };
+    return { ...m, [roomId]: [...cur, chip] };
   });
   const addProject = ({ roomId, title }) => setRooms(r => {
     const draftsIdx = (r && r.drafts) || [];
@@ -721,7 +723,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     <MemberChips list={members[p.roomId]} me={me} />
                     <span style={{ flex: 1 }} />
                     <InviteControl roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
-                    <NewAccountInvite roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
+                    <NewAccountInvite roomId={p.roomId} roomTitle={p.title} onInvited={(mx, name) => addPendingMember(p.roomId, mx, name)} />
                   </div>
                   <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 5, display: "flex", alignItems: "center", gap: 5 }}>
                     <I.shield style={{ fontSize: 11 }} /> Everyone invited can open and edit every article and source in this project.

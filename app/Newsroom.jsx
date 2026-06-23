@@ -1049,6 +1049,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   and put them in the same project the typed-mxid invite would use */}
               <NewAccountInvite
                 roomId={room ? room.roomId : null}
+                roomTitle={room ? (room.title || title) : title}
                 ensureRoom={async () => {
                   let rm = room;
                   if (!rm) {
