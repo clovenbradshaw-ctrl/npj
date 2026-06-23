@@ -672,9 +672,11 @@
         const fitAttr = b.fit ? ' fit="' + esc(b.fit) + '"' : '';
         const cropAttr = (b.crop && b.crop.ar)
           ? ' data-crop="' + esc([b.crop.s, b.crop.x, b.crop.y, b.crop.ar].join(",")) + '"' : '';
-        // the banner box conforms to the image's shape in the editor (the whole
-        // image, as published) rather than the fixed-height letterbox below
-        const conformAttr = b.banner ? ' conform' : '';
+        // every image box conforms to its image's shape in the editor — the
+        // whole image, exactly as the reader/published page shows it — rather
+        // than a fixed-height letterbox. The declared height below only acts as
+        // the drop target while the slot is empty.
+        const conformAttr = ' conform';
         // caption + credit are editable islands inside the non-editable figure
         // (the slot itself stays protected). The credit takes markdown links the
         // same way a contributor bio does — name / [outlet](https://…).

@@ -451,7 +451,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
-  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
+  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
   const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
 
   // ---- images come in by paste/drop too ----
