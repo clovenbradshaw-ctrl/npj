@@ -115,7 +115,7 @@
       if (t.t === "s") return "~~" + t.text + "~~";
       if (t.t === "code") return "`" + t.text + "`";
       if (t.t === "a") return "[" + t.text + "](" + (t.href || "") + ")";
-      if (t.t === "sup") return "[" + t.text + "]"; // a manual footnote marker — keep as text
+      if (t.t === "sup") return "[^" + (t.key || t.text) + "]"; // a footnote marker → a real markdown footnote reference
       if (t.c != null) {                            // a source-bound claim
         const marks = citeMarksMd(t, ctx);
         if (!marks) return t.c;
@@ -144,6 +144,7 @@
       case "ul": (b.items || []).forEach(it => out.push("- " + tokensToMd(it, ctx).trim())); out.push(""); break;
       case "ol": (b.items || []).forEach((it, i) => out.push((i + 1) + ". " + tokensToMd(it, ctx).trim())); out.push(""); break;
       case "hr": out.push("---", ""); break;
+      case "footnotes": (b.notes || []).forEach(n => out.push("[^" + n.key + "]: " + String(n.text || "").trim())); out.push(""); break;
       case "code": out.push("```", String(b.text || "").replace(/\n+$/, ""), "```", ""); break;
       case "verse":
         String(b.text || "").replace(/\n+$/, "").split("\n").forEach(l => out.push(l.replace(/\s+$/, "") + "  "));
@@ -218,7 +219,7 @@
       if (t.t === "s") return "<s>" + esc(t.text) + "</s>";
       if (t.t === "code") return "<code>" + esc(t.text) + "</code>";
       if (t.t === "a") return '<a href="' + esc(t.href) + '">' + esc(t.text) + "</a>";
-      if (t.t === "sup") return "<sup>" + esc(t.text) + "</sup>";
+      if (t.t === "sup") return "<sup>" + esc(t.num != null ? t.num : t.text) + "</sup>"; // footnote marker (the number)
       if (t.c != null) return esc(t.c) + citeMarksHtml(t, ctx);
       return esc(t.text || "");
     }).join("");
@@ -227,7 +228,7 @@
   // it to safe HTML (escaped text + sanitized <a>) for the exported figcaption.
   function creditHtml(credit) {
     const c = String(credit == null ? "" : credit).trim(); if (!c) return "";
-    const P = window.NpjProfiles;
+    const P = (typeof window !== "undefined") ? window.NpjProfiles : null;
     const toks = (P && P.linkTokens) ? P.linkTokens(c) : [{ type: "text", text: c }];
     return toks.map(t => t.type === "link"
       ? '<a href="' + esc(t.href) + '">' + esc(t.label) + "</a>"
@@ -253,6 +254,10 @@
       case "ul": return "<ul>" + (b.items || []).map(it => "<li>" + tokensToHtml(it, ctx) + "</li>").join("") + "</ul>";
       case "ol": return "<ol>" + (b.items || []).map(it => "<li>" + tokensToHtml(it, ctx) + "</li>").join("") + "</ol>";
       case "hr": return "<hr>";
+      case "footnotes": {
+        const items = (b.notes || []).map(n => "<li>" + (creditHtml(n.text) || "") + "</li>").join("");
+        return items ? "<p><strong>Notes</strong></p><ol>" + items + "</ol>" : "";
+      }
       case "code": return "<pre><code>" + esc(String(b.text || "").replace(/\n+$/, "")) + "</code></pre>";
       case "verse": return "<p><em>" + esc(String(b.text || "").replace(/\n+$/, "")).replace(/\n/g, "<br>") + "</em></p>";
       case "img": return b.banner ? "" : imgHtml(b);

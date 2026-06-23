@@ -484,7 +484,21 @@ function ArticleRead(props) {
       if (t.t === "s") return <s key={i}>{t.text}</s>;
       if (t.t === "code") return <code key={i} className="np-mono" style={{ fontSize: "0.85em", background: "var(--paper-2)", padding: "0 4px" }}>{t.text}</code>;
       if (t.t === "a") return <a key={i} href={t.href} target="_blank" rel="noopener" style={{ color: "inherit", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{t.text}</a>;
-      if (t.t === "sup") return <sup key={i} className="np-mono" style={{ fontSize: 11 }}>{t.text}</sup>;
+      if (t.t === "sup") {
+        // a footnote marker: a small linked number that jumps to its note below
+        // (and the note links back). Older logs with no number fall back to text.
+        if (t.num != null) {
+          const k = t.key || t.text || "";
+          return (
+            <sup key={i} id={"fnref-" + k} style={{ fontSize: 11, lineHeight: 0 }}>
+              <a href={"#fn-" + k} aria-label={"Footnote " + t.num}
+                onClick={(e) => { e.preventDefault(); const el = document.getElementById("fn-" + k); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }}
+                style={{ color: "var(--data)", textDecoration: "none", fontWeight: 600, fontFamily: "var(--mono)" }}>{t.num}</a>
+            </sup>
+          );
+        }
+        return <sup key={i} className="np-mono" style={{ fontSize: 11 }}>{t.text}</sup>;
+      }
       return <React.Fragment key={i}>{t.text || ""}</React.Fragment>;
     }
     const claim = claimById[t.id];
@@ -543,6 +557,27 @@ function ArticleRead(props) {
             <Tag key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", paddingLeft: 26 }}>
               {(b.items || []).map((it, j) => <li key={j} style={{ marginBottom: 6 }}>{renderTokens(it)}</li>)}
             </Tag>
+          );
+        }
+        if (b.type === "footnotes") {
+          const notes = (b.notes || []).filter(n => n && n.key);
+          if (!notes.length) return null;
+          return (
+            <section key={i} aria-label="Footnotes" style={{ margin: "36px 0 8px", paddingTop: 16, borderTop: "2px solid var(--ink)" }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 12 }}>Notes</div>
+              <ol style={{ margin: 0, paddingLeft: 24, display: "flex", flexDirection: "column", gap: 10 }}>
+                {notes.map(n => (
+                  <li key={n.key} id={"fn-" + n.key} value={n.num}
+                    style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink)", scrollMarginTop: 90 }}>
+                    {n.text ? (window.npjRichText ? window.npjRichText(n.text) : n.text) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
+                    {" "}
+                    <a href={"#fnref-" + n.key} aria-label="Back to text"
+                      onClick={(e) => { e.preventDefault(); const el = document.getElementById("fnref-" + n.key); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }}
+                      style={{ color: "var(--data)", textDecoration: "none", fontFamily: "var(--mono)", fontSize: 12.5 }}>↩</a>
+                  </li>
+                ))}
+              </ol>
+            </section>
           );
         }
         if (b.type === "hr") return <hr key={i} style={{ border: 0, borderTop: "2.5px solid var(--ink)", width: 110, margin: "30px auto" }} />;

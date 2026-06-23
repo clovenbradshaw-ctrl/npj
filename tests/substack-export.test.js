@@ -137,3 +137,25 @@ test("a claim with two sources gets both numbers, each linked", () => {
   assert.match(NS.toMarkdown(a, opts), /Both back this\.\[\[1\]\]\([^)]+\)\[\[2\]\]\([^)]+\)/);
   assert.match(NS.toHtml(a, opts), /<sup><a href="[^"]+">1<\/a>,<a href="[^"]+">2<\/a><\/sup>/);
 });
+
+test("footnotes: markers become real markdown refs and a [^key]: definitions block", () => {
+  const a = { headline: "T", body: [
+    { type: "p", tokens: ["A fact", { t: "sup", key: "fn1", num: 1, text: "1" }, " holds."] },
+    { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "See [the report](https://example.org/r)." }] }
+  ] };
+  const m = NS.toMarkdown(a, opts);
+  assert.match(m, /A fact\[\^fn1\] holds\./);                       // inline reference
+  assert.match(m, /^\[\^fn1\]: See \[the report\]\(https:\/\/example\.org\/r\)\.$/m); // definition
+});
+
+test("footnotes: HTML export keeps the number inline and an escaped Notes list", () => {
+  // note text rides through creditHtml (markdown links resolve in the browser via
+  // NpjProfiles; here we assert the structure + escaping, env-independent)
+  const a = { headline: "T", body: [
+    { type: "p", tokens: ["A fact", { t: "sup", key: "fn1", num: 1, text: "1" }, " holds."] },
+    { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "Per R&D <2026>." }] }
+  ] };
+  const h = NS.toHtml(a, opts);
+  assert.match(h, /A fact<sup>1<\/sup> holds\./);
+  assert.match(h, /<p><strong>Notes<\/strong><\/p><ol><li>Per R&amp;D &lt;2026&gt;\.<\/li><\/ol>/);
+});

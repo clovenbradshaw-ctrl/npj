@@ -142,99 +142,62 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
   );
 }
 
-/* ---- the last step: lock sign-in behind a passkey ----
+/* ---- the last step: make sure they can actually get back in ----
    A guest account is a real account, and the password they just set is its only
-   key. On a device that supports it, we offer to wrap that password in a platform
-   passkey (Face ID / fingerprint, via WebAuthn PRF) so getting back in is one
-   touch — stored encrypted in this browser, nothing leaving the device. It's a
-   convenience, never the only way in: the password still works anywhere, so
-   "skip and remember it" is always a first-class choice. */
-function PasskeyStep({ creds, onEnter, card }) {
-  const [supported, setSupported] = useState(null); // null = still checking
-  const [state, setState] = useState("idle");       // idle | working | done | error
-  const [err, setErr] = useState("");
+   key — and there's no easy reset (the homeserver keeps just a hash). So rather
+   than lock sign-in behind a device passkey, we make the durable thing explicit:
+   hand them their exact credentials to copy, and make them confirm they've saved
+   them somewhere safe — a password manager ideally — before we let them in. */
+function SecureAccountStep({ creds, onEnter, card }) {
+  const [reveal, setReveal] = useState(false);
+  const [copied, setCopied] = useState("");   // which field was last copied
+  const [saved, setSaved] = useState(false);  // the "I've saved it" confirmation
 
-  useEffect(() => {
-    let alive = true;
-    (window.PasskeyVault ? window.PasskeyVault.supported() : Promise.resolve(false))
-      .then(s => { if (alive) setSupported(!!s); }).catch(() => { if (alive) setSupported(false); });
-    return () => { alive = false; };
-  }, []);
+  const copy = async (label, value) => { if (await copyText(value)) { setCopied(label); setTimeout(() => setCopied(c => (c === label ? "" : c)), 1500); } };
 
-  const enroll = async () => {
-    if (state === "working") return;
-    setState("working"); setErr("");
-    try {
-      await window.PasskeyVault.enroll({ mxid: creds.mxid, password: creds.password, label: creds.displayName || creds.mxid });
-      setState("done");
-    } catch (e) {
-      if (e && e.name === "NotAllowedError") setErr("Passkey setup was cancelled — you can still sign in with your password.");
-      else if (e && e.code === "noprf") setErr("This device's passkey can't store a sign-in. Just remember your password.");
-      else setErr((e && e.message) || "Couldn't set up your passkey.");
-      setState("error");
-    }
+  const fieldRow = (label, value, secret) => {
+    const masked = secret && !reveal;
+    const shown = masked ? "•".repeat(Math.min(16, (String(value || "").length) || 12)) : (value || "—");
+    return (
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 0", borderBottom: "1px solid var(--rule)" }}>
+        <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, whiteSpace: "nowrap" }}>{label}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 13, textAlign: "right", wordBreak: "break-all" }}>{shown}</span>
+          {secret && (
+            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setReveal(r => !r)} title={reveal ? "Hide" : "Show"} aria-label={reveal ? "Hide password" : "Show password"} style={{ padding: 3 }}>
+              {reveal ? <I.eyeoff style={{ fontSize: 13 }} /> : <I.eye style={{ fontSize: 13 }} />}
+            </button>
+          )}
+          <button type="button" className="btn btn-sm btn-ghost" onClick={() => copy(label, value)} title="Copy" aria-label={"Copy " + label} style={{ padding: 3 }}>
+            {copied === label ? <I.check style={{ fontSize: 13, color: "var(--verified)" }} /> : <I.copy style={{ fontSize: 13 }} />}
+          </button>
+        </span>
+      </div>
+    );
   };
 
-  const fieldRow = (label, value, mono) => (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--rule)" }}>
-      <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, whiteSpace: "nowrap" }}>{label}</span>
-      <span style={{ fontFamily: mono ? "var(--mono)" : "var(--serif)", fontSize: 13, textAlign: "right", wordBreak: "break-all" }}>{value || "—"}</span>
-    </div>
-  );
-  const errBox = err ? (
-    <div style={{ marginTop: 12, padding: "9px 11px", background: "color-mix(in srgb, var(--reject) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--reject) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, color: "var(--reject)" }}>{err}</div>
-  ) : null;
-
-  const summary = (
-    <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "4px 12px", marginBottom: 16 }}>
-      {fieldRow("Name", creds.displayName, false)}
-      {fieldRow("Address", creds.mxid, true)}
-    </div>
-  );
-
-  // device can't do passkeys → there's nothing to set up; remembering the password
-  // IS the plan, so say so plainly and let them in.
-  if (supported === false) return card(
-    <>
-      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>You&rsquo;re all set.</h1>
-      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
-        Your account is real and it&rsquo;s yours. <strong style={{ color: "var(--ink)" }}>Remember the password you just set</strong> — it&rsquo;s your key to signing back in from any device. The server only keeps a hash, so no one can recover it for you.
-      </p>
-      {summary}
-      <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-        Enter the newsroom<I.arrow style={{ fontSize: 13 }} />
-      </button>
-    </>
-  );
-
-  const done = state === "done";
   return card(
     <>
       <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now · last step</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>{done ? "Passkey saved." : "Make getting back in easy."}</h1>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>Save your password.</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
-        {done
-          ? <>Next time on this device, just use Face&nbsp;ID or your fingerprint — no password to type. Your password still works anywhere as a backup.</>
-          : <>Lock your sign-in to this device with <strong style={{ color: "var(--ink)" }}>Face&nbsp;ID or a fingerprint</strong>, so you never have to type your password here. It&rsquo;s stored encrypted on this device — or skip it and just remember your password, which works from anywhere.</>}
+        Your account is real and it&rsquo;s yours — but <strong style={{ color: "var(--ink)" }}>there&rsquo;s no easy reset</strong>. The password you just set is the only key, and the server keeps just a hash, so no one can recover it for you. Save it in a <strong style={{ color: "var(--ink)" }}>password manager</strong> (or somewhere safe you&rsquo;ll find again) before you go in.
       </p>
-      {summary}
-      {done ? (
-        <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-          <I.check style={{ fontSize: 14 }} />Enter the newsroom
-        </button>
-      ) : (
-        <>
-          <button className="btn btn-primary" disabled={supported === null || state === "working"} onClick={enroll}
-            style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (supported === null || state === "working") ? .6 : 1 }}>
-            {state === "working" ? <InviteSpinner /> : <I.lock style={{ fontSize: 13 }} />}{state === "working" ? "Setting up…" : "Set up passkey sign-in"}
-          </button>
-          <button className="btn btn-ghost" onClick={onEnter} style={{ marginTop: 10, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
-            Skip — I&rsquo;ll remember my password<I.arrow style={{ fontSize: 13 }} />
-          </button>
-        </>
-      )}
-      {errBox}
+      <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "4px 12px", marginBottom: 16 }}>
+        {fieldRow("Name", creds.displayName, false)}
+        {fieldRow("Sign-in ID", creds.mxid, false)}
+        {fieldRow("Password", creds.password, true)}
+      </div>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 9, cursor: "pointer", marginBottom: 16 }}>
+        <input type="checkbox" checked={saved} onChange={e => setSaved(e.target.checked)} style={{ marginTop: 3, width: 16, height: 16, flex: "0 0 auto", accentColor: "var(--ink)" }} />
+        <span style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.45 }}>
+          I&rsquo;ve saved my password somewhere safe, like a password manager — I understand it can&rsquo;t be reset for me.
+        </span>
+      </label>
+      <button className="btn btn-primary" disabled={!saved} onClick={onEnter}
+        style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: saved ? 1 : .5, cursor: saved ? "pointer" : "not-allowed" }}>
+        Enter the newsroom<I.arrow style={{ fontSize: 13 }} />
+      </button>
     </>
   );
 }
@@ -243,15 +206,27 @@ function PasskeyStep({ creds, onEnter, card }) {
    Full-screen, branded, owns the whole viewport while a newcomer onboards.
    props: payload (parsed token), onDone(session) */
 function WelcomeInvite({ payload, onDone }) {
-  const [phase, setPhase] = useState("signing"); // signing | name | password | secure | finishing | used | error
+  const [phase, setPhase] = useState("signing"); // signing | returning | name | password | secure | finishing | error
   const [err, setErr] = useState("");
   const [name, setName] = useState(payload.n || ""); // pre-filled with who the inviter named
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
+  const [returnPw, setReturnPw] = useState("");      // the password they set, for a re-used link
   const [busy, setBusy] = useState(false);
-  const [creds, setCreds] = useState(null);          // {mxid,password,displayName} carried into the passkey step
+  const [creds, setCreds] = useState(null);          // {mxid,password,displayName} carried into the save-password step
   const sessRef = useRef(null);                      // the live session, surfaced once they secure the account
   const mxid = "@" + payload.u + ":" + payload.hs;
+
+  // Land them INSIDE the project, reliably. Index it on the guest's own account
+  // (so the workspace recovers it — and joinedRooms can finish a missed join on
+  // the next load), then accept the invite the inviter sent when minting the
+  // link. joinRoom retries on rate-limit; both are best-effort so a hiccup never
+  // strands the newcomer. Shared by the first sign-in and the returning one.
+  const landInProject = async () => {
+    if (!payload.r) return;
+    try { await window.MatrixAuth.registerDraft({ roomId: payload.r, title: payload.rt || "Your project" }); } catch (e) {}
+    try { await window.MatrixAuth.joinRoom(payload.r); } catch (e) {}
+  };
 
   // auto-login with the one-time password from the link
   useEffect(() => {
@@ -259,20 +234,14 @@ function WelcomeInvite({ payload, onDone }) {
     (async () => {
       try {
         await window.MatrixAuth.login(mxid, payload.p);
-        // Land them INSIDE the project, reliably. First index it on the guest's
-        // own account (so the workspace recovers it — and joinedRooms can finish
-        // a missed join on the next load), then accept the invite the inviter
-        // sent when minting the link. joinRoom retries on rate-limit; both are
-        // best-effort so a hiccup never strands the newcomer on this screen.
-        if (payload.r) {
-          try { await window.MatrixAuth.registerDraft({ roomId: payload.r, title: payload.rt || "Your project" }); } catch (e) {}
-          try { await window.MatrixAuth.joinRoom(payload.r); } catch (e) {}
-        }
+        await landInProject();
         if (alive) setPhase("name");
       } catch (e) {
         if (!alive) return;
-        // a 403 on a fresh link almost always means it's already been redeemed
-        if (e && (e.errcode === "M_FORBIDDEN" || e.status === 403)) setPhase("used");
+        // The link's one-time password dies the moment they set their own — which
+        // is exactly what a 403 here means: they've followed this link before. So
+        // rather than a dead end, let them in with the password they chose.
+        if (e && (e.errcode === "M_FORBIDDEN" || e.status === 403)) setPhase("returning");
         else { setErr((e && e.message) || "We couldn't open this invite."); setPhase("error"); }
       }
     })();
@@ -296,9 +265,9 @@ function WelcomeInvite({ payload, onDone }) {
     try {
       await window.MatrixAuth.changePassword(payload.p, pw);
       // re-read the live session so the app picks up the verified identity, but
-      // hold it until they've had the chance to lock sign-in behind a passkey —
-      // a guest account is a real account, and the password they just set is the
-      // only key to it, so we offer to make returning easy before whisking them off.
+      // hold it until they've confirmed they saved the password — a guest account
+      // is a real account with no easy reset, and the password they just set is
+      // its only key, so we make them stash it safely before whisking them off.
       sessRef.current = window.MatrixAuth.current();
       setCreds({ mxid, password: pw, displayName: name.trim() || payload.n || "" });
       setBusy(false);
@@ -307,6 +276,23 @@ function WelcomeInvite({ payload, onDone }) {
   };
 
   const enterNewsroom = () => { setPhase("finishing"); onDone && onDone(sessRef.current || window.MatrixAuth.current()); };
+
+  // returning through the original link: the temp password is spent, so they sign
+  // in with the password they set, then we drop them straight into the project.
+  const returnSignIn = async () => {
+    if (busy) return;
+    if (!returnPw) { setErr("Enter your password."); return; }
+    setBusy(true); setErr("");
+    try {
+      const sess = await window.MatrixAuth.login(mxid, returnPw);
+      await landInProject();
+      setPhase("finishing");
+      onDone && onDone(sess);
+    } catch (e) {
+      setErr((e && e.message) || "That password didn't match. Try again.");
+      setBusy(false);
+    }
+  };
 
   const card = (children) => (
     <div style={{ position: "fixed", inset: 0, zIndex: 9998, background: "var(--paper)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, overflowY: "auto" }}>
@@ -332,14 +318,21 @@ function WelcomeInvite({ payload, onDone }) {
     </div>
   );
 
-  if (phase === "used") return card(
+  if (phase === "returning") return card(
     <>
-      <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 10 }}>Already set up</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 12px" }}>This invite is done.</h1>
-      <p style={{ fontFamily: "var(--serif)", fontSize: 15.5, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 20px" }}>
-        Looks like <strong style={{ color: "var(--ink)" }}>{mxid}</strong> already chose a password. Sign in with it instead.
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>Welcome back</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>Sign in to continue.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        You&rsquo;ve set this account up already, so the link&rsquo;s one-time password is spent. Enter the password <strong style={{ color: "var(--ink)" }}>you chose</strong> to pick up where you left off.
       </p>
-      <button className="btn btn-primary" onClick={() => { location.hash = "submit"; location.reload(); }}>Go to sign in</button>
+      <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 6 }}>Your password</label>
+      <input autoFocus type="password" value={returnPw} onChange={e => { setReturnPw(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && returnSignIn()}
+        style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 15, padding: "10px 12px", fontFamily: "var(--mono)", outline: "none" }} />
+      {errBox}
+      <button className="btn btn-primary" disabled={busy} onClick={returnSignIn} style={{ marginTop: 16, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: busy ? .6 : 1 }}>
+        {busy ? <InviteSpinner /> : <I.lock style={{ fontSize: 13 }} />}{busy ? "Signing in…" : "Sign in"}
+      </button>
+      <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 14 }}>{mxid}</div>
     </>
   );
 
@@ -352,7 +345,7 @@ function WelcomeInvite({ payload, onDone }) {
     </>
   );
 
-  if (phase === "secure") return <PasskeyStep creds={creds} onEnter={enterNewsroom} card={card} />;
+  if (phase === "secure") return <SecureAccountStep creds={creds} onEnter={enterNewsroom} card={card} />;
 
   if (phase === "finishing") return card(
     <div style={{ textAlign: "center", padding: "16px 0" }}>

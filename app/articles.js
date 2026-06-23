@@ -81,7 +81,9 @@
   }
 
   /* ---------------- plain text of a body (versions, diffing, engines) ---------------- */
-  function tokenText(t) { return typeof t === "string" ? t : (t && (t.c != null ? t.c : t.text)) || ""; }
+  // A footnote marker ({t:"sup"}) carries no reading text — it's a reference, so
+  // it must not leak its "fn1"/number into plaintext, word counts or diffs.
+  function tokenText(t) { return typeof t === "string" ? t : (t && (t.c != null ? t.c : (t.t === "sup" ? "" : t.text))) || ""; }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
     return body.map(b => {
@@ -90,6 +92,7 @@
       if (b.type === "h2" || b.type === "h3") return b.text || "";
       if (b.type === "pull") return (b.text || "") + (b.attribution ? " — " + b.attribution : "");
       if (b.type === "ul" || b.type === "ol") return (b.items || []).map(it => "· " + it.map(tokenText).join("")).join("\n");
+      if (b.type === "footnotes") return (b.notes || []).map(n => n && n.text || "").filter(Boolean).join("\n");
       if (b.type === "img") return b.caption || "";
       if (b.type === "embed") return b.url || "";
       if (b.type === "code" || b.type === "verse") return b.text || "";
@@ -453,7 +456,10 @@
             return;
           }
           if (tag === "sup" && c.classList.contains("md-cite")) {
-            if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
+            // a manual footnote marker: its stable key rides on data-cite (the
+            // visible text is just the number), and it's numbered + paired with
+            // its "[^key]:" definition in the footnote pass below.
+            if (c.hasAttribute("data-fn")) { flush(); const fk = (c.getAttribute("data-cite") || plain(c) || "").trim(); toks.push({ t: "sup", key: fk, text: plain(c) }); return; }
             const key = c.getAttribute("data-cite"); if (!key) return;
             // the pinned source-span: the exact words in the source backing this claim
             const quote = (c.getAttribute("data-quote") || "").trim() || quoteFromCiteIds(c, key);
@@ -574,7 +580,39 @@
       const toks = inlineTokens(node);
       if (hasInk(toks)) blocks.push({ type: "p", tokens: toks });
     });
-    return { blocks, headline, dek };
+
+    /* ---- footnotes: pair inline markers with their "[^key]: …" definitions ----
+       The composer drops a <sup data-fn> marker inline and a "[^key]: text"
+       paragraph at the foot of the document. Here we lift those definition
+       paragraphs out of the prose, number every marker by the order it's first
+       referenced (1, 2, 3…), and gather one { type:"footnotes", notes } block the
+       reader renders as endnotes — so a footnote is a real, linked note, not the
+       raw "[^fn1]:" text showing through. */
+    const FN_DEF = /^\s*\[\^([^\]\s]+)\]:\s*([\s\S]*)$/;
+    const fnDefs = {};                 // key → definition text (first one wins)
+    const kept = [];
+    blocks.forEach(b => {
+      if (b.type === "p") {
+        const m = (b.tokens || []).map(tokenText).join("").match(FN_DEF);
+        if (m) { const k = m[1].trim(); if (k && fnDefs[k] == null) fnDefs[k] = (m[2] || "").trim(); return; }
+      }
+      kept.push(b);
+    });
+    const fnNum = {}; let fnSeq = 0;   // key → number, in first-reference order
+    const numberMarker = (t) => {
+      if (!t || t.t !== "sup") return;
+      const k = (t.key || t.text || "").trim(); if (!k) return;
+      if (!fnNum[k]) fnNum[k] = ++fnSeq;
+      t.key = k; t.num = fnNum[k];
+    };
+    kept.forEach(b => { (b.tokens || []).forEach(numberMarker); (b.items || []).forEach(it => it.forEach(numberMarker)); });
+    // A note is emitted for every REFERENCED key (a bare "[^key]:" with no marker
+    // is dropped, like standard markdown); a referenced key with no definition
+    // still gets a slot so its number and jump target exist.
+    const notes = Object.keys(fnNum).sort((a, b) => fnNum[a] - fnNum[b])
+      .map(k => ({ key: k, num: fnNum[k], text: fnDefs[k] || "" }));
+    if (notes.length) kept.push({ type: "footnotes", notes });
+    return { blocks: kept, headline, dek };
   }
 
   /* ---------------- body blocks → HTML (the post-publish edit surface) ---------------- */
@@ -589,7 +627,7 @@
       if (t.t === "s") return "<s>" + esc(t.text) + "</s>";
       if (t.t === "code") return "<code>" + esc(t.text) + "</code>";
       if (t.t === "a") return '<a href="' + esc(t.href) + '">' + esc(t.text) + "</a>";
-      if (t.t === "sup") return '<sup class="md-cite" data-fn="1" data-cite="' + esc(t.text) + '" contenteditable="false">' + esc(t.text) + "</sup>";
+      if (t.t === "sup") { const k = t.key || t.text || ""; const label = (t.num != null ? t.num : t.text); return '<sup class="md-cite" data-fn="1" data-cite="' + esc(k) + '" contenteditable="false">' + esc(label) + "</sup>"; }
       return esc(t.text || "");
     }).join("");
   }
@@ -602,6 +640,9 @@
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";
       if (b.type === "verse") return '<pre class="verse">' + esc(b.text) + "</pre>";
+      // footnotes round-trip back to the composer as the "[^key]: text" paragraphs
+      // the author edits; the inline markers (data-cite=key) above re-pair with them.
+      if (b.type === "footnotes") return (b.notes || []).map(n => "<p>[^" + esc(n.key) + "]: " + esc(n.text || "") + "</p>").join("");
       // editable image-slot (not a static <img>) so the edit surface can
       // replace it — a fresh drop uploads to the media store, then publish/save
       // moves it to archive.org. Primary src is the live media-store copy when
