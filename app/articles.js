@@ -104,6 +104,42 @@
     return Math.max(1, Math.round(words / 220));
   }
 
+  /* ---------------- footnote hygiene: never strand a marker on its own line ----
+     A footnote marker ({t:"sup"}) references a WORD, so a paragraph holding
+     nothing but markers (and whitespace) is a stranded marker — it renders as a
+     lone "1" on its own line in every reader and the Substack export. Fold those
+     markers onto the END of the previous paragraph (where the marker belongs);
+     with no paragraph above, onto the START of the next one. Idempotent, and the
+     plaintext is unchanged (a sup carries no reading text — see tokenText). This
+     repairs older drafts already saved this way AND backstops the composer's
+     anchorFootnoteCaret, so the marker lands against its text everywhere. */
+  function isFnMarker(t) { return !!t && typeof t === "object" && t.t === "sup"; }
+  function onlyFnMarkers(tokens) {
+    const ts = tokens || [];
+    return ts.length > 0 && ts.some(isFnMarker) &&
+      ts.every(t => isFnMarker(t) || (typeof t === "string" && !t.trim()));
+  }
+  // Non-mutating: blocks are cloned (Object.assign) when markers attach, so a
+  // shared article body is never corrupted by a repeat call (read model + export).
+  function mergeStrandedFootnotes(blocks) {
+    const src = Array.isArray(blocks) ? blocks : [];
+    const out = [];
+    let carry = [];   // markers with no paragraph above them yet — attach to the next one
+    src.forEach(b => {
+      if (b && b.type === "p" && onlyFnMarkers(b.tokens)) {
+        const markers = b.tokens.filter(isFnMarker);
+        const prev = out[out.length - 1];
+        if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
+        else carry = carry.concat(markers);
+        return;   // drop the stranded paragraph
+      }
+      if (carry.length && b && b.type === "p") { out.push(Object.assign({}, b, { tokens: carry.concat(b.tokens || []) })); carry = []; return; }
+      out.push(b);
+    });
+    if (carry.length) out.push({ type: "p", tokens: carry });   // nowhere to attach — keep the marker rather than lose it
+    return out;
+  }
+
   /* ---------------- standardized article metadata ----------------
      The fields every published piece should carry so the front page renders
      consistently no matter which layout template it lands in. `required` ones
@@ -210,7 +246,9 @@
         credit: bannerBlock.credit || "",
         banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
       } : null,
-      body: Array.isArray(state.body) ? state.body : [],
+      // normalize on read too, so a draft already saved with a stranded marker
+      // renders right for every consumer (reader + Substack export) without a re-save
+      body: mergeStrandedFootnotes(Array.isArray(state.body) ? state.body : []),
       sources, versions
     };
     return { article, sources, versions, events: events.map(e => e.ev) };
@@ -601,14 +639,16 @@
        "[^key]: text" definition paragraph (older drafts wrote notes as prose). */
     const FN_DEF = /^\s*\[\^([^\]\s]+)\]:\s*([\s\S]*)$/;
     const fnDefs = Object.assign({}, fnRegionDefs);   // key → note text (region wins)
-    const kept = [];
+    const defStripped = [];
     blocks.forEach(b => {
       if (b.type === "p") {
         const m = (b.tokens || []).map(tokenText).join("").match(FN_DEF);
         if (m) { const k = m[1].trim(); if (k && fnDefs[k] == null) fnDefs[k] = (m[2] || "").trim(); return; }
       }
-      kept.push(b);
+      defStripped.push(b);
     });
+    // a marker that landed alone in its own paragraph attaches to the text above
+    const kept = mergeStrandedFootnotes(defStripped);
     const fnNum = {}; let fnSeq = 0;   // key → number, in first-reference order
     const numberMarker = (t) => {
       if (!t || t.t !== "sup") return;

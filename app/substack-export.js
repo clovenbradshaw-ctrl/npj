@@ -101,6 +101,40 @@
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  // ---- footnote hygiene: a marker references a WORD, so a paragraph holding
+  // nothing but markers (and whitespace) is a stranded marker that prints as a
+  // lone "1" on its own line. Fold those onto the end of the previous paragraph
+  // (or the start of the next, if there's none above). Idempotent — the read
+  // model normalizes too (articles.js mergeStrandedFootnotes); this keeps the
+  // export right when a body is handed in directly. ----
+  function isFnMarker(t) { return !!t && typeof t === "object" && t.t === "sup"; }
+  function onlyFnMarkers(tokens) {
+    const ts = tokens || [];
+    return ts.length > 0 && ts.some(isFnMarker) &&
+      ts.every(t => isFnMarker(t) || (typeof t === "string" && !t.trim()));
+  }
+  // Non-mutating: blocks are cloned (Object.assign) when markers attach, so the
+  // caller's article body is never corrupted by a repeat call (e.g. toHtml then
+  // toMarkdown on the same article).
+  function mergeStrandedFootnotes(blocks) {
+    const src = Array.isArray(blocks) ? blocks : [];
+    const out = [];
+    let carry = [];   // markers with no paragraph above them yet — attach to the next one
+    src.forEach(b => {
+      if (b && b.type === "p" && onlyFnMarkers(b.tokens)) {
+        const markers = b.tokens.filter(isFnMarker);
+        const prev = out[out.length - 1];
+        if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
+        else carry = carry.concat(markers);
+        return;   // drop the stranded paragraph
+      }
+      if (carry.length && b && b.type === "p") { out.push(Object.assign({}, b, { tokens: carry.concat(b.tokens || []) })); carry = []; return; }
+      out.push(b);
+    });
+    if (carry.length) out.push({ type: "p", tokens: carry });   // nowhere to attach — keep the marker rather than lose it
+    return out;
+  }
+
   // ---- source numbering: first-appearance order across every claim, exactly
   // like the reader's ledger (useClaimModel) so the numbers match the page. ----
   function indexSources(body, sources) {
@@ -207,8 +241,9 @@
   function toMarkdown(article, opts) {
     opts = opts || {};
     const A = article || {};
+    const body = mergeStrandedFootnotes(A.body);
     const sources = sourcesFor(opts);
-    const { numByKey, ordered } = indexSources(A.body, sources);
+    const { numByKey, ordered } = indexSources(body, sources);
     const ctx = { citations: opts.citations !== false, numByKey, sources };
     const out = [];
 
@@ -224,7 +259,7 @@
     const hero = heroImage(A);
     if (hero) pushImageMd(out, hero);
 
-    (A.body || []).forEach(b => blockToMd(out, b, ctx));
+    body.forEach(b => blockToMd(out, b, ctx));
 
     if (opts.sourcesList !== false && ordered.length) {
       out.push("---", "", "## Sources", "");
@@ -331,8 +366,9 @@
   function toHtml(article, opts) {
     opts = opts || {};
     const A = article || {};
+    const body = mergeStrandedFootnotes(A.body);
     const sources = sourcesFor(opts);
-    const { numByKey, ordered } = indexSources(A.body, sources);
+    const { numByKey, ordered } = indexSources(body, sources);
     const ctx = { citations: opts.citations !== false, numByKey, sources };
     const parts = [];
 
@@ -341,7 +377,7 @@
     const hero = heroImage(A);
     if (hero) { const h = imgHtml(hero); if (h) parts.push(h); }
 
-    (A.body || []).forEach(b => { const h = blockToHtml(b, ctx); if (h) parts.push(h); });
+    body.forEach(b => { const h = blockToHtml(b, ctx); if (h) parts.push(h); });
 
     if (opts.sourcesList !== false && ordered.length) {
       parts.push("<hr>", "<h2>Sources</h2>");
@@ -502,5 +538,5 @@
     return saveBlob(toHtmlDocument(article, opts), filename(article, "html"), "text/html;charset=utf-8");
   }
 
-  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, heroImage, evidenceUrl, textFragment, copyForSubstack, download, downloadHtml };
+  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, mergeStrandedFootnotes, heroImage, evidenceUrl, textFragment, copyForSubstack, download, downloadHtml };
 });
