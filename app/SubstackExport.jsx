@@ -4,7 +4,10 @@
    surface: a one-click rich copy (HTML + markdown on the clipboard, so a paste
    into Substack keeps headings, images, links, blockquotes and the sourcing),
    a .md download, separate Title/Subtitle chips for Substack's own fields, and
-   a live markdown preview. Toggles control the source citations + Sources list.
+   a live markdown preview. Toggles control the footnote markers + the
+   "Sources & evidence" footnotes — each source link opens its archive.org
+   snapshot on the exact cited passage (a Text Fragment), so the reader lands on
+   precisely the evidence.
 
    Substack mechanics we lean on:
      • Pasted HTML formats; pasted markdown stays literal — so the copy ships
@@ -110,9 +113,12 @@ function SubstackExport({ article, onClose }) {
           <div>
             <div style={eyebrow}>Sourcing {sourceCount ? "· " + sourceCount + " archived source" + (sourceCount === 1 ? "" : "s") : ""}</div>
             <div style={{ display: "flex", gap: 8, marginTop: 7, flexWrap: "wrap" }}>
-              <ExportToggle on={citations} set={setCitations} label="Inline citations" hint="A small superscript after each sourced claim, linked to its archive.org snapshot." />
-              <ExportToggle on={sourcesList} set={setSourcesList} label="Sources list" hint="A numbered “Sources” section at the end, each linked to its snapshot." />
+              <ExportToggle on={citations} set={setCitations} label="Footnote markers" hint="A superscript after each sourced claim — it opens the archive.org snapshot on the exact words cited." />
+              <ExportToggle on={sourcesList} set={setSourcesList} label="Sources & evidence" hint="Footnotes at the end: every source with the passage it backs, quoted and linked to its snapshot." />
             </div>
+            <span className="np-mono" style={{ display: "block", marginTop: 8, fontSize: 10.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
+              Every source link opens its archive.org snapshot scrolled to — and highlighting — the precise passage that backs the claim, so a reader sees exactly what the evidence is.
+            </span>
           </div>
 
           {/* save a file */}

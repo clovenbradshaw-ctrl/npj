@@ -189,3 +189,53 @@ test("footnotes: HTML export keeps the number inline and an escaped Notes list",
   assert.match(h, /A fact<sup>1<\/sup> holds\./);
   assert.match(h, /<p><strong>Notes<\/strong><\/p><ol><li>Per R&amp;D &lt;2026&gt;\.<\/li><\/ol>/);
 });
+
+/* ---- the evidence: sources as footnotes that open the snapshot on the cited
+   words (a Text Fragment, #:~:text=…), showing precisely what backs the claim ---- */
+const EVID_SOURCES = {
+  s1: { id: "s1", outlet: "Reuters", title: "Budget vote",
+        archive_url: "https://web.archive.org/web/2026/https://reuters.com/b", retrieved: "2026-06-01" },
+  s2: { id: "s2", outlet: "City", title: "Minutes",
+        archive_url: "https://web.archive.org/web/2026/https://city.gov/m", retrieved: "2026-06-02" }
+};
+const EVID = {
+  headline: "Budget",
+  body: [{ type: "p", tokens: [
+    { c: "The budget passed 7-2.", src: ["s1"], id: "c1", q: { s1: "passed seven to two" } }, " ",
+    { c: "Parks got more.", src: ["s2"], id: "c2",
+      q: { s2: "the parks department received an additional two million dollars in the final vote" } }
+  ] }]
+};
+const eopts = { sources: EVID_SOURCES };
+
+test("textFragment anchors short passages whole, long ones by first/last words, and escapes '-'", () => {
+  assert.equal(NS.textFragment("passed seven to two"), ":~:text=passed%20seven%20to%20two");
+  assert.equal(NS.textFragment("cost-of-living rose"), ":~:text=cost%2Dof%2Dliving%20rose");
+  assert.equal(
+    NS.textFragment("the parks department received an additional two million dollars in the final vote"),
+    ":~:text=the%20parks%20department%20received%20an%20additional,in%20the%20final%20vote");
+});
+
+test("evidenceUrl deep-links a snapshot to the passage; no quote (or no snapshot) → bare/empty", () => {
+  const src = { archive_url: "https://web.archive.org/web/2026/https://x.org/a" };
+  assert.equal(NS.evidenceUrl(src, "passed seven to two"),
+    "https://web.archive.org/web/2026/https://x.org/a#:~:text=passed%20seven%20to%20two");
+  assert.equal(NS.evidenceUrl(src, ""), "https://web.archive.org/web/2026/https://x.org/a");
+  assert.equal(NS.evidenceUrl({}, "x"), "");
+});
+
+test("inline citation markers deep-link to the snapshot on the cited words (HTML + markdown)", () => {
+  const h = NS.toHtml(EVID, eopts);
+  assert.match(h, /<sup><a href="https:\/\/web\.archive\.org\/web\/2026\/https:\/\/reuters\.com\/b#:~:text=passed%20seven%20to%20two">1<\/a><\/sup>/);
+  // a long passage anchors by its ends, so the highlight survives mid-passage drift
+  assert.match(h, /https:\/\/city\.gov\/m#:~:text=the%20parks%20department%20received%20an%20additional,in%20the%20final%20vote">2<\/a>/);
+  const m = NS.toMarkdown(EVID, eopts);
+  assert.match(m, /The budget passed 7-2\.\[\[1\]\]\(https:\/\/web\.archive\.org\/web\/2026\/https:\/\/reuters\.com\/b#:~:text=passed%20seven%20to%20two\)/);
+});
+
+test("the Sources footnote quotes each cited passage, each linked to the snapshot on those words", () => {
+  const h = NS.toHtml(EVID, eopts);
+  assert.match(h, /<li><a href="[^"]*reuters\.com\/b#:~:text=passed%20seven%20to%20two">Reuters — Budget vote<\/a> <em>\(archived 2026-06-01\)<\/em><br>“<a href="[^"]*reuters\.com\/b#:~:text=passed%20seven%20to%20two">passed seven to two<\/a>”<\/li>/);
+  const m = NS.toMarkdown(EVID, eopts);
+  assert.match(m, /^   - \[“passed seven to two”\]\(https:\/\/web\.archive\.org\/web\/2026\/https:\/\/reuters\.com\/b#:~:text=passed%20seven%20to%20two\)$/m);
+});
