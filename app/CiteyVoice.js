@@ -43,6 +43,7 @@
     asserted:  'owned as your analysis \u2014 it follows from the grounded premises.',
     testimony: 'owned as your account \u2014 you\u2019re the witness on the record.',
     voice:     'owned as your position \u2014 rendered to readers as argument, not fact.',
+    context:   'continuing coverage \u2014 the article proves it, set against prior reporting.',
     flagged:   'this would publish unverified \u2014 pin a source, or mark it yours.'
   };
   function templated(verdict) { return TEMPLATED[verdict.status] || TEMPLATED.falsum; }

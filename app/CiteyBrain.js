@@ -67,8 +67,10 @@
   function depthFor(tier) { return tier === 'smarter' ? 3 : 1; }
 
   // The author's owned-stance attribute → Citey state. An owned claim is grounded
-  // by honest declaration, not a citation.
-  var STANCE_STATE = { analysis: 'asserted', testimony: 'testimony', voice: 'voice' };
+  // by honest declaration, not a citation. `context` is a fourth declaration:
+  // continuing coverage — the article substantiates the claim, set against prior
+  // reporting (the past articles ride along as context links, not as proof).
+  var STANCE_STATE = { analysis: 'asserted', testimony: 'testimony', voice: 'voice', context: 'context' };
 
   // THE CORE CALL — given a claim span, return Citey's mechanical state, read
   // straight from the editor's grounding attributes. No model. No guess.
@@ -132,6 +134,7 @@
       case 'asserted':  return 'What does the author rest this on?';
       case 'testimony': return 'Who witnessed this?';
       case 'voice':     return 'Whose position is this?';
+      case 'context':   return 'What prior coverage does this continue?';
       case 'verum':
       case 'entails':   return 'What grounds this?';
       default:          return 'What is the status of this claim?';
@@ -153,15 +156,17 @@
   // Not everything wants a citation — own it instead. Records the stance on the
   // span (carried into the draft HTML) and clears the needs-quote flag, so the
   // publish gate treats the claim as grounded by honest declaration.
-  //   'analysis'  → ⊢   'testimony' → ⊨   'voice' → ⊩
+  //   'analysis'  → ⊢   'testimony' → ⊨   'voice' → ⊩   'context' → ⊪
   function assert(span, stance) {
     var el = claimEl(span);
     var state = STANCE_STATE[stance] || 'asserted';
-    var norm = stance === 'testimony' ? 'testimony' : stance === 'voice' ? 'voice' : 'analysis';
+    var norm = STANCE_STATE[stance] ? stance : 'analysis';
     if (el && el.setAttribute) {
       el.setAttribute('data-stance', norm);
       if (el.classList) el.classList.remove('needs-quote');
-      el.setAttribute('title', 'Owned by the author — ' + ({ analysis: 'their analysis', testimony: 'their account', voice: 'their stated position' }[norm]));
+      el.setAttribute('title', norm === 'context'
+        ? 'Continuing coverage — the article substantiates this, set against prior reporting'
+        : 'Owned by the author — ' + ({ analysis: 'their analysis', testimony: 'their account', voice: 'their stated position' }[norm]));
     }
     return { state: state, owned: norm, el: el };
   }

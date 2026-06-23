@@ -989,12 +989,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
         el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
         el.classList.remove("needs-quote");
-        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : "analysis";
+        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : "analysis";
         el.setAttribute("data-stance", norm);
-        el.setAttribute("title", "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
+        el.setAttribute("title", norm === "context"
+          ? "Continuing coverage — the article substantiates this, set against prior reporting"
+          : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
         setRev(v => v + 1); scheduleSave(); renumberCites();
       },
-      unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.removeAttribute("data-context"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      // context links — sources cited as CONTEXT (prior coverage), not proof. They
+      // ride a separate attribute so the gate, which only reads proof, is untouched.
+      addContext: (el, key) => { if (!el || !key || !window.NpjCitations) return; window.NpjCitations.addContext(el, key); setRev(v => v + 1); scheduleSave(); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
+      removeContext: (el, key) => { if (!el || !key || !window.NpjCitations) return; window.NpjCitations.removeContext(el, key); setRev(v => v + 1); scheduleSave(); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
       // attach an EXISTING reusable citation to a span (the many-to-many reuse path)
       attachCitation: (el, citeId) => {
         if (!el || !citeId || !window.NpjCitations) return;
@@ -1075,6 +1081,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
+    // ---- context links: prior coverage a sentence builds on (context, not proof) ----
+    // The source keys this sentence cites for context (across its claim spans).
+    contextFor: (row) => {
+      const out = [];
+      (row.claimSpans || []).forEach(s => (window.NpjCitations ? window.NpjCitations.contextKeys(s) : []).forEach(k => { if (out.indexOf(k) < 0) out.push(k); }));
+      return out;
+    },
+    // Link a source as CONTEXT to this sentence — context, not proof. If the
+    // sentence wasn't a claim yet, linking prior coverage also grounds it as
+    // continuing coverage ("in context"), so adding context never quietly creates
+    // an ungrounded claim that blocks the gate. An already-grounded (or
+    // mid-grounding) claim keeps its own status; the context just rides alongside.
+    addContext: (row, key) => {
+      const had = !!(row.claimSpans && row.claimSpans.length);
+      const span = rowSpanFor(row, null, true); if (!span) return;
+      if (!had && !span.getAttribute("data-stance") && !(span.getAttribute("data-quote") || "").trim()) {
+        window.__npjGround.own(span, "context");
+      }
+      window.__npjGround.addContext(span, key);
+    },
+    removeContext: (row, key) => {
+      (row.claimSpans || []).forEach(s => window.__npjGround.removeContext(s, key));
+    },
     // sources in the order they appear in the document (the list tracks the prose)
     sources: () => {
       const ord = docOrderKeys();

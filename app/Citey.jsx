@@ -30,7 +30,7 @@ const CiteyStore = (function () {
   let gate = { bound: 0, pinned: 0, owned: 0, undeclared: 0 };
   let hidden = (function () { try { return localStorage.getItem(CITEY_HIDE_KEY) === '1'; } catch (e) { return false; } })();
   const subs = new Set();
-  const PRIO = { negation: 6, nequiv: 6, falsum: 5, suspicious: 4, turnstile: 3, flagged: 5, entails: 1, verum: 1, asserted: 1, testimony: 1, voice: 1 };
+  const PRIO = { negation: 6, nequiv: 6, falsum: 5, suspicious: 4, turnstile: 3, flagged: 5, entails: 1, verum: 1, asserted: 1, testimony: 1, voice: 1, context: 1 };
 
   function notify() { subs.forEach(fn => { try { fn(snapshot()); } catch (e) {} }); }
   function subscribe(fn) { subs.add(fn); fn(snapshot()); return () => subs.delete(fn); }
@@ -274,6 +274,7 @@ class CiteyAgent extends React.Component {
       needsWork ? React.createElement('button', { key: 'a', onClick: () => this._own('analysis'), style: chip() }, '⊢  My analysis') : null,
       needsWork ? React.createElement('button', { key: 't', onClick: () => this._own('testimony'), style: chip() }, '⊨  I witnessed this') : null,
       needsWork ? React.createElement('button', { key: 'v', onClick: () => this._own('voice'), style: chip() }, '⊩  My stated position') : null,
+      needsWork ? React.createElement('button', { key: 'cx', onClick: () => this._own('context'), style: chip({ borderColor: '#2E8B86' }) }, '⊪  In context — continuing coverage') : null,
       isOwned ? React.createElement('button', { key: 'un', onClick: this._unown, style: chip() }, '↩  Unmark — back to a claim') : null,
       isGrounded ? React.createElement('button', { key: 're', onClick: this._pin, style: chip() }, '✎  Re-pin the source line') : null,
       React.createElement('button', { key: 'tags', onClick: this._suggest, style: chip({ borderColor: '#4a4733' }) }, '✦  Suggest tags'),
@@ -344,7 +345,7 @@ class CiteyAgent extends React.Component {
     const gate = this.state.gate || {};
     const fState = this.state.menu ? this._focusedState() : null;
     const isGrounded = fState === 'verum' || fState === 'entails';
-    const isOwned = fState === 'asserted' || fState === 'testimony' || fState === 'voice';
+    const isOwned = fState === 'asserted' || fState === 'testimony' || fState === 'voice' || fState === 'context';
     const needsWork = fState === 'falsum' || fState === 'suspicious' || fState === 'negation';
 
     // Subtler by default: a smaller sprite that sits quiet (and a touch faded)
