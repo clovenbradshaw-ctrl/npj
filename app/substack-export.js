@@ -269,6 +269,19 @@
     }
   }
 
+  // the title block (kicker / headline / dek / byline·date) as HTML parts —
+  // shared by toHtml's titled mode and the standalone document's <header>.
+  function headerHtml(A) {
+    const out = [];
+    if (A.kicker) out.push("<p><strong>" + esc(String(A.kicker).toUpperCase()) + "</strong></p>");
+    if (A.headline) out.push("<h1>" + esc(A.headline) + "</h1>");
+    if (A.dek) out.push("<p><em>" + esc(A.dek) + "</em></p>");
+    const by = bylineText(A), date = dateText(A);
+    const meta = [by ? "By " + by : "", date].filter(Boolean).join(" · ");
+    if (meta) out.push("<p>" + esc(meta) + "</p>");
+    return out;
+  }
+
   function toHtml(article, opts) {
     opts = opts || {};
     const A = article || {};
@@ -277,14 +290,7 @@
     const ctx = { citations: opts.citations !== false, numByKey, sources };
     const parts = [];
 
-    if (!opts.omitTitle) {
-      if (A.kicker) parts.push("<p><strong>" + esc(String(A.kicker).toUpperCase()) + "</strong></p>");
-      if (A.headline) parts.push("<h1>" + esc(A.headline) + "</h1>");
-      if (A.dek) parts.push("<p><em>" + esc(A.dek) + "</em></p>");
-      const by = bylineText(A), date = dateText(A);
-      const meta = [by ? "By " + by : "", date].filter(Boolean).join(" · ");
-      if (meta) parts.push("<p>" + esc(meta) + "</p>");
-    }
+    if (!opts.omitTitle) headerHtml(A).forEach(p => parts.push(p));
 
     const hero = heroImage(A);
     if (hero) { const h = imgHtml(hero); if (h) parts.push(h); }
@@ -304,9 +310,104 @@
     return parts.join("\n");
   }
 
-  function filename(article) {
+  // ====================================================================
+  //  STANDALONE HTML DOCUMENT  (the file that copies perfectly)
+  // ====================================================================
+  // A .md file can't paste into Substack formatted — Substack ignores pasted
+  // markdown *syntax*. So the durable, foldered "export a file" path is a
+  // self-contained .html page: open it in any browser and it renders the whole
+  // piece, with a one-click "Copy article" button that puts clean rich HTML on
+  // the clipboard (Substack honors pasted HTML). It works offline, survives a
+  // wiped clipboard, and — because a browser copies a rendered selection AS rich
+  // HTML — a manual select-all + ⌘/Ctrl-C pastes in formatted too. The button's
+  // copy targets the body only (#npj-copy); title & subtitle have their own
+  // chips, because Substack fills those from its own fields.
+  const DOC_CSS = [
+    "*{box-sizing:border-box}",
+    "html{-webkit-text-size-adjust:100%}",
+    "body{margin:0;background:#f6f5f1;color:#1a1a1a;font:18px/1.65 Georgia,'Times New Roman',serif}",
+    ".npj-bar{position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;gap:10px;align-items:center;",
+      "user-select:none;-webkit-user-select:none;",  // a select-all + copy never grabs the toolbar
+      "background:#16140d;color:#fff;padding:12px 18px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif}",
+    ".npj-bar strong{color:#ffd400;font-size:14px;letter-spacing:.02em}",
+    ".npj-bar .hint{flex:1 1 240px;min-width:200px;font-size:12px;line-height:1.4;color:#cfcdc4}",
+    ".npj-bar button{font:600 13px/1 -apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;",
+      "border:0;border-radius:2px;padding:9px 13px;cursor:pointer;background:#ffd400;color:#16140d}",
+    ".npj-bar button.ghost{background:transparent;color:#fff;border:1px solid #4a473d}",
+    "main{max-width:680px;margin:0 auto;padding:30px 22px 96px}",
+    "h1{font-size:2.1rem;line-height:1.12;margin:.1em 0 .35em}",
+    "h2{font-size:1.45rem;margin:1.7em 0 .4em}h3{font-size:1.18rem;margin:1.5em 0 .3em}",
+    "p{margin:0 0 1.1em}a{color:#0a58ca}",
+    "figure{margin:1.6em 0}img{display:block;max-width:100%;height:auto;margin:0 auto}",
+    "figcaption{margin-top:.5em;text-align:center;font:italic 14px/1.5 Georgia,serif;color:#666}",
+    "blockquote{margin:1.6em 0;padding:.2em 0 .2em 1em;border-left:3px solid #16140d;font-style:italic}",
+    "sup{font-size:.7em}sup a{text-decoration:none}",
+    "hr{border:0;border-top:1px solid #ccc;margin:2.2em 0}",
+    "pre{overflow:auto;background:#f0eee7;padding:14px 16px;border-radius:3px;font-size:15px}",
+    "#npj-meta h1{margin-top:0}#npj-meta>p:last-child{color:#666;font-size:15px}"
+  ].join("");
+
+  const DOC_SCRIPT =
+    "(function(){" +
+    "function flash(b,m){var t=b.getAttribute('data-label')||b.textContent;b.textContent=m;" +
+      "setTimeout(function(){b.textContent=t;},1800);}" +
+    "function selectInto(node,b){var r=document.createRange();r.selectNodeContents(node);" +
+      "var s=window.getSelection();s.removeAllRanges();s.addRange(r);var ok=false;" +
+      "try{ok=document.execCommand('copy');}catch(e){}" +
+      "flash(b,ok?'Copied \\u2014 paste into Substack':'Press \\u2318/Ctrl+C to copy');}" +
+    "function copyNode(node,b){var html=node.innerHTML,text=node.innerText||node.textContent||'';" +
+      "if(navigator.clipboard&&window.ClipboardItem){navigator.clipboard.write([new ClipboardItem({" +
+      "'text/html':new Blob([html],{type:'text/html'})," +
+      "'text/plain':new Blob([text],{type:'text/plain'})})])" +
+      ".then(function(){flash(b,'Copied \\u2014 paste into Substack');})" +
+      ".catch(function(){selectInto(node,b);});}else{selectInto(node,b);}}" +
+    "function copyText(txt,b){if(navigator.clipboard&&navigator.clipboard.writeText){" +
+      "navigator.clipboard.writeText(txt).then(function(){flash(b,'Copied!');})" +
+      ".catch(function(){flash(b,'Copy failed');});}else{flash(b,'Copy failed');}}" +
+    "var body=document.getElementById('npj-copy');" +
+    "var cb=document.getElementById('npj-copy-body');if(cb)cb.addEventListener('click',function(){copyNode(body,this);});" +
+    "[].forEach.call(document.querySelectorAll('[data-copy-text]'),function(b){" +
+      "b.addEventListener('click',function(){copyText(this.getAttribute('data-copy-text')||'',this);});});" +
+    "})();";
+
+  function toHtmlDocument(article, opts) {
+    opts = opts || {};
     const A = article || {};
-    return (A.slug || slugify(A.headline) || "article") + ".md";
+    const header = headerHtml(A).join("\n");
+    const body = toHtml(A, Object.assign({}, opts, { omitTitle: true }));
+    const title = esc(A.headline || "Article");
+
+    const chips = [
+      '<button id="npj-copy-body" data-label="Copy article">Copy article</button>'
+    ];
+    if (A.headline) chips.push('<button class="ghost" data-copy-text="' + esc(A.headline) + '" data-label="Copy title">Copy title</button>');
+    if (A.dek) chips.push('<button class="ghost" data-copy-text="' + esc(A.dek) + '" data-label="Copy subtitle">Copy subtitle</button>');
+
+    return [
+      "<!doctype html>",
+      '<html lang="en"><head>',
+      '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width,initial-scale=1">',
+      "<title>" + title + " — for Substack</title>",
+      "<style>" + DOC_CSS + "</style>",
+      "</head><body>",
+      '<div class="npj-bar">',
+      "<strong>Paste into Substack</strong>",
+      chips.join(""),
+      '<span class="hint">Open in a browser, click <b>Copy article</b>, then paste into a new Substack post. Title &amp; subtitle have their own fields.</span>',
+      "</div>",
+      "<main>",
+      header ? '<div id="npj-meta">' + header + "</div>" : "",
+      '<div id="npj-copy">' + body + "</div>",
+      "</main>",
+      "<script>" + DOC_SCRIPT + "<\/script>",
+      "</body></html>"
+    ].filter(Boolean).join("\n");
+  }
+
+  function filename(article, ext) {
+    const A = article || {};
+    return (A.slug || slugify(A.headline) || "article") + "." + (ext || "md");
   }
 
   // ---- browser-only: clipboard + download ----
@@ -331,10 +432,8 @@
     return "";
   }
 
-  function download(article, opts) {
-    const md = toMarkdown(article, opts);
-    const name = filename(article);
-    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+  function saveBlob(text, name, mime) {
+    const blob = new Blob([text], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name;
@@ -343,5 +442,14 @@
     return name;
   }
 
-  return { toMarkdown, toHtml, filename, indexSources, heroImage, copyForSubstack, download };
+  function download(article, opts) {
+    return saveBlob(toMarkdown(article, opts), filename(article, "md"), "text/markdown;charset=utf-8");
+  }
+
+  // The "copies perfectly" file: a self-contained page you open and copy from.
+  function downloadHtml(article, opts) {
+    return saveBlob(toHtmlDocument(article, opts), filename(article, "html"), "text/html;charset=utf-8");
+  }
+
+  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, heroImage, copyForSubstack, download, downloadHtml };
 });
