@@ -303,6 +303,36 @@ rides the article's EO genesis event as `dek`.
 but the publish gate has a rename field — a custom name sticks with the
 draft and the committed file is named accordingly.
 
+## Export to Substack — a paste that lands perfectly
+
+Any published piece carries an **Export** button (the reader's control bar)
+that opens the Substack panel (`app/SubstackExport.jsx`, over
+`app/substack-export.js`). The mechanic it leans on: Substack's editor honors
+**pasted HTML** (headings, bold/italic, links, lists, blockquotes, `<img>`) but
+treats **pasted markdown syntax as literal text** — so the formatting has to
+travel as HTML, not as `#`/`*` characters. Two paths, both land formatted:
+
+- **Copy article** — one click puts rich HTML *and* a markdown fallback on the
+  clipboard in a single write; paste into a new Substack post and headings,
+  emphasis, links, lists, blockquotes and photos come across. Substack re-hosts
+  each image straight from its **archive.org URL** (auth-gated Matrix
+  `store:`/`mxc:` copies are dropped, since Substack fetches server-side), so
+  there's nothing to re-upload.
+- **Download .html — the file that copies perfectly.** A self-contained web
+  page (`toHtmlDocument`): open it in any browser and click its own **Copy
+  article** button for the same rich paste, **offline** and **without the
+  clipboard quirks** — even a plain select-all + ⌘/Ctrl-C copies as formatted
+  HTML, because a rendered browser selection already is. This is the durable,
+  shareable artifact; a `.md` download is offered too, but only as the
+  plain-text archival record (pasted markdown stays literal in Substack).
+
+**The sourcing rides along.** NPJ's distinctive payload — every claim bound to
+an archived snapshot — survives the export: each sourced claim gets a
+superscript number linked to its archive.org snapshot, and a numbered
+**Sources** list closes the piece. Both are toggleable for a clean copy.
+**Title and subtitle** are handed over as their own one-click chips, because
+Substack fills those from its own fields — so the copied body omits them.
+
 ## Citey reviews every source for PII before it's archived
 
 archive.org is permanent, public and all-or-nothing — once a source is up it

@@ -54,6 +54,7 @@ function SubstackExport({ article, onClose }) {
     flash(how === "text" ? "text" : how === "rich" ? "rich" : "fail");
   };
   const downloadMd = () => { try { NS.download(article, opts); flash("file"); } catch (e) {} };
+  const downloadHtmlFile = () => { try { NS.downloadHtml(article, opts); flash("html"); } catch (e) {} };
 
   const eyebrow = { fontFamily: "var(--mono)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--ink-soft)" };
   const fieldBox = { display: "flex", alignItems: "center", gap: 8, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "8px 10px" };
@@ -76,7 +77,7 @@ function SubstackExport({ article, onClose }) {
 
         <div style={{ padding: "16px 18px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
           <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.5, color: "var(--ink)", margin: 0 }}>
-            <strong>Copy the article</strong>, then paste it into a new Substack post. Headings, bold, links, lists, blockquotes and the photos all come across formatted — Substack pulls each image straight from its archive.org URL, so there's nothing to re-upload.
+            <strong>Copy the article</strong>, then paste it into a new Substack post. Headings, bold, links, lists, blockquotes and the photos all come across formatted — Substack pulls each image straight from its archive.org URL, so there's nothing to re-upload. Prefer a file? <strong>Download&nbsp;.html</strong> below — open it and click <em>Copy&nbsp;article</em> for the same perfect paste, offline.
           </p>
 
           {/* the main action */}
@@ -114,16 +115,25 @@ function SubstackExport({ article, onClose }) {
             </div>
           </div>
 
-          {/* secondary actions */}
-          <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-            <button onClick={downloadMd} className="btn" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-              <I.archive style={{ fontSize: 14 }} /> {copied === "file" ? "Downloaded!" : "Download .md"}
-            </button>
-            <button onClick={() => copyText(preview, "md")} className="btn btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-              <I.copy style={{ fontSize: 14 }} /> {copied === "md" ? "Copied!" : "Copy markdown"}
-            </button>
-            <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", flex: 1, minWidth: 140, lineHeight: 1.4 }}>
-              The .md is the plain-text record (title &amp; subtitle included); the rich copy above is what pastes into Substack.
+          {/* save a file */}
+          <div>
+            <div style={eyebrow}>Save a file</div>
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center", marginTop: 7 }}>
+              <button onClick={downloadHtmlFile} className="btn"
+                title="A self-contained web page — open it in any browser and click “Copy article” to paste perfectly into Substack. Works offline; nothing to re-upload."
+                style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
+                <I.ext style={{ fontSize: 14 }} /> {copied === "html" ? "Downloaded!" : "Download .html"}
+              </button>
+              <button onClick={downloadMd} className="btn" title="Plain-text markdown — the archival record (title &amp; subtitle included)."
+                style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <I.archive style={{ fontSize: 14 }} /> {copied === "file" ? "Downloaded!" : "Download .md"}
+              </button>
+              <button onClick={() => copyText(preview, "md")} className="btn btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <I.copy style={{ fontSize: 14 }} /> {copied === "md" ? "Copied!" : "Copy markdown"}
+              </button>
+            </div>
+            <span className="np-mono" style={{ display: "block", marginTop: 8, fontSize: 10.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
+              <strong>.html</strong> is the file that copies perfectly — open it, hit <em>Copy article</em>, paste into Substack (images, headings &amp; sourcing intact). <strong>.md</strong> is the plain-text record; pasted markdown stays literal in Substack.
             </span>
           </div>
 

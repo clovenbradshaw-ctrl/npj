@@ -126,10 +126,40 @@ test("non-public image URLs (mxc:/blob:) are dropped — Substack can't fetch th
   assert.ok(!/<img/.test(NS.toHtml(a, opts)));
 });
 
-test("filename derives from the slug", () => {
+test("filename derives from the slug, and takes an extension", () => {
   assert.equal(NS.filename(ARTICLE), "city-budget.md");
+  assert.equal(NS.filename(ARTICLE, "html"), "city-budget.html");
   assert.equal(NS.filename({ headline: "Hello, World!" }), "hello-world.md");
   assert.equal(NS.filename({}), "article.md");
+});
+
+test("toHtmlDocument is a self-contained page with a copy button and the article", () => {
+  const d = NS.toHtmlDocument(ARTICLE, opts);
+  assert.match(d, /^<!doctype html>/);
+  assert.match(d, /<title>City passes budget — for Substack<\/title>/);
+  assert.match(d, /<style>[^]*<\/style>/);                       // styles are inlined (works offline)
+  assert.match(d, /id="npj-copy-body"[^>]*>Copy article</);      // the one-click copy
+  assert.match(d, /<script>[^]*ClipboardItem[^]*<\/script>/);    // and the script that powers it
+});
+
+test("toHtmlDocument keeps the title out of the copy region (Substack's own field)", () => {
+  const d = NS.toHtmlDocument(ARTICLE, opts);
+  // headline lives in #npj-meta; the body to copy lives in #npj-copy, after it
+  const meta = d.indexOf('id="npj-meta"'), copy = d.indexOf('id="npj-copy"');
+  assert.ok(meta > -1 && copy > meta, "meta block precedes the copy block");
+  assert.match(d, /id="npj-meta">[^]*<h1>City passes budget<\/h1>/);
+  // the body's heading + the lifted hero ride in the copy region
+  assert.match(d, /id="npj-copy">[^]*<h2>What changed<\/h2>/);
+  assert.match(d, /id="npj-copy">[^]*<img src="https:\/\/web\.archive\.org\/web\/2026\/banner\.jpg"/);
+  // title & subtitle get their own copy chips
+  assert.match(d, /data-copy-text="City passes budget"/);
+  assert.match(d, /data-copy-text="After a long debate\."/);
+});
+
+test("toHtmlDocument escapes the headline in <title> and the copy-title chip", () => {
+  const d = NS.toHtmlDocument({ headline: 'A & B <tag>', body: [] }, opts);
+  assert.match(d, /<title>A &amp; B &lt;tag&gt; — for Substack<\/title>/);
+  assert.match(d, /data-copy-text="A &amp; B &lt;tag&gt;"/);
 });
 
 test("a claim with two sources gets both numbers, each linked", () => {
