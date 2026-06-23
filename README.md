@@ -275,6 +275,22 @@ fonts, colors and backgrounds never enter a draft. **Images paste too**: a
 screenshot or a copied image lands as a regular image figure (and if it was
 copied off archive.org, the durable CDN link is kept instead of raw bytes).
 
+**Return vs Shift+Return.** A plain **Return** is a paragraph break — a new
+`<p>`, which ships with paragraph spacing between it and the last one. A
+**Shift+Return** is a soft line break — a `<br>`, which ships tight, with no
+extra space (addresses, verse, a forced wrap). The editor pins the browser's
+block separator to `<p>` so a Return splits consistently across browsers, and
+the publish pipeline (`htmlToBlocks` → the reader) renders each exactly that
+way; inside a code/verse block a Return is a literal newline instead.
+
+**Preview is the real thing, not a mock.** The editor's **Preview** button folds
+the live draft through the *same* builder that publishing uses
+(`NpjArticles.genesisFromContent`) and hands the result to the reader's own
+renderer (`ArticleRead` in preview mode) — same Header, same body blocks, same
+paper page. So what you see in Preview is byte-for-byte what ships: paragraph
+spacing, soft line breaks, images, the byline and the sources footer. Esc (or
+✕ Close) drops you back in the editor.
+
 **The page knows its own media.** The contents rail keeps a census of every
 image and embed in the piece; image thumbnails open a full-size viewer
 (arrows page through, esc closes, "show in document" jumps to the figure).
