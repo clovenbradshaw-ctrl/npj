@@ -164,6 +164,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [srcFindIdx, setSrcFindIdx] = useState(0);
   const [browseQuery, setBrowseQuery] = useState("");   // search the whole registry to reuse a record
   const [browseOpen, setBrowseOpen] = useState(false);
+  const [renameKey, setRenameKey] = useState(null);     // the source being renamed in the library
+  const [renameText, setRenameText] = useState("");
   const [toast, setToast] = useState(null);
   const [hop, setHop] = useState(null);            // Citey hops when a claim resolves
   const mainRef = useRef(null);
@@ -382,6 +384,29 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     timers.current.query = setTimeout(() => scrollReaderTo("data-find", 0), 250);
   };
   const pickSource = (key) => { setSelSrc(key); setArmIdx(0); setPending(null); setSrcQuery(""); setSrcFindIdx(0); };
+
+  // ---- source library housekeeping: rename + delete ----
+  const startRename = (key, cur) => { setRenameKey(key); setRenameText(cur || ""); };
+  const cancelRename = () => { setRenameKey(null); setRenameText(""); };
+  const commitRename = (key) => {
+    const t = renameText.trim();
+    if (t && api.renameSource) { api.renameSource(key, t); say("Renamed to “" + clip(t, 40) + "”"); }
+    cancelRename(); bump();
+  };
+  // delete a source from the draft — confirm first, and spell out the blast
+  // radius when sentences are grounded in it (their words stay; the source goes).
+  const deleteSource = (key) => {
+    const rec = srcRec(key); const title = rec.title || key;
+    const used = allC.filter(c => c.srcKey === key).reduce((n, c) => n + api.usageCount(c.id), 0);
+    const msg = used > 0
+      ? "Delete “" + title + "”?\n\nIt grounds " + used + " sentence" + (used === 1 ? "" : "s") + " in this draft. Deleting unlinks " + (used === 1 ? "it" : "them") + " — the sentence" + (used === 1 ? "" : "s") + " keep the words but lose this source, and its citation records are removed. This can't be undone."
+      : "Delete “" + title + "”?\n\nIt isn't cited in the draft yet — this just removes it from the source library.";
+    if (typeof window !== "undefined" && window.confirm && !window.confirm(msg)) return;
+    if (api.deleteSource) api.deleteSource(key);
+    if (renameKey === key) cancelRename();
+    if (selSrc === key) setSelSrc(null);
+    say("Deleted “" + clip(title, 40) + "”"); bump();
+  };
 
   // ---- drag-select → staged pin: the author finds the words themself ----
   const onSrcMouseUp = (refObj) => {
@@ -860,17 +885,42 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     <section style={{ display: "flex", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
       <div style={{ width: 250, flexShrink: 0, display: "flex", flexDirection: "column", gap: 8 }}>
         <div className="np-eyebrow" style={{ color: NR.muted }}>Source library · {srcList.length}</div>
+        <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginTop: -2 }}>In the order they appear in the draft</div>
         {srcList.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view) and it shows here to read and cite.</div>}
         {srcList.map(({ key, rec }) => {
           const nC = allC.filter(c => c.srcKey === key).length;
           const active = selSrc === key;
+          const isRenaming = renameKey === key;
           return (
-            <button key={key} onClick={() => pickSource(key)}
-              style={{ textAlign: "left", border: "1.5px solid " + (active ? "var(--yellow)" : NR.line), background: active ? "rgba(255,236,1,.06)" : NR.field, borderRadius: 8, padding: "9px 11px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, letterSpacing: ".08em", color: NR.muted }}>{kindOf(rec)}</span>
-              <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, color: NR.text, lineHeight: 1.2 }}>{rec.title || key}</span>
-              <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>{nC + " CITATION" + (nC === 1 ? "" : "S") + " MINTED" + (rec.archive_url ? " · ARCHIVED" : "")}</span>
-            </button>
+            <div key={key} style={{ border: "1.5px solid " + (active ? "var(--yellow)" : NR.line), background: active ? "rgba(255,236,1,.06)" : NR.field, borderRadius: 8, overflow: "hidden" }}>
+              {isRenaming ? (
+                <div style={{ padding: "9px 11px", display: "flex", flexDirection: "column", gap: 6 }}>
+                  <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(key); } else if (e.key === "Escape") { e.preventDefault(); cancelRename(); } }}
+                    placeholder="Source title" className="np-cond"
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13, padding: "6px 8px", outline: "none" }} />
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button onClick={() => commitRename(key)} style={chipBtn({ flex: 1, background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save</button>
+                    <button onClick={cancelRename} style={chipBtn({ flex: 1 })}>Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <React.Fragment>
+                  <button onClick={() => pickSource(key)} title="Open this source to read and cite"
+                    style={{ textAlign: "left", width: "100%", boxSizing: "border-box", border: 0, background: "none", color: "inherit", cursor: "pointer", padding: "9px 11px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, letterSpacing: ".08em", color: NR.muted }}>{kindOf(rec)}</span>
+                    <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, color: NR.text, lineHeight: 1.2 }}>{rec.title || key}</span>
+                    <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>{nC + " CITATION" + (nC === 1 ? "" : "S") + " MINTED" + (rec.archive_url ? " · ARCHIVED" : "")}</span>
+                  </button>
+                  <div style={{ display: "flex", borderTop: "1px solid " + NR.line }}>
+                    <button onClick={() => startRename(key, rec.title || key)} title="Rename this source"
+                      style={{ flex: 1, border: 0, borderRight: "1px solid " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "6px 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>✎ Rename</button>
+                    <button onClick={() => deleteSource(key)} title="Delete this source from the draft"
+                      style={{ flex: 1, border: 0, background: "transparent", color: "#b3261e", cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "6px 4px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4 }}>✕ Delete</button>
+                  </div>
+                </React.Fragment>
+              )}
+            </div>
           );
         })}
       </div>

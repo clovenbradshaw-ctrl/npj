@@ -479,19 +479,107 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // the draft. Drags that START here keep the browser's native move/copy —
   // the content is already clean.
   const dragFromSelf = useRef(false);
+  // Build a clean fragment from pasted HTML that KEEPS npj grounding and nothing
+  // else: claim-src spans (data-src / data-cite-id / data-quote / data-stance)
+  // and their md-cite markers survive — with fresh, collision-free cids — while
+  // foreign tags are unwrapped to their text and only a small inline whitelist is
+  // kept. Returns { html, keys }; html is "" when there's no provenance to keep.
+  const provenanceHtml = (html) => {
+    if (!html || !/claim-src|md-cite/.test(html)) return { html: "", keys: [] };
+    const src = document.createElement("div"); src.innerHTML = html;
+    if (!src.querySelector(".claim-src, sup.md-cite")) return { html: "", keys: [] };  // our markers only — never reroute a plain external paste
+    const newCid = () => "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e6).toString(36);
+    const cidMap = {};
+    const remap = (old) => old ? (cidMap[old] || (cidMap[old] = newCid())) : newCid();
+    const keys = {};
+    const INLINE = { strong: "strong", b: "strong", em: "em", i: "em", s: "s", code: "code", a: "a" };
+    const out = document.createElement("div");
+    const walk = (parent, node) => {
+      node.childNodes.forEach(c => {
+        if (c.nodeType === 3) { parent.appendChild(document.createTextNode(c.nodeValue)); return; }
+        if (c.nodeType !== 1) return;
+        const tag = c.tagName.toLowerCase();
+        if (tag === "span" && c.classList.contains("claim-src")) {
+          const span = document.createElement("span");
+          const st = c.getAttribute("data-stance");
+          const dq = c.getAttribute("data-quote");
+          span.className = (st || (dq && dq.trim())) ? "claim-src" : "claim-src needs-quote";
+          const ds = c.getAttribute("data-src"); if (ds) { span.setAttribute("data-src", ds); ds.split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; }); }
+          const dci = c.getAttribute("data-cite-id"); if (dci) span.setAttribute("data-cite-id", dci);
+          if (dq != null) span.setAttribute("data-quote", dq);
+          if (st) span.setAttribute("data-stance", st);
+          if (c.hasAttribute("data-cid")) span.setAttribute("data-cid", remap(c.getAttribute("data-cid")));
+          const ttl = c.getAttribute("title"); if (ttl) span.setAttribute("title", ttl);
+          walk(span, c);
+          parent.appendChild(span);
+          return;
+        }
+        if (tag === "sup" && c.classList.contains("md-cite")) {
+          const sup = document.createElement("sup");
+          sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
+          const dc = c.getAttribute("data-cite"); if (dc) { sup.setAttribute("data-cite", dc); keys[dc] = 1; }
+          const dci = c.getAttribute("data-cite-id"); if (dci) sup.setAttribute("data-cite-id", dci);
+          const dq = c.getAttribute("data-quote"); if (dq != null) sup.setAttribute("data-quote", dq);
+          if (c.hasAttribute("data-fn")) sup.setAttribute("data-fn", "1");
+          if (c.hasAttribute("data-cid")) sup.setAttribute("data-cid", remap(c.getAttribute("data-cid")));
+          const ttl = c.getAttribute("title"); if (ttl) sup.setAttribute("title", ttl);
+          sup.textContent = c.textContent || "";
+          parent.appendChild(sup);
+          return;
+        }
+        if (tag === "br") { parent.appendChild(document.createElement("br")); return; }
+        if (tag === "p" || tag === "div" || tag === "li") {
+          // collapse block wrappers to their text + a soft break, so foreign block
+          // styling never rides into the editable surface
+          walk(parent, c);
+          if (parent.lastChild && parent.lastChild.nodeName !== "BR") parent.appendChild(document.createElement("br"));
+          return;
+        }
+        const keep = INLINE[tag];
+        if (keep) {
+          const el = document.createElement(keep);
+          if (tag === "a") { const href = c.getAttribute("href"); if (href && /^(https?:|mailto:|#)/i.test(href)) { el.setAttribute("href", href); el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener"); } }
+          walk(el, c);
+          parent.appendChild(el);
+          return;
+        }
+        // any other element: keep only its text/children (drops styles, images…)
+        walk(parent, c);
+      });
+    };
+    walk(out, src);
+    return { html: out.innerHTML, keys: Object.keys(keys) };
+  };
   const onPaste = (e) => {
     const cd = e.clipboardData; if (!cd) return;
     e.preventDefault();
     const files = Array.from(cd.files || []).filter(f => /^image\//.test(f.type));
     if (files.length) {
       let archiveUrl = null;
-      const html = cd.getData("text/html") || "";
-      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      const ih = cd.getData("text/html") || "";
+      const m = ih.match(/<img[^>]+src=["']([^"']+)["']/i);
       if (m && window.NpjArchiveCDN.isMediaUrl(m[1])) archiveUrl = m[1];
       insertImageFiles(files, archiveUrl);
       return;
     }
     const text = cd.getData("text/plain");
+    // our own grounded text, copied from anywhere in the session, re-lands cited
+    const prov = provenanceHtml(cd.getData("text/html") || "");
+    if (prov.html) {
+      if (/\n/.test(text)) escapeBlock(); // a multi-line paste never lands inside a headline / the dek
+      document.execCommand("insertHTML", false, prov.html);
+      // re-register any source the pasted spans cite, so it shows in the library
+      if (prov.keys.length) setSources(s => {
+        const have = {}; s.forEach(x => { have[x.key] = 1; });
+        const add = prov.keys.filter(k => !have[k] && window.NPJ.SOURCES[k]).map(k => ({ key: k, archived: !!(window.NPJ.SOURCES[k] || {}).archive_url }));
+        return add.length ? [...s, ...add] : s;
+      });
+      renumberCites();
+      setRev(v => v + 1);
+      if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+      scanHeadings(); scheduleSave();
+      return;
+    }
     if (!text) return;
     if (/\n/.test(text)) escapeBlock(); // block-level paste never lands inside a headline or the dek
     window.NpjPlainText.insert(text);
@@ -657,6 +745,40 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   }, []);
 
   const citeNum = (key) => { const i = citeOrderRef.current.indexOf(key); return i < 0 ? 0 : i + 1; };
+  // Sources in the order they FIRST appear in the prose — recomputed live from
+  // the document, so as the author moves text around the order tracks the page
+  // (the published reader numbers the same way; see ArticleRead useClaimModel).
+  // Cited keys come first in document order; a source ingested but not yet cited
+  // trails after in the order it was added.
+  const docOrderKeys = () => {
+    const root = ed.current;
+    const order = [];
+    if (root) {
+      root.querySelectorAll('sup.md-cite[data-cite]:not([data-fn]), .claim-src[data-src]').forEach(el => {
+        (el.getAttribute('data-cite') || el.getAttribute('data-src') || '')
+          .split(/\s+/).filter(Boolean).forEach(k => { if (order.indexOf(k) < 0) order.push(k); });
+      });
+    }
+    sources.forEach(s => { if (order.indexOf(s.key) < 0) order.push(s.key); });
+    return order;
+  };
+  // Renumber the inline [n] cite markers to match document order and keep
+  // citeOrder in step. Display-only and safe: the publish path reads the source
+  // KEY off each marker, never the printed number (articles.js htmlToBlocks), and
+  // the reader re-numbers by appearance — this just keeps the editor's chips
+  // honest as text is added, moved or deleted.
+  const renumberCites = () => {
+    const root = ed.current; if (!root) return;
+    const order = docOrderKeys();
+    root.querySelectorAll('sup.md-cite[data-cite]:not([data-fn])').forEach(s => {
+      const n = order.indexOf(s.getAttribute('data-cite')) + 1;
+      if (n > 0 && s.textContent !== String(n)) s.textContent = String(n);
+    });
+    const prev = citeOrderRef.current;
+    if (order.length !== prev.length || order.some((k, i) => k !== prev[i])) {
+      citeOrderRef.current = order; setCiteOrder(order);
+    }
+  };
   // the span to bind: the live in-editor selection if there is one, else the
   // last one we saved — a collapsed caret is never a span
   const spanRange = () => {
@@ -697,7 +819,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!r) { setArmSrc(key); setMenu(null); return; }
     const claimText = String(r.toString() || "").trim();
     const cid = bindRangeToSource(r, key);
-    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave();
+    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave(); renumberCites();
     // now make the author point at the words in the source — the citation isn't
     // done until that span is pinned
     openPin(cid, key, claimText);
@@ -759,7 +881,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : "analysis";
         el.setAttribute("data-stance", norm);
         el.setAttribute("title", "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
-        setRev(v => v + 1); scheduleSave();
+        setRev(v => v + 1); scheduleSave(); renumberCites();
       },
       unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
       // attach an EXISTING reusable citation to a span (the many-to-many reuse path)
@@ -839,7 +961,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
-    sources: () => sources.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} })),
+    // sources in the order they appear in the document (the list tracks the prose)
+    sources: () => {
+      const ord = docOrderKeys();
+      return sources.slice().sort((a, b) => ord.indexOf(a.key) - ord.indexOf(b.key))
+        .map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }));
+    },
     allCitations: () => window.NpjCitations ? window.NpjCitations.all() : [],
     citationsFor: (span) => window.NpjCitations ? window.NpjCitations.citationsFor(span) : [],
     usageCount: (citeId) => window.NpjCitations ? window.NpjCitations.usage(citeId, ed.current).length : 0,
@@ -869,6 +996,53 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       rec.text = (rec.text ? rec.text + "\n" : "") + t;
       setRev(v => v + 1);
       scheduleSave();   // pasted / PDF-extracted source text sticks to the draft
+    },
+    // rename a source — its display title across the editor, reader and exports.
+    // The citation records and bound spans (keyed by the stable source key) are
+    // untouched, so nothing about the grounding changes.
+    renameSource: (key, title) => {
+      const rec = window.NPJ.SOURCES[key]; const t = String(title || "").trim();
+      if (!rec || !t || rec.title === t) return false;
+      rec.title = t;
+      setRev(v => v + 1); scheduleSave();
+      return true;
+    },
+    // delete a source from the draft: unbind every claim that cites it (unwrapping
+    // any span left grounding nothing, and dropping its marker), discard the
+    // citation records minted from it, then forget the record + library entry. The
+    // prose keeps its words; only this source's grounding is removed.
+    deleteSource: (key) => {
+      const root = ed.current;
+      if (root) {
+        Array.from(root.querySelectorAll('.claim-src')).forEach(span => {
+          const cites = window.NpjCitations ? window.NpjCitations.citationsFor(span) : [];
+          const srcs = (span.getAttribute('data-src') || '').split(/\s+/).filter(Boolean);
+          if (srcs.indexOf(key) < 0 && !cites.some(c => c.srcKey === key)) return;
+          if (window.NpjCitations) cites.forEach(c => { if (c.srcKey === key) window.NpjCitations.detach(span, c.id); });
+          const leftCites = window.NpjCitations ? window.NpjCitations.citationsFor(span) : [];
+          const leftSrcs = (span.getAttribute('data-src') || '').split(/\s+/).filter(Boolean).filter(k => k !== key);
+          if (leftSrcs.length || leftCites.length || span.getAttribute('data-stance')) {
+            if (leftSrcs.length) span.setAttribute('data-src', leftSrcs.join(' ')); else span.removeAttribute('data-src');
+          } else {
+            const cid = span.getAttribute('data-cid');
+            if (cid) Array.from(root.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).forEach(s => s.remove());
+            const p = span.parentNode; while (span.firstChild) p.insertBefore(span.firstChild, span); p.removeChild(span);
+          }
+        });
+        // sweep any leftover markers still pointing at this source
+        Array.from(root.querySelectorAll('sup.md-cite[data-cite="' + key + '"]')).forEach(s => {
+          const cid = s.getAttribute('data-cid');
+          const span = cid && root.querySelector('.claim-src[data-cid="' + cid + '"]');
+          if (!span || (span.getAttribute('data-src') || '').split(/\s+/).indexOf(key) < 0) s.remove();
+        });
+      }
+      if (window.NpjCitations) window.NpjCitations.forSource(key).forEach(c => window.NpjCitations.remove(c.id));
+      setSources(s => s.filter(x => x.key !== key));
+      const ord = citeOrderRef.current.filter(k => k !== key); citeOrderRef.current = ord; setCiteOrder(ord);
+      delete window.NPJ.SOURCES[key];
+      setRev(v => v + 1); scheduleSave(); renumberCites();
+      if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+      return true;
     }
   };
   // armed + a fresh selection just landed → bind it to the armed source
@@ -1341,7 +1515,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); scheduleSave(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
