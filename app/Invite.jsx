@@ -21,80 +21,6 @@ function InviteSpinner({ size }) {
   return <span style={{ width: s, height: s, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-1px" }} />;
 }
 
-/* ---- the recovery file ----
-   A guest account is a real account: a federated Matrix identity that only the
-   guest holds the password to. So when one is minted we hand over a single
-   self-contained, printable HTML file with everything needed to get back in —
-   address, homeserver, password, and a one-click sign-in link. It is the only
-   copy of that password anyone keeps; the homeserver stores just a hash. */
-function esc(s) {
-  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-function recoveryFileHtml(info) {
-  const d = esc(info.displayName || info.localpart || "your account");
-  const created = esc(info.createdAt || new Date().toLocaleString());
-  const row = (label, value, mono) => `<tr><th>${esc(label)}</th><td${mono ? ' class="m"' : ""}>${esc(value)}</td></tr>`;
-  const rows = [
-    row("Display name", info.displayName || "—"),
-    row("Your address", info.mxid, true),
-    row("Homeserver", info.homeserver, true),
-    row("Password", info.password, true),
-    info.project ? row("Project", info.project) : "",
-    row("Created", created)
-  ].join("");
-  // Inline everything — this file has to keep working years from now, offline,
-  // with no network and no NPJ stylesheet. Colours mirror the NPJ press aesthetic.
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NPJ recovery — ${d}</title>
-<style>
-  :root{--yellow:#ffec01;--ink:#16140d;--ink-soft:#3a362b;--paper:#f6f1e4;--card:#fffdf6;--rule:rgba(22,20,13,.4);--verified:#1f6f4a;--reject:#b23a26}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--paper);color:var(--ink);font-family:'Newsreader',Georgia,'Times New Roman',serif;line-height:1.5;padding:32px 16px;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  .sheet{max-width:560px;margin:0 auto;background:var(--card);border:1.5px solid var(--ink);box-shadow:7px 7px 0 rgba(22,20,13,.12)}
-  .top{background:var(--yellow);border-bottom:1.5px solid var(--ink);padding:16px 24px;display:flex;align-items:baseline;justify-content:space-between;gap:12px}
-  .brand{font-family:'Anton','Arial Narrow',sans-serif;font-size:26px;letter-spacing:.5px;text-transform:uppercase}
-  .kicker{font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.18em;text-transform:uppercase}
-  .body{padding:24px}
-  h1{font-family:'Anton','Arial Narrow',sans-serif;font-weight:400;font-size:34px;line-height:1.02;margin:0 0 8px}
-  p{font-size:15px;color:var(--ink-soft);margin:0 0 16px}
-  table{width:100%;border-collapse:collapse;margin:4px 0 18px;border:1.5px solid var(--ink)}
-  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(22,20,13,.16);vertical-align:top;font-size:14px}
-  tr:last-child th,tr:last-child td{border-bottom:0}
-  th{width:38%;font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-soft);font-weight:400;background:rgba(22,20,13,.035)}
-  td.m{font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:13.5px;word-break:break-all}
-  .cta{display:inline-block;background:var(--ink);color:var(--yellow);text-decoration:none;font-family:'Barlow Condensed','Arial Narrow',sans-serif;text-transform:uppercase;letter-spacing:.05em;font-size:15px;padding:10px 18px;border:1.5px solid var(--ink)}
-  .note{font-family:'Spline Sans Mono',ui-monospace,monospace;font-size:11px;line-height:1.6;color:var(--ink-soft);border-top:1px dashed var(--rule);margin-top:20px;padding-top:14px}
-  .warn{color:var(--reject)}
-  @media print{body{padding:0;background:#fff}.sheet{box-shadow:none}.cta{display:none}}
-</style></head>
-<body><div class="sheet">
-  <div class="top"><span class="brand">NPJ</span><span class="kicker">Account recovery</span></div>
-  <div class="body">
-    <h1>Keep this safe.</h1>
-    <p>This is how you sign back in to <strong>People&rsquo;s Journalism</strong>. It holds the only copy of your password &mdash; the server keeps just a one-way hash, so no one can recover it for you. Print it or store it in a password manager.</p>
-    <table>${rows}</table>
-    ${info.signinUrl ? `<a class="cta" href="${esc(info.signinUrl)}">Open the sign-in page &rarr;</a>` : ""}
-    <div class="note">
-      To sign in: open People&rsquo;s Journalism, choose <strong>Sign in with Matrix</strong>, and enter your address and password above.<br>
-      <span class="warn">Anyone with this file can sign in as you.</span> Treat it like a key.
-    </div>
-  </div>
-</div></body></html>`;
-}
-function downloadRecovery(info) {
-  try {
-    const blob = new Blob([recoveryFileHtml(info)], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    const safe = String(info.localpart || "account").replace(/[^a-z0-9._-]+/gi, "-");
-    a.href = url; a.download = "npj-recovery-" + safe + ".html";
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
-    return true;
-  } catch (e) { return false; }
-}
-
 /* clipboard with a select-and-copy fallback for insecure contexts / old browsers */
 async function copyText(text) {
   try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
@@ -216,45 +142,99 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
   );
 }
 
-/* ---- the recovery handoff ----
-   The last step before the newsroom: the new account's credentials exist only in
-   this browser tab right now, so we push the recovery file at them once on arrival
-   and won't let them leave without a clear chance to save it. */
-function RecoveryStep({ info, onEnter, card }) {
-  const [saved, setSaved] = useState(false);
-  const grab = () => { if (downloadRecovery(info)) setSaved(true); };
-  // auto-offer the download once — most browsers honour a download from a real
-  // user gesture chain (the "Finish" click that landed here), and the button below
-  // is the reliable fallback if it's blocked.
-  useEffect(() => { grab(); /* eslint-disable-next-line */ }, []);
+/* ---- the last step: lock sign-in behind a passkey ----
+   A guest account is a real account, and the password they just set is its only
+   key. On a device that supports it, we offer to wrap that password in a platform
+   passkey (Face ID / fingerprint, via WebAuthn PRF) so getting back in is one
+   touch — stored encrypted in this browser, nothing leaving the device. It's a
+   convenience, never the only way in: the password still works anywhere, so
+   "skip and remember it" is always a first-class choice. */
+function PasskeyStep({ creds, onEnter, card }) {
+  const [supported, setSupported] = useState(null); // null = still checking
+  const [state, setState] = useState("idle");       // idle | working | done | error
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (window.PasskeyVault ? window.PasskeyVault.supported() : Promise.resolve(false))
+      .then(s => { if (alive) setSupported(!!s); }).catch(() => { if (alive) setSupported(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const enroll = async () => {
+    if (state === "working") return;
+    setState("working"); setErr("");
+    try {
+      await window.PasskeyVault.enroll({ mxid: creds.mxid, password: creds.password, label: creds.displayName || creds.mxid });
+      setState("done");
+    } catch (e) {
+      if (e && e.name === "NotAllowedError") setErr("Passkey setup was cancelled — you can still sign in with your password.");
+      else if (e && e.code === "noprf") setErr("This device's passkey can't store a sign-in. Just remember your password.");
+      else setErr((e && e.message) || "Couldn't set up your passkey.");
+      setState("error");
+    }
+  };
+
   const fieldRow = (label, value, mono) => (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "7px 0", borderBottom: "1px solid var(--rule)" }}>
       <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, whiteSpace: "nowrap" }}>{label}</span>
       <span style={{ fontFamily: mono ? "var(--mono)" : "var(--serif)", fontSize: 13, textAlign: "right", wordBreak: "break-all" }}>{value || "—"}</span>
     </div>
   );
+  const errBox = err ? (
+    <div style={{ marginTop: 12, padding: "9px 11px", background: "color-mix(in srgb, var(--reject) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--reject) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, color: "var(--reject)" }}>{err}</div>
+  ) : null;
+
+  const summary = (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "4px 12px", marginBottom: 16 }}>
+      {fieldRow("Name", creds.displayName, false)}
+      {fieldRow("Address", creds.mxid, true)}
+    </div>
+  );
+
+  // device can't do passkeys → there's nothing to set up; remembering the password
+  // IS the plan, so say so plainly and let them in.
+  if (supported === false) return card(
+    <>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>You&rsquo;re all set.</h1>
+      <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+        Your account is real and it&rsquo;s yours. <strong style={{ color: "var(--ink)" }}>Remember the password you just set</strong> — it&rsquo;s your key to signing back in from any device. The server only keeps a hash, so no one can recover it for you.
+      </p>
+      {summary}
+      <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+        Enter the newsroom<I.arrow style={{ fontSize: 13 }} />
+      </button>
+    </>
+  );
+
+  const done = state === "done";
   return card(
     <>
-      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now · save your file</div>
-      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>Keep your recovery file.</h1>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>You&rsquo;re a member now · last step</div>
+      <h1 style={{ fontFamily: "var(--display)", fontSize: 38, lineHeight: 1, margin: "0 0 10px" }}>{done ? "Passkey saved." : "Make getting back in easy."}</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
-        Your account is real and it&rsquo;s yours. This little file is the only copy of the password you just set — the server keeps just a hash, so no one can recover it for you. Download it and tuck it somewhere safe.
+        {done
+          ? <>Next time on this device, just use Face&nbsp;ID or your fingerprint — no password to type. Your password still works anywhere as a backup.</>
+          : <>Lock your sign-in to this device with <strong style={{ color: "var(--ink)" }}>Face&nbsp;ID or a fingerprint</strong>, so you never have to type your password here. It&rsquo;s stored encrypted on this device — or skip it and just remember your password, which works from anywhere.</>}
       </p>
-      <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "4px 12px", marginBottom: 16 }}>
-        {fieldRow("Name", info.displayName, false)}
-        {fieldRow("Address", info.mxid, true)}
-        {fieldRow("Homeserver", info.homeserver, true)}
-      </div>
-      <button className="btn btn-primary" onClick={grab} style={{ display: "inline-flex", alignItems: "center", gap: 7, width: "100%", justifyContent: "center" }}>
-        {saved ? <I.check style={{ fontSize: 14 }} /> : <I.arrow style={{ fontSize: 14, transform: "rotate(90deg)" }} />}
-        {saved ? "Downloaded — get it again" : "Download recovery file"}
-      </button>
-      <button className="btn btn-ghost" onClick={onEnter} style={{ marginTop: 10, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, opacity: saved ? 1 : .8 }}>
-        {saved ? "Enter the newsroom" : "Skip — enter anyway"}<I.arrow style={{ fontSize: 13 }} />
-      </button>
-      <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 12, lineHeight: 1.5 }}>
-        Anyone who opens this file can sign in as you — treat it like a key.
-      </div>
+      {summary}
+      {done ? (
+        <button className="btn btn-primary" onClick={onEnter} style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+          <I.check style={{ fontSize: 14 }} />Enter the newsroom
+        </button>
+      ) : (
+        <>
+          <button className="btn btn-primary" disabled={supported === null || state === "working"} onClick={enroll}
+            style={{ width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: (supported === null || state === "working") ? .6 : 1 }}>
+            {state === "working" ? <InviteSpinner /> : <I.lock style={{ fontSize: 13 }} />}{state === "working" ? "Setting up…" : "Set up passkey sign-in"}
+          </button>
+          <button className="btn btn-ghost" onClick={onEnter} style={{ marginTop: 10, width: "100%", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7 }}>
+            Skip — I&rsquo;ll remember my password<I.arrow style={{ fontSize: 13 }} />
+          </button>
+        </>
+      )}
+      {errBox}
     </>
   );
 }
@@ -263,16 +243,15 @@ function RecoveryStep({ info, onEnter, card }) {
    Full-screen, branded, owns the whole viewport while a newcomer onboards.
    props: payload (parsed token), onDone(session) */
 function WelcomeInvite({ payload, onDone }) {
-  const [phase, setPhase] = useState("signing"); // signing | name | password | recovery | finishing | used | error
+  const [phase, setPhase] = useState("signing"); // signing | name | password | secure | finishing | used | error
   const [err, setErr] = useState("");
   const [name, setName] = useState(payload.n || ""); // pre-filled with who the inviter named
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
-  const [recovery, setRecovery] = useState(null);  // credentials handed to the new account, for the recovery file
-  const sessRef = useRef(null);                      // the live session, surfaced once they save their file
+  const [creds, setCreds] = useState(null);          // {mxid,password,displayName} carried into the passkey step
+  const sessRef = useRef(null);                      // the live session, surfaced once they secure the account
   const mxid = "@" + payload.u + ":" + payload.hs;
-  const signinUrl = location.origin + location.pathname + "#submit";
 
   // auto-login with the one-time password from the link
   useEffect(() => {
@@ -317,12 +296,13 @@ function WelcomeInvite({ payload, onDone }) {
     try {
       await window.MatrixAuth.changePassword(payload.p, pw);
       // re-read the live session so the app picks up the verified identity, but
-      // hold it until they've saved their recovery file — a guest account is a
-      // real account, and this file is the only copy of the password they just set.
+      // hold it until they've had the chance to lock sign-in behind a passkey —
+      // a guest account is a real account, and the password they just set is the
+      // only key to it, so we offer to make returning easy before whisking them off.
       sessRef.current = window.MatrixAuth.current();
-      setRecovery({ displayName: name.trim() || payload.n || "", mxid, localpart: payload.u, homeserver: payload.hs, password: pw, project: payload.rt || "", signinUrl, createdAt: new Date().toLocaleString() });
+      setCreds({ mxid, password: pw, displayName: name.trim() || payload.n || "" });
       setBusy(false);
-      setPhase("recovery");
+      setPhase("secure");
     } catch (e) { setErr((e && e.message) || "Couldn't set your password. Try again."); setBusy(false); }
   };
 
@@ -372,7 +352,7 @@ function WelcomeInvite({ payload, onDone }) {
     </>
   );
 
-  if (phase === "recovery") return <RecoveryStep info={recovery} onEnter={enterNewsroom} card={card} />;
+  if (phase === "secure") return <PasskeyStep creds={creds} onEnter={enterNewsroom} card={card} />;
 
   if (phase === "finishing") return card(
     <div style={{ textAlign: "center", padding: "16px 0" }}>
