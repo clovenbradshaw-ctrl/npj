@@ -155,7 +155,11 @@ function VersionHistory({ versions, onClose }) {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.72)", zIndex: 5200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 22px" }} className="fade-in">
-      <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: single ? "min(620px,97vw)" : "min(860px,97vw)", maxHeight: "86vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
+      {/* The panel is a self-contained ink-on-paper reading surface. It can be
+          mounted inside the dark newsroom (which sets color: var(--nr-text), a
+          light cream), so we pin color here — otherwise the snapshot title and
+          body, which inherit, would render light-on-light and be unreadable. */}
+      <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: single ? "min(620px,97vw)" : "min(860px,97vw)", maxHeight: "86vh", overflowY: "auto", background: "var(--paper)", color: "var(--ink)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT HISTORY</span>
