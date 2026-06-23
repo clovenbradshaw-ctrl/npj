@@ -330,7 +330,7 @@ function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", st
     : state === "syncing" ? "backing up to your account…"
     : state === "synced" ? "✓ saved · this browser + your account"
     : state === "error" ? "saved in this browser · account backup failed"
-    : state === "localonly" ? "saved in this browser only" + (signedIn ? "" : " — sign in to back it up")
+    : state === "localonly" ? "saved in this browser only"
     : (signedIn ? "autosaves · this browser + your account" : "autosaves · this browser only");
   // colors track the newsroom theme via its --nr-* vars (the pill lives inside
   // .newsroom), so the status reads at AA contrast in both light and dark.
