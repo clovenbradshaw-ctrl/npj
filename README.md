@@ -29,7 +29,7 @@ founding admin curates the site and grows the network from there.
 | `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation |
 | `app/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
 | `app/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
-| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
+| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩, or **⊪ in context** — continuing coverage that builds on prior articles), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
 | `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
@@ -216,8 +216,11 @@ Next to **Prose** (the editor), the Newsroom's view switcher opens the
 that always shows a second view and **pivots** as you work:
 
 - **Grounding** — every sentence is a row: its status pill (⊤ grounded · ⊨ N
-  sources · ⊥ needs source · ⊩/⊨/⊢ owned · ¬ sources disagree), the citations
-  attached to it, and its stance. Click a sentence and the panel shows its
+  sources · ⊥ needs source · ⊩/⊨/⊢ owned · ⊪ in context · ¬ sources disagree), the
+  citations attached to it, and its stance. A sentence can *also* carry **context**
+  — the prior coverage it builds on (⊪), cited for context rather than proof and
+  kept apart from the citations that back it, so a claim can be *both* proved by the
+  article **and** set against past articles. Click a sentence and the panel shows its
   grounding card; click a citation chip and the panel pivots to the registry.
 - **Citations** — the registry of reusable records. A citation is a pinned span
   of a source — exact words plus character offsets (multi-part when the support
@@ -240,7 +243,7 @@ A **Ground truth** strip keeps the running tally (grounded / yours / conflicts /
 needs sources) and the gate chip — **⚑ N blockers** until every sentence is
 grounded or owned, **⊤ gate open** after. **Walk me through** hands Citey the
 floor: he steps sentence-by-sentence through everything unsourced with one
-honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / Infer ⊢).
+honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / Infer ⊢ / In context ⊪).
 All of it reads and writes the same editor DOM and autosave as Prose; the views
 can't diverge.
 
@@ -261,6 +264,12 @@ Click him on a flagged claim and he offers the two honest ways to ground it:
   analysis**, your **⊨ account** (you witnessed it), or your **⊩ stated position**.
   Owning records the stance and clears the flag; it publishes as your prose, not a
   citation. The thing Citey won't rest beside is the *undeclared* claim.
+- **In context** — a fourth, lighter declaration for *continuing coverage*: a claim
+  the article itself substantiates while building on the outlet's prior reporting
+  (a topic or thesis sentence like "The war over benches continues"). It grounds
+  the claim (⊪) and carries links to the **past articles** it builds on — cited for
+  context, not proof. Context links ride a separate channel from the proof
+  citations, so the same sentence can be *both* proved **and** set in context.
 
 Citey also reflects the **publish gate**: a live count of how many claims would
 still ship unverified, and a wary face until they're all sourced or owned — the

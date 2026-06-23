@@ -26,16 +26,18 @@
 
 (() => {
 const VIEWS = [["prose", "Prose"], ["grounding", "Grounding"], ["citations", "Citations"], ["sources", "Sources"]];
-const STANCE_GLYPH = { voice: "⊩", testimony: "⊨", analysis: "⊢" };
-const STANCE_LABEL = { voice: "Your voice", testimony: "Your account", analysis: "Your analysis" };
-const STANCE_OPTS = [["voice", "Argue — your voice ⊩"], ["testimony", "Assert — your account ⊨"], ["analysis", "Infer — your analysis ⊢"]];
+const STANCE_GLYPH = { voice: "⊩", testimony: "⊨", analysis: "⊢", context: "⊪" };
+const STANCE_LABEL = { voice: "Your voice", testimony: "Your account", analysis: "Your analysis", context: "In context" };
+const STANCE_OPTS = [["voice", "Argue — your voice ⊩"], ["testimony", "Assert — your account ⊨"], ["analysis", "Infer — your analysis ⊢"], ["context", "Continue — in context ⊪"]];
 const DOT = { grounded: "#1F9E76", multi: "#6ea8d8", owned: "#7C74DE", needs: "#D8632E", conflict: "#D8412C" };
+const CONTEXT_TEAL = "#2E8B86";
 
 // Status pill (solid backgrounds read in both newsroom themes).
 function pillFor(st) {
   if (st.key === "conflict") return { glyph: "¬", label: "Sources disagree", fg: "#b3261e", bg: "#fdecea" };
   if (st.key === "multi") return { glyph: "⊨", label: st.nSrc + " sources", fg: "#3a63c4", bg: "#e8eefb" };
   if (st.key === "grounded") return { glyph: "⊤", label: "Grounded", fg: "#1f8a55", bg: "#e7f4ec" };
+  if (st.key === "owned" && st.stance === "context") return { glyph: "⊪", label: "In context", fg: "#1f7d78", bg: "#e6f4f3" };
   if (st.key === "owned") return { glyph: STANCE_GLYPH[st.stance] || "⊩", label: STANCE_LABEL[st.stance] || "Your voice", fg: "#6b5bd6", bg: "#efeafc" };
   return { glyph: "⊥", label: "Needs source", fg: "#b5701b", bg: "#fbf1e3" };
 }
@@ -45,20 +47,25 @@ function pillFor(st) {
 function statusOf(row) {
   const Brain = window.CiteyBrain;
   const spans = row.claimSpans || [];
-  let stance = null, conflict = false, needs = false; const keys = {};
+  let stance = null, conflict = false, needs = false; const keys = {}; const ctx = {};
   spans.forEach(s => {
+    (window.NpjCitations ? window.NpjCitations.contextKeys(s) : []).forEach(k => { ctx[k] = 1; });
     let v = { state: "falsum" };
     try { v = Brain.citeyStateForSpan({ el: s }); } catch (e) {}
-    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice") stance = s.getAttribute("data-stance") || "analysis";
+    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context") stance = s.getAttribute("data-stance") || "analysis";
     else if (v.state === "verum" || v.state === "entails") String(v.srcKey || s.getAttribute("data-src") || "").split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; });
     else if (v.state === "negation") conflict = true;
     else needs = true;
   });
   const n = Object.keys(keys).length;
-  if (conflict) return { key: "conflict", spans };
-  if (stance && !n && !needs) return { key: "owned", stance, spans };
-  if (n && !needs) return { key: n > 1 ? "multi" : "grounded", nSrc: n, spans };
-  return { key: "needs", spans };
+  const context = Object.keys(ctx);
+  let out;
+  if (conflict) out = { key: "conflict", spans };
+  else if (stance && !n && !needs) out = { key: "owned", stance, spans };
+  else if (n && !needs) out = { key: n > 1 ? "multi" : "grounded", nSrc: n, spans };
+  else out = { key: "needs", spans };
+  out.context = context;
+  return out;
 }
 
 // Best mechanical match between a claim and a candidate quote (CiteyAssist; 0 when unavailable).
@@ -493,6 +500,46 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     );
   };
 
+  // ---- context links: prior coverage a sentence builds on (context, not proof) ----
+  const rowContext = (row) => (api.contextFor(row) || []).map(k => ({ key: k, rec: srcRec(k) }));
+  const ContextChip = ({ row, ck, compact }) => (
+    <span title={"Prior coverage, cited for context — “" + clip(srcShort(ck.key), 90) + "”. Click to open the source."}
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 6px 3px 8px", borderRadius: 6, background: "#e6f4f3", color: "#1f7d78", fontFamily: "var(--cond)", fontSize: 12.5, maxWidth: compact ? 190 : 220 }}>
+      <span style={{ fontFamily: "var(--mono)", fontSize: 10 }}>⊪</span>
+      <button onClick={() => { setSelSrc(ck.key); pivot("sources"); }}
+        style={{ border: 0, background: "none", color: "inherit", font: "inherit", cursor: "pointer", padding: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {clip(srcShort(ck.key), 24)}
+      </button>
+      <button onClick={() => { api.removeContext(row, ck.key); bump(); }} title="Unlink this context"
+        style={{ border: 0, background: "none", color: "inherit", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+    </span>
+  );
+  // chips for the prior coverage + a picker to add more. Offered on ANY sentence —
+  // a claim can be proved (or owned) AND still be set against prior coverage.
+  const ContextStrip = ({ row, compact, label, addable }) => {
+    const ctx = rowContext(row);
+    if (addable === false && ctx.length === 0) return null;     // read-only + nothing to show
+    const linked = ctx.map(c => c.key);
+    const avail = (srcList || []).filter(s => linked.indexOf(s.key) < 0);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {label !== false && <div className="np-mono" style={{ fontSize: 9, color: CONTEXT_TEAL, letterSpacing: ".05em" }}>⊪ IN CONTEXT · PRIOR COVERAGE — CITED FOR CONTEXT, NOT PROOF</div>}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          {ctx.map(ck => <ContextChip key={ck.key} row={row} ck={ck} compact={compact} />)}
+          {addable !== false && ctx.length === 0 && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: NR.muted }}>no prior coverage linked</span>}
+          {addable !== false && (avail.length > 0
+            ? <select value="" onChange={e => { if (e.target.value) { api.addContext(row, e.target.value); bump(); } }}
+                title="Link prior coverage this sentence builds on — as context, not proof"
+                style={{ background: NR.field, color: NR.text, border: "1px dashed " + CONTEXT_TEAL, borderRadius: 6, padding: "3px 7px", fontFamily: "var(--cond)", fontSize: 12.5, cursor: "pointer" }}>
+                <option value="">+ Prior coverage…</option>
+                {avail.map(s => <option key={s.key} value={s.key}>{clip(srcShort(s.key), 40)}</option>)}
+              </select>
+            : (srcList.length === 0 ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.muted }}>add a source in Prose to cite it as context</span> : null))}
+        </div>
+      </div>
+    );
+  };
+
   // best registry matches for a sentence that still needs grounding
   const candidatesFor = (row, st, max) => {
     if (!row || !(st.key === "needs" || st.key === "conflict")) return [];
@@ -789,16 +836,24 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                   style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{row.text}</button>
                 <div style={{ marginTop: 5 }}><HashChip row={row} NR={NR} /></div>
               </div>
-              <div>
-                {st.key === "owned"
-                  ? <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>no source needed</span>
-                  : (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                      {cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
-                      <button onClick={() => openCite(row.sid)} title="Find the words in a source that back this sentence"
-                        style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px dashed " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5 }}>+ Cite</button>
-                    </div>
-                  )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+                {st.key === "owned" && st.stance === "context"
+                  ? <ContextStrip row={row} compact />
+                  : st.key === "owned"
+                    ? <React.Fragment>
+                        <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>no source needed</span>
+                        <ContextStrip row={row} compact addable={false} label={false} />
+                      </React.Fragment>
+                    : (
+                      <React.Fragment>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                          {cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
+                          <button onClick={() => openCite(row.sid)} title="Find the words in a source that back this sentence"
+                            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px dashed " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5 }}>+ Cite</button>
+                        </div>
+                        <ContextStrip row={row} compact addable={false} label={false} />
+                      </React.Fragment>
+                    )}
               </div>
               <div>
                 {(st.key === "grounded" || st.key === "multi") && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>sourced fact</span>}
@@ -821,6 +876,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <span style={{ color: "#3a63c4", fontWeight: 700 }}>⊨ N sources</span> — backed independently by more than one source &nbsp;·&nbsp;
         <span style={{ color: "#b5701b", fontWeight: 700 }}>⊥ Needs source</span> — nothing pinned yet; blocks the gate &nbsp;·&nbsp;
         <span style={{ color: "#6b5bd6", fontWeight: 700 }}>⊩ Yours</span> — argued, witnessed, or inferred; honestly labelled &nbsp;·&nbsp;
+        <span style={{ color: CONTEXT_TEAL, fontWeight: 700 }}>⊪ In context</span> — continuing coverage: the article proves it, set against prior reporting &nbsp;·&nbsp;
         <span style={{ color: "#b3261e", fontWeight: 700 }}>¬ Sources disagree</span> — two pinned quotes conflict; unlink one
       </div>
     </section>
@@ -946,16 +1002,22 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   );
 
   // ============ panel · PROSE (compact, status-shaded preview) ============
-  const proseShade = (key) => {
+  const proseShade = (key, stance) => {
     if (key === "conflict") return { background: "rgba(216,65,44,.16)", borderBottom: "1.5px solid #D8412C" };
+    if (key === "owned" && stance === "context") return { background: "rgba(46,139,134,.14)", borderBottom: "1.5px solid " + CONTEXT_TEAL };
     if (key === "owned") return { background: "rgba(124,116,222,.14)", borderBottom: "1.5px solid #7C74DE" };
     if (key === "needs") return { background: "rgba(216,99,46,.15)", borderBottom: "1.5px dashed #D8632E" };
     return { background: "rgba(255,236,1,.13)", borderBottom: "1.5px solid #d8c520" };
   };
   const proseSup = (st) => {
     const map = { conflict: ["¬", "#b3261e"], needs: ["⚑", "#b5701b"], grounded: ["⊤", "#9a8500"], multi: ["⊨", "#9a8500"] };
-    const pair = st.key === "owned" ? [STANCE_GLYPH[st.stance] || "⊩", "#6b5bd6"] : map[st.key];
-    return <sup style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: pair[1], marginLeft: 2, lineHeight: 0 }}>{pair[0]}</sup>;
+    const pair = st.key === "owned"
+      ? (st.stance === "context" ? ["⊪", CONTEXT_TEAL] : [STANCE_GLYPH[st.stance] || "⊩", "#6b5bd6"])
+      : map[st.key];
+    const ctxMark = (st.context && st.context.length && !(st.key === "owned" && st.stance === "context"))
+      ? <sup title="set in context of prior coverage" style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: CONTEXT_TEAL, marginLeft: 1, lineHeight: 0, opacity: .8 }}>⊪</sup>
+      : null;
+    return <React.Fragment><sup style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: pair[1], marginLeft: 2, lineHeight: 0 }}>{pair[0]}</sup>{ctxMark}</React.Fragment>;
   };
   const prosePanel = (() => {
     const paras = [];
@@ -974,7 +1036,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                 <React.Fragment key={row.sid}>
                   <span onClick={() => { setSelSid(row.sid); flash(row.sid); if (view === "grounding") scrollToSid(row.sid); }}
                     title="Select — the workspace shows its grounding record"
-                    style={Object.assign({ cursor: "pointer", padding: "0 1px", outline: selSid === row.sid ? "1.5px solid rgba(124,116,222,.8)" : "none", outlineOffset: 2, animation: flashSid === row.sid ? "rowflash 1.8s ease-out" : "none" }, proseShade(st.key))}>
+                    style={Object.assign({ cursor: "pointer", padding: "0 1px", outline: selSid === row.sid ? "1.5px solid rgba(124,116,222,.8)" : "none", outlineOffset: 2, animation: flashSid === row.sid ? "rowflash 1.8s ease-out" : "none" }, proseShade(st.key, st.stance))}>
                     {row.text}{proseSup(st)}
                   </span>{" "}
                 </React.Fragment>
@@ -1014,6 +1076,12 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           )}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 9 }}>
             {rowCites(selRow.row).map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={selRow.st.key === "conflict"} compact />)}
+          </div>
+          <div style={{ borderTop: "1px dashed " + NR.line, margin: "2px 0 10px", paddingTop: 9 }}>
+            <ContextStrip row={selRow.row} />
+            <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginTop: 5 }}>
+              Context, not proof — the prior coverage this sentence builds on, kept apart from the citations that back the claim.
+            </div>
           </div>
           {candidatesFor(selRow.row, selRow.st, 3).length > 0 && (<React.Fragment>
             <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Best matches in the registry</div>
@@ -1156,7 +1224,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <button onClick={() => openCite(walk.cur)} className="np-cond" style={{ border: "1.5px solid var(--ink)", background: "var(--yellow)", color: "var(--ink)", padding: "5px 12px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>🔍 Find support</button>
             <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>or own it:</span>
-            {[["voice", "Argue ⊩", "Your stated position — argument, not fact"], ["testimony", "Assert ⊨", "Your first-hand account — you are the witness"], ["analysis", "Infer ⊢", "Your analysis — follows from the grounded facts"]].map(([v, l, ti]) => (
+            {[["voice", "Argue ⊩", "Your stated position — argument, not fact"], ["testimony", "Assert ⊨", "Your first-hand account — you are the witness"], ["analysis", "Infer ⊢", "Your analysis — follows from the grounded facts"], ["context", "In context ⊪", "Continuing coverage — the article proves it, set against prior reporting"]].map(([v, l, ti]) => (
               <button key={v} onClick={() => curWalkRow && setStance(curWalkRow, statusOf(curWalkRow), v)} title={ti}
                 style={{ border: "1px solid var(--ink)", background: "transparent", color: "var(--ink)", padding: "5px 10px", fontSize: 12, fontFamily: "var(--cond)", fontWeight: 600, cursor: "pointer" }}>{l}</button>
             ))}
