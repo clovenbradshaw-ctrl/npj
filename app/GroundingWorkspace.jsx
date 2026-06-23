@@ -167,7 +167,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [renameKey, setRenameKey] = useState(null);     // the source being renamed in the library
   const [renameText, setRenameText] = useState("");
   const [toast, setToast] = useState(null);
-  const [exporting, setExporting] = useState(false); // the "export for fact-check" panel
+  const [exporting, setExporting] = useState(false); // the "outstanding fact checks" panel
+  const [exportPayload, setExportPayload] = useState(null); // null while eoreader4 parses
   const [hop, setHop] = useState(null);            // Citey hops when a claim resolves
   const mainRef = useRef(null);
   const srcRefMain = useRef(null); const srcRefPanel = useRef(null); const srcRefModal = useRef(null);
@@ -476,38 +477,37 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   };
   const srcRec = (key) => api.sourceRec(key) || {};
   const srcShort = (key) => { const rec = srcRec(key); return (rec.title && rec.title !== "Web source" && rec.title !== "Web snapshot") ? rec.title : (rec.outlet || key || "source"); };
-  const srcUrl = (key) => { const rec = srcRec(key); return rec.archive_url || rec.original_url || ""; };
   const kindOf = (rec) => String(rec.outlet || rec.type || "source").toUpperCase();
 
-  // ---- snapshot the ungrounded claims for "export for fact-check" ----
-  // The blockers (⊥ needs source, ¬ conflict) are exactly the claims a second
-  // reader can help with. We package each with its sentence, the surrounding
-  // paragraph (so the claim reads in context) and its stable ref, plus the
-  // sources already in the draft — all plain data the NpjFactCheck shaper turns
-  // into a worksheet. Read fresh at open: it's a snapshot of the live grounding.
-  const buildFactCheckPayload = () => {
-    const paras = [];
-    enriched.forEach(e => {
-      if (!paras.length || paras[paras.length - 1].bi !== e.row.blockIndex) paras.push({ bi: e.row.blockIndex, list: [] });
-      paras[paras.length - 1].list.push(e);
-    });
-    const paraOf = {};
-    paras.forEach(p => p.list.forEach(e => { paraOf[e.row.sid] = p; }));
-    const items = enriched
+  // ---- "outstanding fact checks": the ungrounded claims, read into bare
+  // propositions. The blockers (⊥ needs source, ¬ conflict) are the claims a
+  // second reader can help verify; eoreader4 (NpjPropositions) parses each
+  // sentence into its atomic propositions so the exported list is checkable
+  // claims, not raw sentences. Runs on open (the engine loads lazily); the
+  // payload is a snapshot of the live grounding, null until parsing resolves.
+  useEffect(() => {
+    if (!exporting) { setExportPayload(null); return; }
+    let alive = true;
+    setExportPayload(null);
+    const claims = enriched
       .filter(e => e.st.key === "needs" || e.st.key === "conflict")
-      .map(e => {
-        const p = paraOf[e.row.sid];
-        const idx = p ? p.list.findIndex(x => x.row.sid === e.row.sid) : -1;
-        const before = (p && idx > 0) ? p.list.slice(0, idx).map(x => x.row.text).join(" ") : "";
-        const after = (p && idx >= 0) ? p.list.slice(idx + 1).map(x => x.row.text).join(" ") : "";
-        const cites = e.st.key === "conflict"
-          ? rowCites(e.row).map(({ c }) => ({ source: srcShort(c.srcKey), quote: c.quote, url: srcUrl(c.srcKey) }))
-          : [];
-        return { sid: e.row.sid, text: e.row.text, status: e.st.key, before, after, cites };
-      });
-    const sources = srcList.map(({ key, rec }) => ({ title: srcShort(key), url: srcUrl(key), archived: !!rec.archive_url }));
-    return { title: (api.draftTitle && api.draftTitle()) || "", generatedAt: Date.now(), items, sources };
-  };
+      .map(e => ({ sid: e.row.sid, text: e.row.text, status: e.st.key }));
+    (async () => {
+      const items = [];
+      for (const c of claims) {
+        let props = [c.text];
+        try {
+          if (window.NpjPropositions) {
+            const ps = await window.NpjPropositions.extract(c.text);
+            if (ps && ps.length) props = ps;
+          }
+        } catch (e) {}
+        items.push({ sid: c.sid, status: c.status, props });
+      }
+      if (alive) setExportPayload({ title: (api.draftTitle && api.draftTitle()) || "", generatedAt: Date.now(), items, claims: claims.length });
+    })();
+    return () => { alive = false; };
+  }, [exporting]); // eslint-disable-line
 
   // citation chip (used by the table rows and the grounding card)
   const CiteChip = ({ c, span, conflict, compact }) => {
@@ -797,7 +797,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         </span>
         <span style={{ flex: 1 }} />
         <button onClick={() => setExporting(true)} disabled={blockers === 0}
-          title={blockers ? "Export the " + blockers + " claim" + (blockers === 1 ? "" : "s") + " that still need grounding as a worksheet others can help fact-check" : "Nothing needs a source — the gate is open"}
+          title={blockers ? "List the " + blockers + " claim" + (blockers === 1 ? "" : "s") + " that still need grounding as bare propositions others can help fact-check" : "Nothing needs a source — the gate is open"}
           className="np-cond" style={chipBtn({ fontWeight: 700, borderColor: blockers ? "#7C74DE" : NR.line, color: blockers ? "#7C74DE" : NR.muted, cursor: blockers ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 5 })}>
           <window.I.shield style={{ fontSize: 12 }} /> Export for fact-check
         </button>
@@ -1174,7 +1174,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         : (<React.Fragment>
             {blockers > 0 && (
               <button onClick={() => setExporting(true)} className="np-cond"
-                title="Export the unsourced claims as a worksheet others can help fact-check — they don't need access to the draft"
+                title="List the unsourced claims as bare propositions others can help fact-check — they don't need access to the draft"
                 style={chipBtn({ fontWeight: 700, borderColor: "#7C74DE", color: "#7C74DE", display: "inline-flex", alignItems: "center", gap: 5 })}>
                 <window.I.shield style={{ fontSize: 12 }} /> <span className="npj-hide-sm">Export for </span>fact-check
               </button>
@@ -1294,7 +1294,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       {walkStage}
       {citeModal}
       {exporting && window.FactCheckExport && (
-        <window.FactCheckExport payload={buildFactCheckPayload()} onClose={() => setExporting(false)} />
+        <window.FactCheckExport payload={exportPayload} loading={!exportPayload} onClose={() => setExporting(false)} />
       )}
       {toast && (
         <div style={{ position: "fixed", left: "50%", bottom: 24, transform: "translateX(-50%)", zIndex: 6000, maxWidth: "min(560px, calc(100vw - 32px))", background: "var(--ink)", color: "var(--paper)", padding: "10px 16px", fontFamily: "var(--cond)", fontSize: 13.5, lineHeight: 1.4, boxShadow: "0 10px 30px rgba(0,0,0,.4)", animation: "pop .2s ease" }}>{toast}</div>

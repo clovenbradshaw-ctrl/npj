@@ -244,6 +244,17 @@ honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / In
 All of it reads and writes the same editor DOM and autosave as Prose; the views
 can't diverge.
 
+**Export outstanding fact checks.** When some claims can't be sourced from the
+desk, hand them off: the **Export for fact-check** action turns every blocker
+(⊥ needs source · ¬ conflict) into a plain bullet list of *outstanding fact
+checks* you can paste straight into an email or a text. The bullets aren't raw
+sentences — the [eoreader4](https://github.com/clovenbradshaw-ctrl/eoreader4)
+reading engine parses each sentence into its **bare propositions** (subject →
+relation → object), so a single dense sentence becomes the few atomic claims a
+checker can actually verify (`app/propositions.js` → `app/fact-check-export.js`,
+no markdown scaffolding). The engine loads lazily and degrades to the sentence
+itself if it's unavailable, so the list always renders.
+
 ## Citey — every claim grounded before it ships
 
 Citey is the drafting assistant: a margin mascot whose face **is** the editor's
