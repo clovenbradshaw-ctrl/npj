@@ -432,9 +432,34 @@
      so the inviter stays signed in as themselves. The newcomer logs in fresh with
      the temp password carried in the link, then immediately changes it — so the
      password in the link (URL fragment, never sent to a server) is single-use. */
+  // A "hashid"-style code: short, CSPRNG, and built from an alphabet that drops
+  // both look-alike glyphs (no 0/O, 1/l/i) AND vowels — so a code never spells an
+  // accidental word, reads cleanly aloud, and is hard to mistype. 27 symbols, so
+  // five of them is ~14M combinations: collisions are rare, and register() retries
+  // the few that do collide, so an auto-minted handle effectively always lands.
+  const HASHID_ALPHABET = "23456789bcdfghjkmnpqrstvwxz";
+  function hashid(len) {
+    const n = Math.max(1, len || 6), A = HASHID_ALPHABET, ceil = 256 - (256 % A.length);
+    const bytes = new Uint8Array(n * 2); crypto.getRandomValues(bytes);
+    let out = "", bi = 0;
+    for (let i = 0; i < n; i++) {
+      // rejection-sample so every symbol is equally likely (no modulo bias)
+      let b = bytes[bi++];
+      while (b >= ceil) { if (bi >= bytes.length) { crypto.getRandomValues(bytes); bi = 0; } b = bytes[bi++]; }
+      out += A[b % A.length];
+    }
+    return out;
+  }
+  // A human-friendly Matrix localpart: an optional name-slug (so the guest reads as
+  // @sam-rivera-x3f9 not @x3f9) plus a hashid suffix that makes it unique. Spaces
+  // and punctuation fold to single hyphens; only Matrix-legal characters survive.
   function randomLocalpart(seed) {
-    const base = String(seed || "").toLowerCase().replace(/[^a-z0-9._=\-/]+/g, "").replace(/^[._\-/]+/, "").slice(0, 16);
-    return (base || "npj") + "-" + Math.random().toString(36).slice(2, 7);
+    const slug = String(seed || "").toLowerCase()
+      .replace(/[^a-z0-9._=\-/]+/g, "-")  // fold anything illegal (incl. spaces) to a hyphen
+      .replace(/[-._/]{2,}/g, "-")        // collapse runs of separators
+      .replace(/^[-._/]+|[-._/]+$/g, "")  // trim leading/trailing separators
+      .slice(0, 16).replace(/[-._/]+$/g, "");
+    return (slug || "guest") + "-" + hashid(5);
   }
   function randomPassword() {
     // 18 CSPRNG bytes → ~24 url-safe chars. Strong, and short-lived: the link's
@@ -467,46 +492,66 @@
     const dom = (raw.indexOf(":") >= 0 ? raw.split(":").pop() : raw).replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
     if (!dom) { const e = new Error("Need a homeserver to register on"); e.code = "badmxid"; throw e; }
     const base = await discover(dom);
-    const localpart = String(username || "").trim() || randomLocalpart(seed);
+    const explicit = String(username || "").trim();   // a hand-picked handle, or "" to auto-mint
     const pw = password || randomPassword();
-    const base_body = { username: localpart, password: pw, inhibit_login: true, initial_device_display_name: deviceName || "People's Journalism (web)" };
-    let uiaSession = null;   // the homeserver's UIA session id, echoed back each stage
-    let flows = null;        // the auth flows the server last advertised
-    let serverDone = [];     // stages the server says are already cleared this session
-    for (let i = 0; i < 8; i++) {
-      let auth;
-      if (uiaSession) {
-        const flow = pickRegisterFlow(flows, !!registrationToken);
-        if (!flow) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
-        // send the first stage the server hasn't cleared yet (the server, not us,
-        // is the source of truth for progress); fall back to the last stage so a
-        // server that returns no `completed` still gets a satisfying auth dict
-        const next = flow.find(s => serverDone.indexOf(s) < 0) || flow[flow.length - 1];
-        auth = next === "m.login.registration_token"
-          ? { type: "m.login.registration_token", token: registrationToken, session: uiaSession }
-          : { type: "m.login.dummy", session: uiaSession };
+
+    // One full UIA registration attempt for a given localpart. Resolves to the new
+    // account, or throws (M_USER_IN_USE included) so the caller can decide to retry.
+    async function attempt(localpart) {
+      const base_body = { username: localpart, password: pw, inhibit_login: true, initial_device_display_name: deviceName || "People's Journalism (web)" };
+      let uiaSession = null;   // the homeserver's UIA session id, echoed back each stage
+      let flows = null;        // the auth flows the server last advertised
+      let serverDone = [];     // stages the server says are already cleared this session
+      for (let i = 0; i < 8; i++) {
+        let auth;
+        if (uiaSession) {
+          const flow = pickRegisterFlow(flows, !!registrationToken);
+          if (!flow) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
+          // send the first stage the server hasn't cleared yet (the server, not us,
+          // is the source of truth for progress); fall back to the last stage so a
+          // server that returns no `completed` still gets a satisfying auth dict
+          const next = flow.find(s => serverDone.indexOf(s) < 0) || flow[flow.length - 1];
+          auth = next === "m.login.registration_token"
+            ? { type: "m.login.registration_token", token: registrationToken, session: uiaSession }
+            : { type: "m.login.dummy", session: uiaSession };
+        }
+        let res, data = {};
+        try {
+          res = await fetch(base + "/_matrix/client/v3/register", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(auth ? { ...base_body, auth } : base_body)
+          });
+        } catch (e) { const err = new Error("network/cors error reaching the homeserver"); err.code = "network"; throw err; }
+        try { data = await res.json(); } catch (e) { data = {}; }
+        if (res.ok) return { mxid: "@" + localpart + ":" + dom, localpart, domain: dom, password: pw, base_url: base, user_id: data.user_id || ("@" + localpart + ":" + dom) };
+        if (res.status === 401 && data && Array.isArray(data.flows)) {
+          flows = data.flows; uiaSession = data.session; serverDone = data.completed || [];
+          if (!pickRegisterFlow(flows, !!registrationToken)) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
+          continue;
+        }
+        const err = new Error((data && (data.error || data.errcode)) || ("registration failed (" + res.status + ")"));
+        err.status = res.status; err.errcode = data && data.errcode; err.data = data;
+        if (err.errcode === "M_FORBIDDEN") err.message = "This homeserver has registration closed.";
+        if (err.errcode === "M_USER_IN_USE") err.message = "That username is taken — try generating again.";
+        throw err;
       }
-      let res, data = {};
-      try {
-        res = await fetch(base + "/_matrix/client/v3/register", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(auth ? { ...base_body, auth } : base_body)
-        });
-      } catch (e) { const err = new Error("network/cors error reaching the homeserver"); err.code = "network"; throw err; }
-      try { data = await res.json(); } catch (e) { data = {}; }
-      if (res.ok) return { mxid: "@" + localpart + ":" + dom, localpart, domain: dom, password: pw, base_url: base, user_id: data.user_id || ("@" + localpart + ":" + dom) };
-      if (res.status === 401 && data && Array.isArray(data.flows)) {
-        flows = data.flows; uiaSession = data.session; serverDone = data.completed || [];
-        if (!pickRegisterFlow(flows, !!registrationToken)) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
-        continue;
-      }
-      const err = new Error((data && (data.error || data.errcode)) || ("registration failed (" + res.status + ")"));
-      err.status = res.status; err.errcode = data && data.errcode; err.data = data;
-      if (err.errcode === "M_FORBIDDEN") err.message = "This homeserver has registration closed.";
-      if (err.errcode === "M_USER_IN_USE") err.message = "That username is taken — try generating again.";
-      throw err;
+      const e = new Error("Registration didn't complete on this homeserver."); e.code = "uia"; throw e;
     }
-    const e = new Error("Registration didn't complete on this homeserver."); e.code = "uia"; throw e;
+
+    // An auto-minted handle should always succeed: if the hashid happens to collide
+    // with an existing account, mint a fresh one and try again. A hand-picked handle
+    // surfaces the clash to the user instead — that name was their explicit choice.
+    let localpart = explicit || randomLocalpart(seed);
+    let lastErr;
+    for (let tries = 0; tries < (explicit ? 1 : 6); tries++) {
+      try { return await attempt(localpart); }
+      catch (e) {
+        lastErr = e;
+        if (!explicit && e && e.errcode === "M_USER_IN_USE") { localpart = randomLocalpart(seed); continue; }
+        throw e;
+      }
+    }
+    throw lastErr;
   }
 
   async function setDisplayName(name) {
