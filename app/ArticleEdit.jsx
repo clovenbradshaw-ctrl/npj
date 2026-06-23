@@ -53,7 +53,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px"></figcaption>' +
     '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>';
   const imageFigure = (id, banner) =>
-    '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" fitcontrol shape="rect" placeholder="' +
+    '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '"' + (banner ? ' conform' : '') + ' fitcontrol shape="rect" placeholder="' +
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
     figCaps + '</figure><p><br/></p>';
