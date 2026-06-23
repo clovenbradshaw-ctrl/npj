@@ -13,9 +13,13 @@
        what makes the paste land formatted.
 
    NPJ's distinctive payload is the sourcing: every cited claim carries the
-   archived snapshot that backs it. We keep that auditable on export — each
-   claim gets a superscript number linked to its archive.org snapshot, and a
-   "Sources" section lists them all. Both are toggleable for a clean copy.
+   archived snapshot that backs it AND the exact pinned passage (token.q) — the
+   evidence. We keep that auditable on export as footnotes: each claim gets a
+   superscript number, and a "Sources" section lists every source with the
+   passage(s) it backs quoted in full. Every one of those links points at the
+   archive.org snapshot deep-linked to the cited words (a Text Fragment,
+   #:~:text=…), so the link opens the archived page showing precisely the
+   evidence — not the top of a long article. Both are toggleable for a clean copy.
 
    Images use the durable archive.org URL (a body img's `src`), never the
    auth-gated Matrix media-store copy (`store`) — Substack fetches the URL
@@ -46,6 +50,34 @@
       return window.NpjMedia.isPublishable(u) ? u : "";
     return /^https?:\/\//i.test(u) ? u : "";
   }
+
+  // ---- evidence deep-links (the "minisite, showing precisely the evidence") ----
+  // A source's snapshot is its archive.org page. To open it *on the cited words*
+  // rather than at the top, we append a Text Fragment (#:~:text=…): a browser
+  // scrolls to and highlights that passage in the archived page. Best-effort —
+  // an unmatched fragment is a harmless no-op (the snapshot just opens normally),
+  // so a single altered character in the archive never breaks the link.
+  function encFrag(s) {
+    // encodeURIComponent handles ',' and '&' (the directive separators); '-' is
+    // left untouched but marks a prefix/suffix in the grammar, so escape it too.
+    return encodeURIComponent(String(s == null ? "" : s)).replace(/-/g, "%2D");
+  }
+  function textFragment(quote) {
+    const q = String(quote || "").replace(/\s+/g, " ").trim();
+    if (!q) return "";
+    const w = q.split(" ");
+    // Long passages are anchored by their first/last words (textStart,textEnd) so
+    // the highlight survives small drifts in the middle; the slices never overlap.
+    if (w.length >= 11) return ":~:text=" + encFrag(w.slice(0, 6).join(" ")) + "," + encFrag(w.slice(-4).join(" "));
+    return ":~:text=" + encFrag(q.length > 300 ? w.slice(0, 12).join(" ") : q);
+  }
+  // The snapshot URL deep-linked to the cited passage. No quote (or no snapshot)
+  // → the bare snapshot URL, unchanged.
+  function evidenceUrl(src, quote) {
+    const base = srcUrl(src); if (!base) return "";
+    const frag = quote ? textFragment(quote) : "";
+    return frag ? base.replace(/#.*$/, "") + "#" + frag : base;
+  }
   function personName(id) {
     if (typeof window !== "undefined" && window.npjPerson) { try { return window.npjPerson(id).name; } catch (e) {} }
     return String(id || "").replace(/^@/, "").split(":")[0];
@@ -73,17 +105,28 @@
   // like the reader's ledger (useClaimModel) so the numbers match the page. ----
   function indexSources(body, sources) {
     const numByKey = new Map();
+    const quotesByKey = new Map();   // key → [{text, norm}] distinct pinned passages, in order
     let n = 0;
     const visit = (tok) => {
-      if (tok && tok.c != null && Array.isArray(tok.src))
-        tok.src.forEach(k => { if (k && !numByKey.has(k)) numByKey.set(k, ++n); });
+      if (!tok || tok.c == null || !Array.isArray(tok.src)) return;
+      tok.src.forEach(k => {
+        if (!k) return;
+        if (!numByKey.has(k)) numByKey.set(k, ++n);
+        const q = tok.q && tok.q[k];
+        const norm = String(q || "").replace(/\s+/g, " ").trim();
+        if (!norm) return;
+        const list = quotesByKey.get(k) || [];
+        if (!list.some(x => x.norm === norm)) list.push({ text: String(q).trim(), norm });
+        quotesByKey.set(k, list);
+      });
     };
     (body || []).forEach(b => {
       (b.tokens || []).forEach(visit);
       (b.items || []).forEach(it => (it || []).forEach(visit));
     });
     const ordered = [...numByKey.entries()].map(([key, num]) => ({
-      key, num, src: sources[key] || { id: key, title: key }
+      key, num, src: sources[key] || { id: key, title: key },
+      quotes: (quotesByKey.get(key) || []).map(x => x.text)   // the evidence this source backs
     }));
     return { numByKey, ordered };
   }
@@ -102,7 +145,7 @@
     if (!ctx.citations || !tok.src || !tok.src.length) return "";
     return tok.src.map(k => {
       const num = ctx.numByKey.get(k); if (!num) return "";
-      const url = srcUrl(ctx.sources[k]);
+      const url = evidenceUrl(ctx.sources[k], tok.q && tok.q[k]); // snapshot, on the cited words
       return url ? "[[" + num + "]](" + url + ")" : "[" + num + "]";
     }).join("");
   }
@@ -185,12 +228,15 @@
 
     if (opts.sourcesList !== false && ordered.length) {
       out.push("---", "", "## Sources", "");
-      ordered.forEach(({ num, src }) => {
-        const url = srcUrl(src);
+      ordered.forEach(({ num, src, quotes }) => {
+        const has = !!srcUrl(src);
         const label = [src.outlet, src.title].filter(Boolean).join(" — ") || src.id || ("Source " + num);
-        let line = num + ". " + (url ? "[" + label + "](" + url + ")" : label);
+        let line = num + ". " + (has ? "[" + label + "](" + evidenceUrl(src, quotes[0]) + ")" : label);
         if (src.retrieved) line += "  \n   _archived " + src.retrieved + "_";
         out.push(line);
+        // the evidence — the exact words in the source that back the claim, each
+        // linking to the snapshot opened on that passage
+        quotes.forEach(q => out.push("   - " + (has ? "[“" + q + "”](" + evidenceUrl(src, q) + ")" : "“" + q + "”")));
       });
       out.push("");
     }
@@ -205,7 +251,7 @@
     if (!ctx.citations || !tok.src || !tok.src.length) return "";
     const inner = tok.src.map(k => {
       const num = ctx.numByKey.get(k); if (!num) return "";
-      const url = srcUrl(ctx.sources[k]);
+      const url = evidenceUrl(ctx.sources[k], tok.q && tok.q[k]); // snapshot, on the cited words
       return url ? '<a href="' + esc(url) + '">' + num + "</a>" : String(num);
     }).filter(Boolean).join(",");
     return inner ? "<sup>" + inner + "</sup>" : "";
@@ -299,11 +345,16 @@
 
     if (opts.sourcesList !== false && ordered.length) {
       parts.push("<hr>", "<h2>Sources</h2>");
-      parts.push("<ol>" + ordered.map(({ src }) => {
-        const url = srcUrl(src);
+      parts.push("<ol>" + ordered.map(({ src, quotes }) => {
+        const has = !!srcUrl(src);
         const label = [src.outlet, src.title].filter(Boolean).join(" — ") || src.id;
-        const body = url ? '<a href="' + esc(url) + '">' + esc(label) + "</a>" : esc(label);
-        return "<li>" + body + (src.retrieved ? ' <em>(archived ' + esc(src.retrieved) + ")</em>" : "") + "</li>";
+        const head = has ? '<a href="' + esc(evidenceUrl(src, quotes[0])) + '">' + esc(label) + "</a>" : esc(label);
+        const arch = src.retrieved ? ' <em>(archived ' + esc(src.retrieved) + ")</em>" : "";
+        // the evidence: each cited passage, linking to the snapshot on those words
+        const ev = quotes.map(q => has
+          ? '<br>“<a href="' + esc(evidenceUrl(src, q)) + '">' + esc(q) + "</a>”"
+          : "<br>“" + esc(q) + "”").join("");
+        return "<li>" + head + arch + ev + "</li>";
       }).join("") + "</ol>");
     }
 
@@ -451,5 +502,5 @@
     return saveBlob(toHtmlDocument(article, opts), filename(article, "html"), "text/html;charset=utf-8");
   }
 
-  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, heroImage, copyForSubstack, download, downloadHtml };
+  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, heroImage, evidenceUrl, textFragment, copyForSubstack, download, downloadHtml };
 });

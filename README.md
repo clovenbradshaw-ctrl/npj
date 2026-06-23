@@ -326,12 +326,20 @@ travel as HTML, not as `#`/`*` characters. Two paths, both land formatted:
   shareable artifact; a `.md` download is offered too, but only as the
   plain-text archival record (pasted markdown stays literal in Substack).
 
-**The sourcing rides along.** NPJ's distinctive payload — every claim bound to
-an archived snapshot — survives the export: each sourced claim gets a
-superscript number linked to its archive.org snapshot, and a numbered
-**Sources** list closes the piece. Both are toggleable for a clean copy.
-**Title and subtitle** are handed over as their own one-click chips, because
-Substack fills those from its own fields — so the copied body omits them.
+**The sourcing rides along, as footnotes.** NPJ's distinctive payload — every
+claim bound to an archived snapshot *and the exact pinned passage that backs it*
+— survives the export. Each sourced claim gets a superscript footnote marker,
+and a **Sources** section closes the piece: every source, with the passage(s) it
+backs quoted in full. The catch that makes it auditable on someone else's
+platform: **every one of those links opens the archive.org snapshot deep-linked
+to the cited words** — a [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/Text_fragments)
+(`#:~:text=…`) the browser scrolls to and highlights — so a reader lands on
+*precisely the evidence*, not the top of a long archived article (long passages
+anchor by their first/last words, so the highlight survives small drifts; an
+unmatched fragment just opens the snapshot normally). Both footnote markers and
+the Sources list are toggleable for a clean copy. **Title and subtitle** are
+handed over as their own one-click chips, because Substack fills those from its
+own fields — so the copied body omits them.
 
 ## Citey reviews every source for PII before it's archived
 
