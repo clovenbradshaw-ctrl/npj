@@ -163,6 +163,32 @@ a { color: inherit; }
 }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ---- footnote inline preview (FootnotePop) — the Substack hover/tap card ----
+   The note floats up next to its marker so the reader never loses their place;
+   it's the same paper card as a citation, just lighter. */
+.fnpop {
+  position: fixed; z-index: 4000; width: 340px;
+  background: var(--card); border: 1.5px solid var(--ink);
+  box-shadow: 6px 6px 0 rgba(22,20,13,0.16);
+  font-family: var(--serif); animation: pop .12s ease;
+}
+.fnpop-h { display: flex; align-items: center; gap: 8px; padding: 9px 12px 0; }
+.fnpop-n {
+  min-width: 18px; height: 18px; padding: 0 4px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: var(--ink); background: var(--yellow); border: 1px solid var(--ink);
+}
+.fnpop-b { padding: 7px 14px 12px; font-size: 14.5px; line-height: 1.52; color: var(--ink); }
+.fnpop-b a { color: var(--data); text-underline-offset: 2px; }
+.fnpop-jump {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 0; border-top: 1.5px solid var(--ink); background: var(--card);
+  color: var(--ink-soft); padding: 8px 14px; letter-spacing: .04em;
+}
+.fnpop-jump:hover { background: var(--paper-2); color: var(--ink); }
+/* the marker: a hair of breathing room so the small number is easy to aim at */
+.fnmark { margin: 0 1px; }
+.fnmark a { cursor: pointer; }
+
 /* ---- status chips ---- */
 .chip {
   font-family: var(--cond);
@@ -432,6 +458,31 @@ a { color: inherit; }
 
 /* poetry / verse block — serif italic, line breaks preserved */
 .md-preview pre.verse { background: transparent; font-family: var(--serif); font-style: italic; font-size: 16.5px; line-height: 1.7; padding: 4px 0 4px 18px; border-left: 3px solid var(--yellow); white-space: pre-wrap; }
+
+/* Footnotes — the Substack-style notes list at the foot of the editor page.
+   The "Footnotes" label is a CSS ::before so it can't be typed over or deleted;
+   each note is one editable <li>, numbered natively by the <ol> (kept in marker
+   order by renumberFootnotes). The inline reference is a .md-cite[data-fn] sup. */
+.md-preview ol.nr-fnotes {
+  list-style: decimal inside;
+  margin: 32px 0 0; padding: 15px 0 2px;
+  border-top: 2px solid var(--nr-line-strong, rgba(255,255,255,.22));
+}
+.md-preview ol.nr-fnotes::before {
+  content: "Footnotes"; display: block;
+  font-family: var(--cond); text-transform: uppercase; letter-spacing: .08em;
+  font-size: 12px; font-weight: 700; color: var(--nr-muted, #8c8676); margin: 0 0 10px;
+}
+.md-preview li.nr-fnote {
+  font-family: var(--serif); font-size: 15px; line-height: 1.55;
+  margin: 0 0 7px; padding-left: 4px; color: var(--nr-soft, #b3ad9c);
+}
+.md-preview li.nr-fnote::marker { font-family: var(--mono); font-size: 12px; color: var(--nr-muted, #8c8676); }
+.md-preview li.nr-fnote:empty::before,
+.md-preview li.nr-fnote:has(> br:only-child)::before {
+  content: attr(data-ph); color: var(--nr-muted, #8c8676); pointer-events: none;
+}
+.newsroom.nr-light .md-preview ol.nr-fnotes { border-top-color: var(--rule, rgba(22,20,13,.18)); }
 
 /* composer widgets dropped into the newsroom editor */
 .md-preview .cmp-widget { border-color: var(--nr-line-strong, rgba(255,255,255,.3)); background: var(--nr-code-bg, rgba(255,255,255,.04)); margin: 0 0 13px; }

@@ -152,6 +152,49 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
   );
 }
 
+// The Substack footnote experience: hover a marker on the desktop (or tap it on a
+// phone) and the note pops up right there, so you read it without losing your
+// place. The note text still has its permanent home in the "Notes" endnotes —
+// this card is the inline preview, with a link down to it. Mirrors HoverCard's
+// positioning (anchored under the marker; a bottom sheet on a phone).
+function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
+  const isPhone = window.useIsMobile(760);
+  if (!data) return null;
+  const { num, text, x, y } = data;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const sheet = isPhone;
+  const w = sheet ? "100%" : Math.min(340, vw - 24);
+  const left = sheet ? 0 : Math.min(Math.max(12, x - 16), vw - (typeof w === "number" ? w : 340) - 12);
+  const top = y + 8;
+  const flip = !sheet && top > vh - 220;
+  const cardStyle = sheet
+    ? { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "60vh", overflowY: "auto",
+        borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" }
+    : { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  const inner = (
+    <div className="fnpop np-scroll" role="dialog" aria-label={"Footnote " + num} style={cardStyle}
+      onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <div className="fnpop-h">
+        <span className="np-mono fnpop-n">{num}</span>
+        <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>Note</span>
+        {sheet && <button onClick={onClose} aria-label="Close note" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px" }}><I.x /></button>}
+      </div>
+      <div className="fnpop-b">
+        {text ? (window.npjRichText ? window.npjRichText(text) : text) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
+      </div>
+      <button className="fnpop-jump np-mono" onClick={onJump}>See in Notes ↓</button>
+    </div>
+  );
+  if (!sheet) return inner;
+  return (
+    <React.Fragment>
+      <div onClick={onClose} aria-hidden="true" className="fade-in"
+        style={{ position: "fixed", inset: 0, zIndex: 3990, background: "rgba(8,7,5,.35)" }} />
+      {inner}
+    </React.Fragment>
+  );
+}
+
 // Two-source image: try the live Matrix media-store copy first, fall back to
 // the durable archive.org one (then any further candidates). Both URLs ride in
 // the img block — see freezeArticleMedia (app/media-store.js).
@@ -318,6 +361,14 @@ function ArticleRead(props) {
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
+  // footnotes, keyed for the inline hover/tap preview (the Substack feel)
+  const [fnPop, setFnPop] = useState(null);
+  const fnLeaveTimer = useRef(null);
+  const footnoteByKey = React.useMemo(() => {
+    const m = {};
+    (A.body || []).forEach(b => { if (b.type === "footnotes") (b.notes || []).forEach(n => { if (n && n.key) m[n.key] = n; }); });
+    return m;
+  }, [A.body]);
   // span feedback: a compose draft pinned to a span ({ quote, anchor, kind }),
   // and the floating select-to-suggest bubble ({ x, y, range, claimId })
   const [compose, setCompose] = useState(null);
@@ -359,6 +410,26 @@ function ArticleRead(props) {
     leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 160);
   }, []);
   const cancelLeave = useCallback(() => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
+
+  // footnote preview: hover (desktop) or tap (phone) a marker → the note floats
+  // up next to it; leaving hides it after a beat so a slide into the card keeps
+  // it open. A click still jumps down to the note's home in the endnotes.
+  const enterFn = useCallback((e, key) => {
+    const n = footnoteByKey[key]; if (!n) return;
+    if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
+    const r = e.currentTarget.getBoundingClientRect();
+    setFnPop({ key, num: n.num, text: n.text, x: r.left, y: r.bottom });
+  }, [footnoteByKey]);
+  const scheduleFnLeave = useCallback(() => {
+    if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
+    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 160);
+  }, []);
+  const cancelFnLeave = useCallback(() => { if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current); }, []);
+  const jumpToFn = useCallback((key) => {
+    setFnPop(null);
+    const el = document.getElementById("fn-" + key);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
 
   // every passage a given source backs (newest model: sourceList carries the
   // claim ids; claimById carries each span's text) — drives the click-to-jump
@@ -490,14 +561,17 @@ function ArticleRead(props) {
       if (t.t === "code") return <code key={i} className="np-mono" style={{ fontSize: "0.85em", background: "var(--paper-2)", padding: "0 4px" }}>{t.text}</code>;
       if (t.t === "a") return <a key={i} href={t.href} target="_blank" rel="noopener" style={{ color: "inherit", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{t.text}</a>;
       if (t.t === "sup") {
-        // a footnote marker: a small linked number that jumps to its note below
-        // (and the note links back). Older logs with no number fall back to text.
+        // a footnote marker: hover (desktop) or tap (phone) previews the note
+        // inline; a click jumps down to its home in the endnotes (and the note
+        // links back). Older logs with no number fall back to plain text.
         if (t.num != null) {
           const k = t.key || t.text || "";
           return (
-            <sup key={i} id={"fnref-" + k} style={{ fontSize: 11, lineHeight: 0 }}>
-              <a href={"#fn-" + k} aria-label={"Footnote " + t.num}
-                onClick={(e) => { e.preventDefault(); const el = document.getElementById("fn-" + k); if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }}
+            <sup key={i} id={"fnref-" + k} className="fnmark" style={{ fontSize: 11, lineHeight: 0 }}>
+              <a href={"#fn-" + k} aria-label={"Footnote " + t.num} aria-describedby={"fn-" + k}
+                onMouseEnter={isPhone ? undefined : (e) => enterFn(e, k)}
+                onMouseLeave={isPhone ? undefined : scheduleFnLeave}
+                onClick={(e) => { e.preventDefault(); if (isPhone) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
                 style={{ color: "var(--data)", textDecoration: "none", fontWeight: 600, fontFamily: "var(--mono)" }}>{t.num}</a>
             </sup>
           );
@@ -695,6 +769,8 @@ function ArticleRead(props) {
         <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
           onClose={() => { setHover(null); setActiveSrc(null); }}
           spansForSource={spansForSource} onJump={jumpToClaim} preview />
+        <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
+          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
       </div>
     );
   }
@@ -731,6 +807,9 @@ function ArticleRead(props) {
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
         onClose={() => { setHover(null); setActiveSrc(null); }}
         suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} />
+
+      <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
+        onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
 
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
         entityData={entityData} active={activeEntity} setActive={setActiveEntity} />

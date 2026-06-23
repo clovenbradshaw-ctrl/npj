@@ -623,6 +623,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       e.preventDefault();
       document.execCommand("insertText", false, "\n");
       scheduleSave();
+    } else if (host && host.closest && host.closest("li.nr-fnote")) {
+      // a footnote note is a single item — Enter adds a line break in place, never
+      // splits the list (which would strand a numberless, keyless <li>).
+      e.preventDefault();
+      document.execCommand("insertLineBreak");
+      scheduleSave();
     }
   };
 
@@ -707,13 +713,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
-  // a numbered footnote: marker in the text, a markdown-ready definition at the end
+  // A footnote, Substack-style: drop a numbered marker at the caret and open a
+  // real, editable note for it in the "Footnotes" list at the foot of the page —
+  // no raw "[^fn1]:" syntax in the prose. The marker carries a stable, unique
+  // key on data-cite; the printed number and the note's home are kept in step by
+  // renumberFootnotes (below), so adding, moving or deleting a marker renumbers
+  // everything live, exactly like Substack.
   const insertFootnote = () => {
-    const n = (ed.current ? ed.current.querySelectorAll("sup[data-fn]").length : 0) + 1;
-    // marker shows the number; its stable key (fn{n}) rides on data-cite and pairs
-    // with the "[^fn{n}]:" definition appended at the foot of the document.
-    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="fn${n}" contenteditable="false" title="footnote ${n}">${n}</sup>&nbsp;`);
-    if (ed.current) { const p = document.createElement("p"); p.textContent = `[^fn${n}]: Write the note here…`; ed.current.appendChild(p); }
+    const key = "fn" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+    // the bullet is a placeholder glyph; renumberFootnotes overwrites it with the number
+    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="${key}" contenteditable="false" title="footnote">•</sup>&nbsp;`);
+    renumberFootnotes();
+    // focus the freshly-opened note so the author types it straight away
+    const root = ed.current;
+    const li = root && root.querySelector('li.nr-fnote[data-fn-key="' + key + '"]');
+    if (li) {
+      li.scrollIntoView({ block: "center", behavior: "smooth" });
+      try {
+        const r = document.createRange(); r.selectNodeContents(li); r.collapse(true);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      } catch (e) {}
+    }
     setFmtMenu(null); scheduleSave();
   };
   const insertVerse = () => { insertHTML(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
@@ -777,6 +797,57 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const prev = citeOrderRef.current;
     if (order.length !== prev.length || order.some((k, i) => k !== prev[i])) {
       citeOrderRef.current = order; setCiteOrder(order);
+    }
+  };
+  // Keep footnotes in step with their markers — the Substack model. The markers
+  // in the prose are the source of truth: we number them by first appearance,
+  // keep exactly one editable note per referenced key in the "Footnotes" list at
+  // the foot of the page, create a note for any new marker, and DROP the note of
+  // a marker that's been deleted. Runs on every input (cheap, idempotent); the
+  // publish pass reads keys + note text, never the printed number.
+  const renumberFootnotes = () => {
+    const root = ed.current; if (!root) return;
+    const markers = Array.from(root.querySelectorAll('sup.md-cite[data-fn][data-cite]'));
+    // keys in first-reference order (a key reused by two markers shares its number)
+    const order = [];
+    markers.forEach(s => { const k = (s.getAttribute('data-cite') || '').trim(); if (k && order.indexOf(k) < 0) order.push(k); });
+    markers.forEach(s => {
+      const n = order.indexOf((s.getAttribute('data-cite') || '').trim()) + 1;
+      if (n > 0 && s.textContent !== String(n)) s.textContent = String(n);
+    });
+    let list = root.querySelector('ol.nr-fnotes');
+    if (!order.length) { if (list) list.remove(); return; }   // last footnote gone → no list
+    if (!list) {
+      list = document.createElement('ol');
+      list.className = 'nr-fnotes'; list.setAttribute('data-fnotes', '1');
+      root.appendChild(list);
+    }
+    // index the notes we already have; DROP orphans (marker deleted) and dupes,
+    // but FOLD any stray fragment (e.g. a list-split that slipped through) back
+    // into the note above it, so an edit never loses a note's words.
+    const have = {}; let lastValid = null;
+    Array.from(list.childNodes).forEach(node => {
+      const isNote = node.nodeType === 1 && node.classList && node.classList.contains('nr-fnote');
+      const k = isNote ? (node.getAttribute('data-fn-key') || '').trim() : '';
+      if (k && order.indexOf(k) >= 0 && !have[k]) { have[k] = node; lastValid = node; return; }
+      if (!k) { const t = (node.textContent || '').trim(); if (t && lastValid) lastValid.append((lastValid.textContent ? ' ' : '') + t); }
+      if (node.remove) node.remove(); else if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    // Reorder/create ONLY when the note order is actually out of step with the
+    // markers. Typing inside a note fires input but doesn't change the order, so
+    // we must not re-append its <li> then — moving the node would drop the caret.
+    const cur = Array.from(list.querySelectorAll(':scope > li.nr-fnote')).map(li => (li.getAttribute('data-fn-key') || '').trim());
+    const inSync = order.every(k => have[k]) && cur.length === order.length && order.every((k, i) => k === cur[i]);
+    if (!inSync) {
+      order.forEach(k => {
+        let li = have[k];
+        if (!li) {
+          li = document.createElement('li');
+          li.className = 'nr-fnote'; li.setAttribute('data-fn-key', k);
+          li.setAttribute('data-ph', 'Write the note…');
+        }
+        list.appendChild(li);   // appendChild moves an existing <li> into marker order
+      });
     }
   };
   // the span to bind: the live in-editor selection if there is one, else the
@@ -1515,7 +1586,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); scheduleSave(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
@@ -2203,10 +2274,16 @@ function htmlToMarkdown(html) {
   const lines = [];
   const footnotes = {};
   root.querySelectorAll("sup.md-cite").forEach(sup => {
-    if (sup.hasAttribute("data-fn")) return; // manual footnote — its definition is typed in the doc
+    if (sup.hasAttribute("data-fn")) return; // manual footnote — its note lives in the footnotes list
     const key = sup.getAttribute("data-cite"); if (!key) return;
     const rec = window.NPJ.SOURCES[key] || {};
     footnotes[key] = rec.archive_url || rec.original_url || rec.title || key;
+  });
+  // manual footnotes: their notes live in the structured "Footnotes" list, not
+  // in the prose — read each note straight off its <li data-fn-key>.
+  root.querySelectorAll("ol.nr-fnotes > li.nr-fnote[data-fn-key]").forEach(li => {
+    const key = (li.getAttribute("data-fn-key") || "").trim(); if (!key) return;
+    footnotes[key] = inline(li).trim();
   });
   Array.from(root.childNodes).forEach(node => {
     if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) lines.push(t, ""); return; }
@@ -2216,6 +2293,7 @@ function htmlToMarkdown(html) {
     else if (tag === "h2") lines.push("## " + inline(node).trim(), "");
     else if (tag === "h3") lines.push("### " + inline(node).trim(), "");
     else if (tag === "blockquote") lines.push("> " + inline(node).trim().replace(/\n/g, "\n> "), "");
+    else if (tag === "ol" && node.classList.contains("nr-fnotes")) { /* the footnotes list — emitted as [^key]: defs below, not as a numbered list */ }
     else if (tag === "ul") { node.querySelectorAll(":scope > li").forEach(li => lines.push("- " + inline(li).trim())); lines.push(""); }
     else if (tag === "ol") { Array.from(node.querySelectorAll(":scope > li")).forEach((li, i) => lines.push((i + 1) + ". " + inline(li).trim())); lines.push(""); }
     else if (tag === "hr") lines.push("---", "");
