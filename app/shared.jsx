@@ -78,7 +78,8 @@ const I = {
 const SRC_TYPE = {
   primary:   { label: "Primary",   icon: I.doc,  color: "var(--ink)" },
   data:      { label: "Data",      icon: I.data, color: "var(--data)" },
-  reporting: { label: "Reporting", icon: I.mic,  color: "var(--review)" }
+  reporting: { label: "Reporting", icon: I.mic,  color: "var(--review)" },
+  interview: { label: "Interview", icon: I.chat, color: "var(--review)" }
 };
 
 /* ---------- plain-text paste ----------
@@ -270,14 +271,26 @@ function SourceCard({ srcKey, onClose, pinned, quote }) {
   // the pinned source-span for THIS claim wins over the source's generic pull
   // quote — it's the exact words in the source that back the passage you hovered
   const cited = (quote && String(quote).trim()) || "";
+  // an interview/conversation has no snapshot to link — it attributes to a
+  // person (named or anonymous), so its card shows the terms, not archive links
+  const NI = window.NpjInterview;
+  const iv = !!(NI && NI.isInterview(s));
+  const talk = s.talk || {};
+  const archived = !!s.archive_url;
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
         padding: "8px 12px", borderBottom: "1.5px solid var(--ink)", background: "var(--paper-2)" }}>
         <SourceTag type={s.type} />
-        <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)", display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <I.archive style={{ fontSize: 13 }} /> ARCHIVED
-        </span>
+        {iv ? (
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--review)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <I.chat style={{ fontSize: 13 }} /> {(talk.anonymous ? "ANONYMOUS · " : "") + (NI.attributionLabel(talk.attribution) || "").toUpperCase()}
+          </span>
+        ) : (
+          <span className="np-mono" style={{ fontSize: 10.5, color: archived ? "var(--verified)" : "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <I.archive style={{ fontSize: 13 }} /> {archived ? "ARCHIVED" : "SNAPSHOT PENDING"}
+          </span>
+        )}
         {pinned && onClose && (
           <button onClick={onClose} className="np-mono" style={{ border: 0, background: "none", fontSize: 14, lineHeight: 1, color: "var(--ink-soft)" }}><I.x /></button>
         )}
@@ -298,16 +311,31 @@ function SourceCard({ srcKey, onClose, pinned, quote }) {
         )}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11,
           fontFamily: "var(--mono)", color: "var(--ink-soft)", borderTop: "1px solid var(--rule)", paddingTop: 8 }}>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.clock style={{ fontSize: 12 }} /> retrieved {s.retrieved}</span>
+          {iv
+            ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.chat style={{ fontSize: 12 }} /> {NI.metaLine(s)}</span>
+            : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.clock style={{ fontSize: 12 }} /> retrieved {s.retrieved}</span>}
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
-          <a href={s.archive_url} target="_blank" rel="noopener" className="btn btn-primary btn-sm" style={{ flex: 1, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
-            <I.archive style={{ fontSize: 13 }} /> Snapshot
-          </a>
-          <a href={s.original_url} target="_blank" rel="noopener" className="btn btn-ghost btn-sm" style={{ textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <I.ext style={{ fontSize: 13 }} /> Live
-          </a>
-        </div>
+        {iv ? (
+          (talk.reason || talk.reporter) && (
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 9, lineHeight: 1.5 }}>
+              {talk.reason ? <div>Granted anonymity: {talk.reason}</div> : null}
+              {talk.reporter ? <div>Spoke with {talk.reporter}</div> : null}
+            </div>
+          )
+        ) : (archived || s.original_url) ? (
+          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+            {archived && (
+              <a href={s.archive_url} target="_blank" rel="noopener" className="btn btn-primary btn-sm" style={{ flex: 1, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                <I.archive style={{ fontSize: 13 }} /> Snapshot
+              </a>
+            )}
+            {s.original_url && (
+              <a href={s.original_url} target="_blank" rel="noopener" className="btn btn-ghost btn-sm" style={{ textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <I.ext style={{ fontSize: 13 }} /> Live
+              </a>
+            )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
