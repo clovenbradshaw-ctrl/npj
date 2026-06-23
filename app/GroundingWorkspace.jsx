@@ -401,7 +401,10 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const pickSource = (key) => { setSelSrc(key); setArmIdx(0); setPending(null); setSrcQuery(""); setSrcFindIdx(0); };
 
   // ---- source library housekeeping: rename + delete ----
-  const startRename = (key, cur) => { setRenameKey(key); setRenameText(cur || ""); };
+  // Renaming a source also opens it in the reader below — you can SEE the document
+  // (its words, the screenshot/PDF) while you give it a real name, instead of
+  // renaming a row blind.
+  const startRename = (key, cur) => { pickSource(key); setRenameKey(key); setRenameText(cur || ""); };
   const cancelRename = () => { setRenameKey(null); setRenameText(""); };
   const commitRename = (key) => {
     const t = renameText.trim();
@@ -854,7 +857,70 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
 
   // ============ main stage · GROUNDING (the table) ============
   const shown = needsOnly ? enriched.filter(e => e.st.key === "needs" || e.st.key === "conflict") : enriched;
-  const groundingMain = (
+  const groundingMain = (() => {
+    const cols = [
+      { key: "status", label: "Status", width: 132, cell: ({ st }) => <Pill st={st} /> },
+      { key: "sentence", label: "Sentence", grow: true, cell: ({ row }) => (
+        <React.Fragment>
+          <button onClick={() => { setSelSid(row.sid); api.jumpTo(row); }} title="Open this sentence in the editor"
+            style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{row.text}</button>
+          <div style={{ marginTop: 5 }}><HashChip row={row} NR={NR} /></div>
+        </React.Fragment>
+      ) },
+      { key: "citations", label: "Citations", width: "30%", cell: ({ row, st, conf, cites }) => (
+        <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+          {st.key === "owned" && st.stance === "context"
+            ? <ContextStrip row={row} compact />
+            : st.key === "owned"
+              ? <React.Fragment>
+                  <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>no source needed</span>
+                  <ContextStrip row={row} compact addable={false} label={false} />
+                </React.Fragment>
+              : (
+                <React.Fragment>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                    {cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
+                    <button onClick={() => openCite(row.sid)} title="Find the words in a source that back this sentence"
+                      style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px dashed " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5 }}>+ Cite</button>
+                  </div>
+                  <ContextStrip row={row} compact addable={false} label={false} />
+                </React.Fragment>
+              )}
+        </div>
+      ) },
+      { key: "stance", label: "Stance", width: 168, cell: ({ row, st, conf }) => (
+        <React.Fragment>
+          {(st.key === "grounded" || st.key === "multi") && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>sourced fact</span>}
+          {conf && <span className="np-mono" style={{ fontSize: 10, color: "#b3261e", lineHeight: 1.4 }}>unlink the quote you trust less</span>}
+          {(st.key === "needs" || st.key === "owned") && (
+            <select value={st.stance || ""} onChange={e => setStance(row, st, e.target.value)}
+              style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, borderRadius: 6, padding: "5px 7px", fontFamily: "var(--cond)", fontSize: 13 }}>
+              <option value="">{st.key === "owned" ? "— clear stance —" : "Own as…"}</option>
+              {STANCE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          )}
+        </React.Fragment>
+      ) },
+    ];
+    const rows = shown.map(({ row, st }) => {
+      const cites = rowCites(row);
+      const onWalk = walk && walk.cur === row.sid;
+      const sel = selSid === row.sid;
+      const hi = highlightCid && cites.some(x => x.c.id === highlightCid);
+      const conf = st.key === "conflict";
+      return {
+        key: row.sid,
+        attrs: { "data-sid": row.sid },
+        data: { row, st, conf, cites },
+        style: {
+          background: onWalk ? "rgba(124,116,222,.12)" : st.key === "needs" ? "rgba(216,99,46,.05)" : conf ? "rgba(216,65,44,.05)" : undefined,
+          outline: onWalk ? "2px solid #7C74DE" : hi ? "2px solid var(--yellow)" : sel ? "1.5px solid rgba(124,116,222,.45)" : "none",
+          outlineOffset: -2,
+          animation: flashSid === row.sid ? "rowflash 1.6s ease-out" : "none",
+        },
+      };
+    });
+    return (
     <section>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 14, color: NR.text }}>
@@ -871,64 +937,11 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <window.I.shield style={{ fontSize: 12 }} /> Export for fact-check
         </button>
       </div>
-      <div style={{ border: "1px solid " + NR.line, borderRadius: 10, overflow: "hidden", background: NR.field }}>
-        <div style={{ display: "grid", gridTemplateColumns: "140px minmax(200px,1.6fr) minmax(180px,1fr) 168px", padding: "10px 14px", gap: 12 }}>
-          {["Status", "Sentence", "Citations", "Stance"].map(h => <div key={h} style={eyebrow}>{h}</div>)}
-        </div>
-        {shown.length === 0 && (
-          <div className="np-mono" style={{ padding: "12px 14px", borderTop: "1px solid " + NR.line, color: NR.muted, fontSize: 12 }}>
+      {shown.length === 0
+        ? <div className="np-mono" style={{ padding: "12px 14px", border: "1px solid " + NR.line, borderRadius: 8, background: NR.field, color: NR.muted, fontSize: 12 }}>
             {needsOnly ? "Nothing blocks publish — every sentence is sourced or owned." : "Write a few sentences in Prose and they'll show here as rows to ground."}
           </div>
-        )}
-        {shown.map(({ row, st }) => {
-          const cites = rowCites(row);
-          const onWalk = walk && walk.cur === row.sid;
-          const sel = selSid === row.sid;
-          const hi = highlightCid && cites.some(x => x.c.id === highlightCid);
-          const conf = st.key === "conflict";
-          return (
-            <div key={row.sid} data-sid={row.sid}
-              style={{ display: "grid", gridTemplateColumns: "140px minmax(200px,1.6fr) minmax(180px,1fr) 168px", gap: 12, padding: "12px 14px", borderTop: "1px solid " + NR.line, background: onWalk ? "rgba(124,116,222,.12)" : st.key === "needs" ? "rgba(216,99,46,.05)" : conf ? "rgba(216,65,44,.05)" : "transparent", outline: onWalk ? "2px solid #7C74DE" : hi ? "2px solid var(--yellow)" : sel ? "1.5px solid rgba(124,116,222,.45)" : "none", outlineOffset: -2, animation: flashSid === row.sid ? "rowflash 1.6s ease-out" : "none" }}>
-              <div><Pill st={st} /></div>
-              <div>
-                <button onClick={() => { setSelSid(row.sid); api.jumpTo(row); }} title="Open this sentence in the editor"
-                  style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{row.text}</button>
-                <div style={{ marginTop: 5 }}><HashChip row={row} NR={NR} /></div>
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {st.key === "owned" && st.stance === "context"
-                  ? <ContextStrip row={row} compact />
-                  : st.key === "owned"
-                    ? <React.Fragment>
-                        <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>no source needed</span>
-                        <ContextStrip row={row} compact addable={false} label={false} />
-                      </React.Fragment>
-                    : (
-                      <React.Fragment>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                          {cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
-                          <button onClick={() => openCite(row.sid)} title="Find the words in a source that back this sentence"
-                            style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px dashed " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5 }}>+ Cite</button>
-                        </div>
-                        <ContextStrip row={row} compact addable={false} label={false} />
-                      </React.Fragment>
-                    )}
-              </div>
-              <div>
-                {(st.key === "grounded" || st.key === "multi") && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>sourced fact</span>}
-                {conf && <span className="np-mono" style={{ fontSize: 10, color: "#b3261e", lineHeight: 1.4 }}>unlink the quote you trust less</span>}
-                {(st.key === "needs" || st.key === "owned") && (
-                  <select value={st.stance || ""} onChange={e => setStance(row, st, e.target.value)}
-                    style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, borderRadius: 6, padding: "5px 7px", fontFamily: "var(--cond)", fontSize: 13 }}>
-                    <option value="">{st.key === "owned" ? "— clear stance —" : "Own as…"}</option>
-                    {STANCE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+        : <DataTable cols={cols} rows={rows} isMobile={isMobile} NR={NR} />}
       <div style={{ margin: "12px 2px 20px", fontFamily: "var(--serif)", fontSize: 12.5, color: NR.muted, lineHeight: 1.7 }}>
         <div style={{ fontWeight: 700, color: NR.text, marginBottom: 2 }}>What the labels mean</div>
         <span style={{ color: "#1f8a55", fontWeight: 700 }}>⊤ Grounded</span> — a pinned quote in an archived source backs the claim &nbsp;·&nbsp;
@@ -939,7 +952,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <span style={{ color: "#b3261e", fontWeight: 700 }}>¬ Sources disagree</span> — two pinned quotes conflict; unlink one
       </div>
     </section>
-  );
+    );
+  })();
 
   // ============ main stage · CITATIONS (the registry) ============
   const registryGroups = (() => {
@@ -984,115 +998,133 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     </div>
   ));
   const attachTarget = selRow && (selRow.st.key === "needs" || selRow.st.key === "conflict") ? selRow : null;
-  const citationsMain = (
-    <section>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
-        <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17, color: NR.text }}>Citation registry</span>
-        <span className="np-mono" style={{ fontSize: 11, color: NR.muted }}>{allC.length + " record" + (allC.length === 1 ? "" : "s")}</span>
-      </div>
-      <p style={{ fontFamily: "var(--serif)", fontSize: 13, color: NR.soft, lineHeight: 1.55, margin: "0 0 14px", maxWidth: 640 }}>
-        A citation is a pinned span of a source — exact words plus character offsets. One record can back many sentences; unlinking a sentence never destroys the record.
-      </p>
-      {attachTarget && candidatesFor(attachTarget.row, attachTarget.st, 5).length > 0 && (
-        <div style={{ border: "1.5px solid rgba(124,116,222,.55)", borderRadius: 8, padding: "10px 12px", marginBottom: 16, background: "rgba(124,116,222,.06)" }}>
-          <div className="np-eyebrow" style={{ color: "#6b5bd6", marginBottom: 7 }}>{"Best matches for the selected sentence — “" + clip(attachTarget.row.text, 54) + "”"}</div>
-          <AttachCands row={attachTarget.row} st={attachTarget.st} max={5} />
+  const citationsMain = (() => {
+    const cols = [
+      { key: "quote", label: "Quote", grow: true, cell: ({ c }) => {
+        const charsMeta = (c.spans && c.spans.length > 1)
+          ? c.spans.length + " parts · chars " + c.spans.map(s => s.loc.start + "–" + s.loc.end).join(" + ")
+          : (c.loc ? "chars " + c.loc.start + "–" + c.loc.end : "");
+        return (
+          <React.Fragment>
+            <button onClick={() => setSelCid(x => x === c.id ? null : c.id)} title="Select this record"
+              style={{ textAlign: "left", width: "100%", border: 0, background: "none", color: NR.text, cursor: "pointer", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: 0 }}>
+              {"“" + clip(c.quote, 140) + "”"}
+            </button>
+            {charsMeta && <div className="np-mono" style={{ fontSize: 8.5, color: NR.muted, marginTop: 3, letterSpacing: ".03em" }}>{charsMeta.toUpperCase()}</div>}
+          </React.Fragment>
+        );
+      } },
+      { key: "source", label: "Source", width: "24%", cell: ({ kind, title }) => (
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 8, letterSpacing: ".08em", background: NR.text, color: NR.bg, padding: "1px 5px", flexShrink: 0 }}>{kind}</span>
+          <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 12.5, color: NR.text, lineHeight: 1.2 }}>{clip(title, 40)}</span>
+        </span>
+      ) },
+      { key: "used", label: "Used", align: "center", width: 78, cell: ({ c }) => {
+        const u = api.usageCount(c.id);
+        return <span className="np-mono" style={{ fontSize: 9.5, color: u ? NR.text : NR.muted, whiteSpace: "nowrap" }}>{u ? "USED ×" + u : "UNUSED"}</span>;
+      } },
+      { key: "actions", label: "", align: "right", width: 1, cell: ({ c }) => {
+        const u = api.usageCount(c.id);
+        return (
+          <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+            {c.srcKey && <button onClick={() => { setSelCid(c.id); pickSource(c.srcKey); pivot("sources"); }} title="See this quote in its source" style={chipBtn({ fontSize: 11, padding: "2px 8px" })}>In context</button>}
+            <button onClick={() => { setSelCid(c.id); setHighlightCid(x => x === c.id ? null : c.id); pivot("grounding"); }} title="Highlight every sentence this record backs" style={chipBtn({ fontSize: 11, padding: "2px 8px" })}>{"Usage ×" + u}</button>
+          </span>
+        );
+      } },
+    ];
+    const rows = [];
+    registryGroups.forEach(grp => grp.items.forEach(c => rows.push({
+      key: c.id,
+      active: selCid === c.id,
+      data: { c, kind: grp.kind, title: grp.title },
+      style: highlightCid === c.id ? { outline: "2px solid rgba(124,116,222,.6)", outlineOffset: -2 } : null,
+    })));
+    return (
+      <section>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 6 }}>
+          <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17, color: NR.text }}>Citation registry</span>
+          <span className="np-mono" style={{ fontSize: 11, color: NR.muted }}>{allC.length + " record" + (allC.length === 1 ? "" : "s")}</span>
         </div>
-      )}
-      {allC.length === 0 && <div className="np-mono" style={{ fontSize: 11, color: NR.muted, lineHeight: 1.6 }}>No records yet — open a sentence's “+ Cite”, go into a source and grab the words that back it. The pinned span lands here, reusable.</div>}
-      {registryList(false)}
-    </section>
-  );
+        <p style={{ fontFamily: "var(--serif)", fontSize: 13, color: NR.soft, lineHeight: 1.55, margin: "0 0 14px", maxWidth: 640 }}>
+          A citation is a pinned span of a source — exact words plus character offsets. One record can back many sentences; unlinking a sentence never destroys the record.
+        </p>
+        {attachTarget && candidatesFor(attachTarget.row, attachTarget.st, 5).length > 0 && (
+          <div style={{ border: "1.5px solid rgba(124,116,222,.55)", borderRadius: 8, padding: "10px 12px", marginBottom: 16, background: "rgba(124,116,222,.06)" }}>
+            <div className="np-eyebrow" style={{ color: "#6b5bd6", marginBottom: 7 }}>{"Best matches for the selected sentence — “" + clip(attachTarget.row.text, 54) + "”"}</div>
+            <AttachCands row={attachTarget.row} st={attachTarget.st} max={5} />
+          </div>
+        )}
+        {allC.length === 0
+          ? <div className="np-mono" style={{ fontSize: 11, color: NR.muted, lineHeight: 1.6 }}>No records yet — open a sentence's “+ Cite”, go into a source and grab the words that back it. The pinned span lands here, reusable.</div>
+          : <DataTable cols={cols} rows={rows} isMobile={isMobile} NR={NR} />}
+      </section>
+    );
+  })();
 
   // ============ main stage · SOURCES (the library TABLE + the reader) ============
   // The library is a table: every source a row — where it's from, our best guess
   // at its title, how many citations rest on it, whether it's archived, and the
   // housekeeping (guess the name / rename / delete). Pick a row to read + cite it.
-  const th = { textAlign: "left", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".09em", textTransform: "uppercase", color: NR.muted, fontWeight: 600, padding: "0 10px 7px", whiteSpace: "nowrap" };
-  const td = { padding: "8px 10px", borderTop: "1px solid " + NR.line, verticalAlign: "middle", color: NR.text };
   const rowBtn = (extra) => Object.assign({ border: "1px solid " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 11.5, padding: "3px 8px", whiteSpace: "nowrap" }, extra || {});
-  const sourcesMain = (
-    <section style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div>
-        <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 2 }}>Source library · {srcList.length}</div>
-        <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginBottom: 9 }}>In the order they appear in the draft · titles + outlets are our best guess — rename any that's off</div>
-        {srcList.length === 0
-          ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view) and it shows here to read and cite.</div>
-          : (
-            <div style={{ overflowX: "auto", border: "1px solid " + NR.line, borderRadius: 8, background: NR.field }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--cond)" }}>
-                <thead>
-                  <tr style={{ background: NR.bg }}>
-                    <th style={Object.assign({}, th, { paddingTop: 8 })}>Where from</th>
-                    <th style={Object.assign({}, th, { paddingTop: 8, width: "100%" })}>Source</th>
-                    <th style={Object.assign({}, th, { paddingTop: 8, textAlign: "center" })}>Cites</th>
-                    <th style={Object.assign({}, th, { paddingTop: 8 })}>Status</th>
-                    <th style={Object.assign({}, th, { paddingTop: 8, textAlign: "right" })}>·</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {srcList.map(({ key, rec }) => {
-                    const nC = allC.filter(c => c.srcKey === key).length;
-                    const active = selSrc === key;
-                    const isRenaming = renameKey === key;
-                    const isWeb = !!rec.original_url;
-                    if (isRenaming) return (
-                      <tr key={key} style={{ background: "rgba(255,236,1,.06)" }}>
-                        <td style={td} colSpan={5}>
-                          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                            <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
-                              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(key); } else if (e.key === "Escape") { e.preventDefault(); cancelRename(); } }}
-                              placeholder="Source title" className="np-cond"
-                              style={{ flex: 1, boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13, padding: "6px 8px", outline: "none" }} />
-                            <button onClick={() => commitRename(key)} style={chipBtn({ background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save</button>
-                            <button onClick={cancelRename} style={chipBtn({})}>Cancel</button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                    return (
-                      <tr key={key} style={{ background: active ? "rgba(255,236,1,.07)" : "transparent" }}>
-                        <td style={Object.assign({}, td, { borderLeft: "3px solid " + (active ? "var(--yellow)" : "transparent") })}>
-                          <span style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".05em", color: NR.muted, whiteSpace: "nowrap" }}>{clip(kindOf(rec), 22)}</span>
-                        </td>
-                        <td style={td}>
-                          <button onClick={() => pickSource(key)} title="Open this source to read and cite"
-                            style={{ textAlign: "left", border: 0, background: "none", color: NR.text, cursor: "pointer", padding: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, lineHeight: 1.25, textDecoration: active ? "underline" : "none", textUnderlineOffset: 3 }}>
-                            {rec.title || key}
-                          </button>
-                        </td>
-                        <td style={Object.assign({}, td, { textAlign: "center" })}>
-                          <span className="np-mono" style={{ fontSize: 11, color: nC ? NR.text : NR.muted }}>{nC}</span>
-                        </td>
-                        <td style={td}>
-                          <span className="np-mono" style={{ fontSize: 9, letterSpacing: ".04em", color: rec.archive_url ? NR.soft : "#c2724a", whiteSpace: "nowrap" }}>{rec.archive_url ? "ARCHIVED" : "NOT ARCHIVED"}</span>
-                        </td>
-                        <td style={Object.assign({}, td, { textAlign: "right" })}>
-                          <span style={{ display: "inline-flex", gap: 5, justifyContent: "flex-end" }}>
-                            {isWeb && <button onClick={() => guessTitle(key)} title="Guess the title & outlet from the page" style={rowBtn({})}>⟲ Guess</button>}
-                            <button onClick={() => startRename(key, rec.title || key)} title="Rename this source" style={rowBtn({})}>✎ Rename</button>
-                            <button onClick={() => deleteSource(key)} title="Delete this source from the draft" style={rowBtn({ color: "#c2724a" })}>✕</button>
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-      </div>
-      {srcList.length > 0 && selSrc && (
-        <div>
-          {searchRow()}
-          {readerBody(srcRefMain, false)}
-          <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 8 }}>
-            {allC.filter(c => c.srcKey === selSrc).length + " citation record" + (allC.filter(c => c.srcKey === selSrc).length === 1 ? "" : "s") + " minted from this source · highlighted spans are cited support · click one to select it"}
-          </div>
+  const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+  const sourcesMain = (() => {
+    const cols = [
+      { key: "where", label: "Where from", cell: ({ rec }) => <span style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".05em", color: NR.muted, whiteSpace: "nowrap" }}>{clip(kindOf(rec), 22)}</span> },
+      { key: "source", label: "Source", grow: true, cell: ({ key, rec, active }) => (
+        <span title="Click the row to open this source — read it and cite it"
+          style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, lineHeight: 1.25, color: NR.text, textDecoration: active ? "underline" : "none", textUnderlineOffset: 3 }}>{rec.title || key}</span>
+      ) },
+      { key: "cites", label: "Cites", align: "center", width: 56, cell: ({ nC }) => <span className="np-mono" style={{ fontSize: 11, color: nC ? NR.text : NR.muted }}>{nC}</span> },
+      { key: "status", label: "Status", cell: ({ rec }) => <span className="np-mono" style={{ fontSize: 9, letterSpacing: ".04em", color: rec.archive_url ? NR.soft : "#c2724a", whiteSpace: "nowrap" }}>{rec.archive_url ? "ARCHIVED" : "NOT ARCHIVED"}</span> },
+      { key: "actions", label: "", align: "right", width: 1, cell: ({ key, rec, isWeb }) => (
+        <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {isWeb && <button onClick={stop(() => guessTitle(key))} title="Guess the title & outlet from the page" style={rowBtn({})}>⟲ Guess</button>}
+          <button onClick={stop(() => startRename(key, rec.title || key))} title="Open this source and rename it" style={rowBtn({})}>✎ Rename</button>
+          <button onClick={stop(() => deleteSource(key))} title="Delete this source from the draft" style={rowBtn({ color: "#c2724a" })}>✕</button>
+        </span>
+      ) },
+    ];
+    const rows = srcList.map(({ key, rec }) => {
+      const active = selSrc === key;
+      if (renameKey === key) return { key, custom: () => (
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(key); } else if (e.key === "Escape") { e.preventDefault(); cancelRename(); } }}
+            placeholder="Source title" className="np-cond"
+            style={{ flex: 1, minWidth: 160, boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13, padding: "6px 8px", outline: "none" }} />
+          <button onClick={() => commitRename(key)} style={chipBtn({ background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save</button>
+          <button onClick={cancelRename} style={chipBtn({})}>Cancel</button>
         </div>
-      )}
-    </section>
-  );
+      ) };
+      return {
+        key, active,
+        onClick: () => pickSource(key),
+        data: { key, rec, active, isWeb: !!rec.original_url, nC: allC.filter(c => c.srcKey === key).length },
+      };
+    });
+    return (
+      <section style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div>
+          <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 2 }}>Source library · {srcList.length}</div>
+          <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.5, marginBottom: 9 }}>In the order they appear in the draft · click a row to open it below · titles + outlets are our best guess — rename any that's off</div>
+          {srcList.length === 0
+            ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view) and it shows here to read and cite.</div>
+            : <DataTable cols={cols} rows={rows} isMobile={isMobile} NR={NR} />}
+        </div>
+        {srcList.length > 0 && selSrc && (
+          <div>
+            {searchRow()}
+            {readerBody(srcRefMain, false)}
+            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 8 }}>
+              {allC.filter(c => c.srcKey === selSrc).length + " citation record" + (allC.filter(c => c.srcKey === selSrc).length === 1 ? "" : "s") + " minted from this source · highlighted spans are cited support · click one to select it"}
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  })();
 
   // ============ panel · PROSE (compact, status-shaded preview) ============
   const proseShade = (key, stance) => {
@@ -1440,6 +1472,91 @@ function SeedBox({ onSeed }) {
         style={{ width: "100%", boxSizing: "border-box", resize: "vertical", border: "1px solid rgba(22,20,13,.4)", background: "#fffdf6", color: "#16140d", fontFamily: "var(--serif)", fontSize: 12.5, padding: "7px 8px", outline: "none" }} />
       <button onClick={() => { if (paste.trim()) { onSeed(paste); setPaste(""); } }} className="np-cond"
         style={{ marginTop: 6, border: "1.5px solid #16140d", background: "var(--yellow)", color: "#16140d", padding: "5px 11px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" }}>Load the text</button>
+    </div>
+  );
+}
+
+// ============================================================================
+// DataTable — the standard, responsive table shared by the Grounding, Citations
+// and Sources views. Desktop: a real <table> with a header row. Phone (isMobile):
+// every row stacks into a labelled card so nothing scrolls sideways off a narrow
+// screen — the conventional "responsive table" collapse, done in JS to match the
+// rest of the newsroom (which flips layouts on useIsMobile, not via CSS).
+//   cols: [{ key, label, align?, width?, grow?, cardHide?, cell(data) }]
+//     grow   — the primary column (takes the slack on desktop, full-width + no
+//              label on the phone card).
+//   rows: [{ key, data, active?, onClick?, style?, attrs?, custom? }]
+//     onClick — makes the whole row a click target (e.g. open a source); cells
+//               with their own buttons must stopPropagation.
+//     custom(colCount) — render a full-width cell instead (the inline rename box).
+// ============================================================================
+function DataTable({ cols, rows, isMobile, NR }) {
+  const th = { textAlign: "left", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".09em", textTransform: "uppercase", color: NR.muted, fontWeight: 600, padding: "9px 10px 7px", whiteSpace: "nowrap" };
+  const td = { padding: "9px 10px", borderTop: "1px solid " + NR.line, verticalAlign: "middle", color: NR.text };
+
+  if (isMobile) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {rows.map(r => {
+          if (r.custom) return (
+            <div key={r.key} style={{ border: "1px solid var(--yellow)", borderRadius: 8, background: NR.field, padding: 10 }}>{r.custom(cols.length)}</div>
+          );
+          const base = {
+            border: "1px solid " + (r.active ? "var(--yellow)" : NR.line),
+            borderLeft: "3px solid " + (r.active ? "var(--yellow)" : NR.line),
+            borderRadius: 8, background: NR.field, overflow: "hidden",
+            cursor: r.onClick ? "pointer" : "default",
+          };
+          return (
+            <div key={r.key} {...(r.attrs || {})} onClick={r.onClick}
+              className={r.onClick ? "npj-rrow" : undefined}
+              style={Object.assign(base, r.style || {})}>
+              {cols.filter(c => !c.cardHide).map(c => {
+                const content = c.cell(r.data);
+                if (content == null || content === false) return null;
+                return (
+                  <div key={c.key} style={{ display: "flex", gap: 12, alignItems: "baseline", padding: "7px 12px", borderTop: "1px solid " + NR.line }}>
+                    {c.label && !c.grow ? <span style={{ flex: "0 0 84px", fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".08em", textTransform: "uppercase", color: NR.muted, paddingTop: 2 }}>{c.label}</span> : null}
+                    <div style={{ flex: 1, minWidth: 0 }}>{content}</div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ overflowX: "auto", border: "1px solid " + NR.line, borderRadius: 8, background: NR.field }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: "var(--cond)" }}>
+        <thead>
+          <tr style={{ background: NR.bg }}>
+            {cols.map(c => <th key={c.key} style={Object.assign({}, th, { textAlign: c.align || "left", width: c.grow ? "100%" : c.width })}>{c.label}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(r => {
+            if (r.custom) return (
+              <tr key={r.key} style={{ background: "rgba(255,236,1,.06)" }}>
+                <td style={td} colSpan={cols.length}>{r.custom(cols.length)}</td>
+              </tr>
+            );
+            return (
+              <tr key={r.key} {...(r.attrs || {})} onClick={r.onClick}
+                className={r.onClick ? "npj-rrow" : undefined}
+                style={Object.assign({ background: r.active ? "rgba(255,236,1,.07)" : "transparent", cursor: r.onClick ? "pointer" : "default" }, r.style || {})}>
+                {cols.map((c, ci) => (
+                  <td key={c.key} style={Object.assign({}, td, { textAlign: c.align || "left" }, ci === 0 ? { borderLeft: "3px solid " + (r.active ? "var(--yellow)" : "transparent") } : null)}>
+                    {c.cell(r.data)}
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
