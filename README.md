@@ -351,6 +351,26 @@ article hotlinks the same copy in its `img` block.
 Local file drops still preview instantly, but they have no durable URL — they
 stay out of the published article until they're on archive.org.
 
+### Edit the photo before it's frozen — crop + hard redaction
+
+Hover a filled image slot and hit **Edit** (`app/photo-editor.js`) to crop the
+frame and paint hard black over anything that shouldn't be public — a face, a
+plate, a screen, an address. Both are **baked into a new image**: the editor
+flattens the crop and the redaction boxes onto a canvas, and `<image-slot>`
+re-uploads *that* copy to the media store. So when publish freezes the slot onto
+archive.org it can only ever copy the redacted version — the un-redacted original
+never reaches the permanent, public record. This is the pixel counterpart to
+Citey's text redaction: a redaction is **hard** (black pixels, not a removable
+overlay or render-time metadata) and **before the archive**, by construction.
+
+### Every photo carries a credit
+
+Each image figure has a **credit** line under the caption. It takes a hyperlink
+the same way a contributor bio does — a name and an optional `[outlet](https://…)`
+in markdown — sanitized through `safeHref`/`npjRichText` (http(s)/mailto only,
+escaped text, `rel="noopener noreferrer nofollow"`) and rendered as a safe link
+in the reader, the hero banner, and the Substack export.
+
 ## Projects, articles & sources
 
 A **project** is a shared Matrix room that *buckets* the work: any number of

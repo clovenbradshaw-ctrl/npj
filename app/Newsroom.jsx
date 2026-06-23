@@ -24,12 +24,18 @@ function nrIsFileSrc(rec) {
 }
 
 const DEK_PH = "Subtitle — one line under the headline";
+// Editable caption + credit lines, shared by the banner and inline image figures.
+// The credit takes a markdown hyperlink like a contributor bio (name /
+// [outlet](https://…)), rendered safely via npjRichText in the reader.
+const FIG_CAPS =
+  '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
+  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
 // so the author fills in fields, not loose formatted prose.
 const START_DOC =
-  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
+  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot>' + FIG_CAPS + '</figure>' +
   '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
@@ -262,7 +268,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
       const embed = f.getAttribute("data-embed-url");
-      const cap = f.querySelector("figcaption");
+      const cap = f.querySelector("figcaption:not(.cmp-credit)");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
       if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
@@ -399,7 +405,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
-  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`;
+  // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
+  // module scope). The credit carries a hyperlink the same way a contributor bio
+  // does — a name and an optional [outlet](https://…), via npjRichText at read.
+  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
   const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
 
   // ---- images come in by paste/drop too ----
@@ -1979,8 +1988,10 @@ function htmlToMarkdown(html) {
       lines.push("");
     }
     else if (tag === "figure") {
-      const cap = node.querySelector("figcaption");
+      const cap = node.querySelector("figcaption:not(.cmp-credit)");
       const capText = cap ? cap.textContent.trim() : "";
+      const credEl = node.querySelector(".cmp-credit");
+      const creditText = credEl ? credEl.textContent.trim() : "";
       // an image slot that resolved an archive.org link carries it in `src` —
       // the published .md hotlinks the IA copy (archive.org is the media CDN);
       // local-only drops have no durable URL and stay out of the .md
@@ -1992,6 +2003,7 @@ function htmlToMarkdown(html) {
         lines.push("![" + capText.replace(/[\[\]\n]/g, " ").trim() + "](" + img + ")", "");
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
       if (capText) lines.push("*" + capText + "*", "");
+      if (creditText) lines.push("*Credit: " + creditText.replace(/\n/g, " ") + "*", "");
     }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });

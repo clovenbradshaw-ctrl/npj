@@ -3,6 +3,24 @@
    Articles arrive as folded EO event logs (app/articles.js); the body block
    shapes rendered here are exactly what the log carries. */
 
+// The caption + photo credit under an image. The credit is markdown ([label](url))
+// like a contributor bio, rendered through npjRichText so a [outlet](https://…)
+// becomes a safe, sanitized link — never raw innerHTML.
+function PhotoFigCaption({ caption, credit }) {
+  if (!caption && !credit) return null;
+  return (
+    <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>
+      {caption ? <span>▢ {caption}</span> : null}
+      {credit ? (
+        <span style={{ display: caption ? "block" : "inline", marginTop: caption ? 2 : 0 }}>
+          <span className="np-eyebrow" style={{ fontSize: 9.5, letterSpacing: ".05em", marginRight: 5 }}>Credit</span>
+          {window.npjRichText ? window.npjRichText(credit) : credit}
+        </span>
+      ) : null}
+    </figcaption>
+  );
+}
+
 // A source key always resolves to SOMETHING renderable, even if the global
 // ledger is missing the record (a torn log line, a stale cache) — a hole in
 // the ledger must never take the whole article down with it.
@@ -495,7 +513,7 @@ function ArticleRead(props) {
           return (
             <figure key={i} style={{ margin: "26px 0" }}>
               <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-              {b.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {b.caption}</figcaption>}
+              <PhotoFigCaption caption={b.caption} credit={b.credit} />
             </figure>
           );
         }
@@ -538,7 +556,7 @@ function ArticleRead(props) {
   const Hero = (heroImg && heroImg.src) ? (
     <figure style={{ margin: "4px 0 24px" }}>
       <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
-      {heroImg.caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▢ {heroImg.caption}</figcaption>}
+      <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
     </figure>
   ) : null;
 

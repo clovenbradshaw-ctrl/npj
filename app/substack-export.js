@@ -223,11 +223,23 @@
       return esc(t.text || "");
     }).join("");
   }
+  // The photo credit is markdown ([label](url)) like a contributor bio — convert
+  // it to safe HTML (escaped text + sanitized <a>) for the exported figcaption.
+  function creditHtml(credit) {
+    const c = String(credit == null ? "" : credit).trim(); if (!c) return "";
+    const P = window.NpjProfiles;
+    const toks = (P && P.linkTokens) ? P.linkTokens(c) : [{ type: "text", text: c }];
+    return toks.map(t => t.type === "link"
+      ? '<a href="' + esc(t.href) + '">' + esc(t.label) + "</a>"
+      : esc(t.text)).join("");
+  }
   function imgHtml(img) {
     const url = publicUrl(img.src); if (!url) return "";
     const cap = cleanCaption(img.caption);
+    const credit = creditHtml(img.credit);
+    const fig = (cap ? esc(cap) : "") + (credit ? (cap ? " — " : "") + "Credit: " + credit : "");
     return "<figure><img src=\"" + esc(url) + "\" alt=\"" + esc(cap) + "\">" +
-      (cap ? "<figcaption>" + esc(cap) + "</figcaption>" : "") + "</figure>";
+      (fig ? "<figcaption>" + fig + "</figcaption>" : "") + "</figure>";
   }
   function blockToHtml(b, ctx) {
     switch (b.type) {
