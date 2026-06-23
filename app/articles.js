@@ -204,6 +204,7 @@
       status: state.status === "unpublished" ? "unpublished" : "published",
       image: bannerBlock ? {
         src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
+        credit: bannerBlock.credit || "",
         banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
       } : null,
       body: Array.isArray(state.body) ? state.body : [],
@@ -513,8 +514,15 @@
         return;
       }
       if (tag === "figure") {
-        const cap = node.querySelector("figcaption");
+        // Two caption lines now: the caption (first figcaption) and the photo
+        // credit (.cmp-credit). Selecting :not(.cmp-credit) keeps the caption
+        // right whichever order they sit in, and old single-figcaption drafts
+        // still match. The credit is markdown ([label](url)) like a profile bio,
+        // rendered safely via npjRichText in the reader.
+        const cap = node.querySelector("figcaption:not(.cmp-credit)");
         const capText = cap ? cap.textContent.trim() : "";
+        const credEl = node.querySelector(".cmp-credit");
+        const creditText = credEl ? credEl.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
         const plainImg = node.querySelector("img");
         const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
@@ -530,7 +538,7 @@
         const caption = /^banner(\s*·|\s|$)/i.test(capText) ? "" : capText;
         if (node.hasAttribute("data-eo-img")) {
           const s = plainImg && plainImg.getAttribute("src");
-          if (s) { const block = { type: "img", src: s, caption }; if (isBanner) block.banner = true; blocks.push(block); }
+          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (isBanner) block.banner = true; blocks.push(block); }
         } else if (slot) {
           // a slot can carry two URLs (src + data-alt): the archive.org one is
           // the canonical `src`; the media-store one rides as `store` so the
@@ -545,6 +553,7 @@
           const src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
           if (src) {
             const block = { type: "img", src, caption };
+            if (creditText) block.credit = creditText;
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
             // fill mode + crop chosen on the slot ride along so the reader and
@@ -606,7 +615,12 @@
         const fitAttr = b.fit ? ' fit="' + esc(b.fit) + '"' : '';
         const cropAttr = (b.crop && b.crop.ar)
           ? ' data-crop="' + esc([b.crop.s, b.crop.x, b.crop.y, b.crop.ar].join(",")) + '"' : '';
-        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+        // caption + credit are editable islands inside the non-editable figure
+        // (the slot itself stays protected). The credit takes markdown links the
+        // same way a contributor bio does — name / [outlet](https://…).
+        const capHtml = '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(b.caption || "") + '</figcaption>';
+        const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";

@@ -201,6 +201,17 @@
     }
   }
 
+  // A pre-encoded blob (e.g. from the photo editor) → data URL, for the no-media
+  // fallback where the slot can only persist a data:image/ string in its sidecar.
+  function blobToDataUrl(blob) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(new Error('read failed'));
+      fr.readAsDataURL(blob);
+    });
+  }
+
   // ── Custom element ──────────────────────────────────────────────────────
   const stylesheet =
     ':host{display:inline-block;position:relative;vertical-align:top;' +
@@ -262,6 +273,11 @@
     // Plain deck slots never show it, so their behaviour is unchanged.
     '.ctl .fitbtn{display:none}' +
     ':host([fitcontrol][data-filled]) .ctl .fitbtn{display:inline-block}' +
+    // The Edit (crop + redact) button only appears when the photo editor is loaded
+    // and the slot is filled — it opens app/photo-editor.js to bake a cropped /
+    // hard-redacted copy and re-upload it.
+    '.ctl .editbtn{display:none}' +
+    ':host([data-pe][data-filled]) .ctl .editbtn{display:inline-block}' +
     '.err{position:absolute;left:8px;bottom:8px;right:8px;color:#b3261e;font-size:11px;' +
     '  background:rgba(255,255,255,.85);padding:4px 6px;border-radius:5px;pointer-events:none}';
 
@@ -297,6 +313,7 @@
         '</div>' +
         '<div class="ctl">' +
         '  <button class="fitbtn" data-act="fit" title="How the image fills the frame — Cover (crop to fill), Contain (fit whole image), or Fill (stretch)">Cover</button>' +
+        '  <button class="editbtn" data-act="edit" title="Crop &amp; redact — burned into the photo before it\'s archived">Edit</button>' +
         '  <button data-act="replace" title="Replace image">Replace</button>' +
         '  <button data-act="clear" title="Remove image">Remove</button></div>' +
         '<input type="file" accept="' + ACCEPT.join(',') + '" hidden>';
@@ -343,6 +360,7 @@
           this._persistFraming();
           return;
         }
+        if (act === 'edit') { this._editPhoto(); }
         if (act === 'replace') { this._exitReframe(true); this._input.click(); }
         if (act === 'clear') {
           this._exitReframe(false);
@@ -693,6 +711,69 @@
       }
     }
 
+    // ── Edit (crop + hard redact) ───────────────────────────────────────────
+    // Open app/photo-editor.js on the slot's CURRENT image, get back a flattened
+    // copy (crop + redactions baked into the pixels), and re-upload it the same way
+    // a fresh drop is uploaded. Because the edited bytes replace the slot's src,
+    // publish's freeze can only ever move the redacted copy onto archive.org — the
+    // un-redacted original never reaches the public record.
+    async _editPhoto() {
+      if (!window.NpjPhotoEditor) return;
+      this._exitReframe(false);
+      const url = this._userUrl || this.getAttribute('src');
+      if (!url) return;
+      const media = window.NpjMedia;
+      // Prefer raw bytes via the media store (works on auth-gated homeservers and
+      // keeps the canvas untainted); otherwise let the editor load the URL itself.
+      const getBytes = () => {
+        if (media && media.fetchBytes && media.isStoreUrl && media.isStoreUrl(url)) return media.fetchBytes(url);
+        return fetch(url).then((r) => (r.ok ? r.blob() : null)).catch(() => null);
+      };
+      let blob = null;
+      try { blob = await window.NpjPhotoEditor.open({ src: url, getBytes, alt: this.getAttribute('data-alt') }); }
+      catch (e) { this._setError((e && e.message) || 'Could not open the photo editor.'); return; }
+      if (!blob) return; // cancelled
+      await this._ingestEditedBlob(blob);
+    }
+
+    async _ingestEditedBlob(blob) {
+      this._setError(null);
+      const gen = ++this._gen;
+      const media = window.NpjMedia;
+      // The crop/redaction is now in the bytes — any prior cover-crop framing is
+      // relative to the OLD image, so drop it and re-center on the new one.
+      this.removeAttribute('data-crop');
+      this._view = { s: 1, x: 0, y: 0 };
+      if (media && media.canUpload && media.canUpload()) {
+        const prevCap = this._cap.textContent;
+        this._cap.textContent = 'Uploading…';
+        try {
+          const up = await media.upload(blob, 'edited-' + Date.now().toString(36) + '.webp');
+          if (gen !== this._gen) return;
+          this._setRemoteSrc(up.url); // announces with the cleared crop, so the host saves it
+        } catch (err) {
+          if (gen !== this._gen) return;
+          this._cap.textContent = prevCap;
+          this._render();
+          this._setError((err && err.message) || 'Upload of the edited image failed.');
+        }
+        return;
+      }
+      // No media store (logged-out embed): a session-only data-URL preview.
+      try {
+        const url = await blobToDataUrl(blob);
+        if (gen !== this._gen) return;
+        this._dropCdnSrc();
+        const val = { u: url, s: 1, x: 0, y: 0 };
+        setSlot(this.id || '', val);
+        if (!this.id) { this._local = val; this._render(); }
+        this._announce(null);
+      } catch (e) {
+        if (gen !== this._gen) return;
+        this._setError('Could not save the edited image.');
+      }
+    }
+
     _setError(msg) {
       if (this._err) { this._err.remove(); this._err = null; }
       if (!msg) return;
@@ -830,6 +911,10 @@
       const editable = !!(window.omelette && window.omelette.writeFile) || !!cdn ||
         !!(media && media.canUpload && media.canUpload());
       this.toggleAttribute('data-editable', editable);
+      // Show the Edit (crop + redact) button only when the photo editor module is
+      // present. It's gated separately from `editable` because editing produces a
+      // re-upload, which the same media-store/omelette paths handle.
+      this.toggleAttribute('data-pe', !!window.NpjPhotoEditor);
       this._sub.style.display = editable ? '' : 'none';
       const cdnLink = this._sub.querySelector('.cdn');
       if (cdnLink) cdnLink.style.display = cdn ? '' : 'none';

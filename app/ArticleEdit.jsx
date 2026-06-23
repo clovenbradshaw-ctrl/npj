@@ -46,12 +46,17 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
+  // caption + credit are editable lines under the (non-editable) figure. The
+  // credit carries a markdown hyperlink like a contributor bio — name /
+  // [outlet](https://…) — rendered safely via npjRichText in the reader.
+  const figCaps =
+    '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px"></figcaption>' +
+    '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>';
   const imageFigure = (id, banner) =>
     '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" fitcontrol shape="rect" placeholder="' +
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
-    '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + (banner ? "banner" : "photo") +
-    ' · drag an image or an archive.org link, then caption</figcaption></figure><p><br/></p>';
+    figCaps + '</figure><p><br/></p>';
   const insertImage = () => { if (bodyRef.current) bodyRef.current.focus(); document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false)); };
   const addBanner = () => { if (bodyRef.current) bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); };
 
