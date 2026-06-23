@@ -213,6 +213,7 @@ function App() {
     return m ? window.MatrixAuth.parseInviteToken(m[1]) : null;
   })()).current;
   const [welcomeDone, setWelcomeDone] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
   const me = (session && session.user_id) || "@you:guest";
   const role = window.roleOf(layout, session && session.user_id);
   const isAdmin = role === "admin";
@@ -250,6 +251,25 @@ function App() {
     })();
     return () => { alive = false; };
   }, [session, setLayout]);
+
+  // Guest access. A signed-in account with no allowlist role still reaches the
+  // newsroom if it's a member of at least one project room — that's how an
+  // invite-link guest "has access" without the admin editing the allowlist.
+  // joinedRooms() self-heals a pending invite into a real join, so a guest who
+  // just followed a link resolves to a member here. It's membership-scoped: a
+  // guest only ever sees the room(s) they were invited to, and (no role →) still
+  // can't publish or manage anyone.
+  useEffect(() => {
+    if (!session || isEditorRole) { setIsGuest(false); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const rooms = await window.MatrixAuth.joinedRooms();
+        if (alive) setIsGuest((rooms || []).some(r => r.kind !== "control"));
+      } catch (e) { if (alive) setIsGuest(false); }
+    })();
+    return () => { alive = false; };
+  }, [session, isEditorRole]);
 
   // hydrate MY durable profile from my Matrix account on sign-in, so my own
   // byline reads right even before the layout is (re)published. Best-effort; it
@@ -486,7 +506,7 @@ function App() {
             window.NpjArticles.loadFront().then(reflect).catch(reflect);
           }} />
       )}
-      {route === "newsroom" && (isEditorRole
+      {route === "newsroom" && ((isEditorRole || isGuest)
         ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}

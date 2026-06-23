@@ -1,14 +1,16 @@
-/* NPJ — Invite someone who has no Matrix account yet.
+/* NPJ — Invite a guest who has no Matrix account yet.
  *
- * Two halves of one flow:
- *   NewAccountInvite — the editor-side widget. The signed-in inviter mints a
- *     fresh account on their own homeserver (hyphae.social) and gets a single
- *     link to hand over. If a project room is in scope, the new account is
- *     invited into it at the same time, so the newcomer lands with access.
- *   WelcomeInvite — what that link opens. It logs the newcomer in with the
- *     one-time password baked into the link, asks them to pick a display name,
- *     then makes them set their own password before anything else. After that
- *     the temp password is dead and they're a normal signed-in contributor.
+ * A guest is a full Matrix login minted by a contributor for one named person,
+ * scoped to one project. Two halves of one flow:
+ *   NewAccountInvite — the editor-side widget. The signed-in inviter types who
+ *     the guest is for, which seeds a recognisable account on their homeserver
+ *     (hyphae.social), records the name on the project room, invites the guest
+ *     into it, and hands back a single link. The guest lands already inside the
+ *     project with access — they can work there, but can't publish.
+ *   WelcomeInvite — what that link opens. It logs the guest in with the
+ *     one-time password baked into the link, indexes + joins the project so it's
+ *     waiting for them, pre-fills their name, then makes them set their own
+ *     password. After that the temp password is dead.
  *
  * The credentials only ever travel in the URL fragment (#welcome=…), which the
  * browser never sends to a server, and the password is replaced on first run.
@@ -32,68 +34,86 @@ async function copyText(text) {
 }
 
 /* ---- the editor-side widget ----
+   Mints an explicit GUEST account: a full Matrix login, but minted by a
+   contributor for one named person and scoped to one project. The inviter
+   types who the guest is for; that name seeds a recognisable id, is recorded
+   on the room for everyone to see, and pre-fills the newcomer's first screen.
    props:
-     roomId    — invite the new account into this project room (optional)
+     roomId    — invite the guest into this project room (optional)
+     roomTitle — the project's name, carried in the link so the guest lands
+                 with a labelled workspace before the room state syncs
      ensureRoom— async () => roomId, used when the room isn't created yet
                  (the Newsroom only spins up a project on first invite)
-     onInvited — (mxid) => void, so the caller can show a pending chip */
-function NewAccountInvite({ roomId, ensureRoom, onInvited }) {
+     onInvited — (mxid, name) => void, so the caller can show a pending chip */
+function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [name, setName] = useState("");      // who the inviter thinks this guest is
   const [needToken, setNeedToken] = useState(false);
   const [token, setToken] = useState("");
-  const [link, setLink] = useState(null);   // { url, mxid }
+  const [link, setLink] = useState(null);   // { url, mxid, name }
   const [copied, setCopied] = useState(false);
 
   const me = window.MatrixAuth.current();
   const domain = (me && me.user_id && (window.MatrixAuth.parseMxid(me.user_id) || {}).domain) || "";
 
   const create = async () => {
+    const who = name.trim();
     if (busy || !domain) { if (!domain) setErr("Sign in with Matrix first."); return; }
+    if (!who) { setErr("Add a name so everyone knows who this guest is."); return; }
     setBusy(true); setErr(""); setLink(null);
     try {
-      const acct = await window.MatrixAuth.register({ domain, registrationToken: token.trim() || undefined });
-      // bring the newcomer into the project room (best-effort; account already exists)
+      // seed the id from the name so the guest reads as e.g. @sam-rivera-x3f9
+      const acct = await window.MatrixAuth.register({ domain, seed: who, registrationToken: token.trim() || undefined });
+      // bring the guest into the project room (best-effort; account already exists)
       let r = roomId || null;
       try { if (!r && ensureRoom) r = await ensureRoom(); } catch (e) { r = null; }
-      if (r) { try { await window.MatrixAuth.invite(r, acct.mxid); onInvited && onInvited(acct.mxid); } catch (e) {} }
-      const url = window.MatrixAuth.buildInviteLink({ v: 1, hs: acct.domain, u: acct.localpart, p: acct.password, r: r || undefined, by: me.user_id });
-      setLink({ url, mxid: acct.mxid }); setNeedToken(false);
+      if (r) {
+        try { await window.MatrixAuth.invite(r, acct.mxid); } catch (e) {}
+        // record who this guest is for, on the room, for every member to see
+        try { await window.MatrixAuth.setGuestName(r, acct.mxid, who, me.user_id); } catch (e) {}
+        onInvited && onInvited(acct.mxid, who);
+      }
+      const url = window.MatrixAuth.buildInviteLink({ v: 1, hs: acct.domain, u: acct.localpart, p: acct.password, r: r || undefined, rt: roomTitle || undefined, n: who, g: 1, by: me.user_id });
+      setLink({ url, mxid: acct.mxid, name: who }); setNeedToken(false);
     } catch (e) {
       if (e && e.code === "uia" && /registration token/i.test(e.message || "")) { setNeedToken(true); setErr(e.message); }
-      else setErr((e && e.message) || "Couldn't create the account.");
+      else setErr((e && e.message) || "Couldn't create the guest account.");
     }
     setBusy(false);
   };
 
   const doCopy = async () => { if (link && await copyText(link.url)) { setCopied(true); setTimeout(() => setCopied(false), 1600); } };
-  const reset = () => { setLink(null); setErr(""); setCopied(false); };
+  const reset = () => { setLink(null); setErr(""); setCopied(false); setName(""); };
 
   if (!open) return (
     <button className="btn btn-sm btn-ghost" onClick={() => setOpen(true)} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11 }}>
-      <I.link style={{ fontSize: 11 }} /> Invite by link
+      <I.link style={{ fontSize: 11 }} /> Invite a guest
     </button>
   );
 
   return (
     <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed var(--rule-strong)", width: "100%" }}>
       <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span>Invite someone with no account</span>
+        <span>Invite a guest</span>
         <button className="btn btn-sm btn-ghost" onClick={() => { setOpen(false); reset(); }} style={{ padding: 2 }}><I.x style={{ fontSize: 10 }} /></button>
       </div>
 
       {!link && (
         <>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.45 }}>
-            Creates a new account on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, pick a display name and set their own password — no sign-up needed.
+            Mints a <strong>guest account</strong> on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, confirm their name and set a password — no sign-up. A guest works inside this project only; they can't publish.
           </div>
+          <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 4, fontSize: 9.5 }}>Who's this guest?</label>
+          <input value={name} onChange={e => { setName(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && create()} placeholder="e.g. Sam Rivera (City Hall source)" className="np-mono"
+            style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 6 }} />
           {needToken && (
             <input value={token} onChange={e => setToken(e.target.value)} placeholder="registration token" className="np-mono"
               style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 6 }} />
           )}
           <button className="btn btn-sm btn-primary" disabled={busy} onClick={create} style={{ display: "inline-flex", alignItems: "center", gap: 6, opacity: busy ? .6 : 1 }}>
-            {busy ? <InviteSpinner /> : <I.link style={{ fontSize: 12 }} />}{busy ? "Creating account…" : "Create invite link"}
+            {busy ? <InviteSpinner /> : <I.link style={{ fontSize: 12 }} />}{busy ? "Creating guest…" : "Create guest link"}
           </button>
         </>
       )}
@@ -101,7 +121,7 @@ function NewAccountInvite({ roomId, ensureRoom, onInvited }) {
       {link && (
         <>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginBottom: 6, lineHeight: 1.4 }}>
-            Account created: <strong>{link.mxid}</strong>{roomId || ensureRoom ? " · invited to this project" : ""}. Send them this link:
+            Guest account for <strong>{link.name}</strong> created (<strong>{link.mxid}</strong>){roomId || ensureRoom ? " · invited to this project" : ""}. Send them this link:
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
             <input readOnly value={link.url} onFocus={e => e.target.select()} className="np-mono"
@@ -128,7 +148,7 @@ function NewAccountInvite({ roomId, ensureRoom, onInvited }) {
 function WelcomeInvite({ payload, onDone }) {
   const [phase, setPhase] = useState("signing"); // signing | name | password | finishing | used | error
   const [err, setErr] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(payload.n || ""); // pre-filled with who the inviter named
   const [pw, setPw] = useState("");
   const [pw2, setPw2] = useState("");
   const [busy, setBusy] = useState(false);
@@ -140,9 +160,15 @@ function WelcomeInvite({ payload, onDone }) {
     (async () => {
       try {
         await window.MatrixAuth.login(mxid, payload.p);
-        // accept the room invite so they land already inside the project (the
-        // inviter invited this account when minting the link); best-effort
-        if (payload.r) { try { await window.MatrixAuth.joinRoom(payload.r); } catch (e) {} }
+        // Land them INSIDE the project, reliably. First index it on the guest's
+        // own account (so the workspace recovers it — and joinedRooms can finish
+        // a missed join on the next load), then accept the invite the inviter
+        // sent when minting the link. joinRoom retries on rate-limit; both are
+        // best-effort so a hiccup never strands the newcomer on this screen.
+        if (payload.r) {
+          try { await window.MatrixAuth.registerDraft({ roomId: payload.r, title: payload.rt || "Your project" }); } catch (e) {}
+          try { await window.MatrixAuth.joinRoom(payload.r); } catch (e) {}
+        }
         if (alive) setPhase("name");
       } catch (e) {
         if (!alive) return;
@@ -231,10 +257,10 @@ function WelcomeInvite({ payload, onDone }) {
 
   if (phase === "name") return card(
     <>
-      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>Welcome · step 1 of 2</div>
+      <div className="np-eyebrow" style={{ color: "var(--verified)", marginBottom: 10 }}>Guest welcome · step 1 of 2</div>
       <h1 style={{ fontFamily: "var(--display)", fontSize: 40, lineHeight: .98, margin: "0 0 10px" }}>What should we call you?</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
-        This is your display name — the byline people see on what you contribute. You can change it later.
+        You've been invited as a guest{payload.rt ? <> to <strong style={{ color: "var(--ink)" }}>{payload.rt}</strong></> : ""}. This is your display name — the byline people see on what you contribute. You can change it later.
       </p>
       <input autoFocus value={name} onChange={e => { setName(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && saveName()}
         placeholder="e.g. Sam Rivera" style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontSize: 16, padding: "11px 12px", fontFamily: "var(--serif)", outline: "none" }} />
