@@ -491,12 +491,23 @@
     const hasInk = (toks) => toks.some(t => typeof t === "string" ? t.trim() : true);
 
     const blocks = [];
+    const fnRegionDefs = {};   // key → note text, read from the structured "Footnotes" list
     let headline = "", dek = "";
     Array.from(root.childNodes).forEach(node => {
       if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) blocks.push({ type: "p", tokens: [t] }); return; }
       if (node.nodeType !== 1) return;
       const tag = node.tagName.toLowerCase();
       const text = String(node.textContent || "").trim();
+      // the editor's structured footnotes list (Substack-style) — not prose. Pull
+      // each note off its <li data-fn-key> for the footnote pass to pair with the
+      // inline markers, and skip it from normal block parsing.
+      if ((tag === "ol" || tag === "ul") && node.classList && node.classList.contains("nr-fnotes")) {
+        node.querySelectorAll("li[data-fn-key]").forEach(li => {
+          const k = (li.getAttribute("data-fn-key") || "").trim();
+          if (k && fnRegionDefs[k] == null) fnRegionDefs[k] = String(li.textContent || "").trim();
+        });
+        return;
+      }
       if (tag === "h1") { if (!headline) headline = text; else blocks.push({ type: "h2", text }); return; }
       if (tag === "h2") { if (text) blocks.push({ type: "h2", text }); return; }
       if (tag === "h3") { if (text) blocks.push({ type: "h3", text }); return; }
@@ -581,15 +592,15 @@
       if (hasInk(toks)) blocks.push({ type: "p", tokens: toks });
     });
 
-    /* ---- footnotes: pair inline markers with their "[^key]: …" definitions ----
-       The composer drops a <sup data-fn> marker inline and a "[^key]: text"
-       paragraph at the foot of the document. Here we lift those definition
-       paragraphs out of the prose, number every marker by the order it's first
-       referenced (1, 2, 3…), and gather one { type:"footnotes", notes } block the
-       reader renders as endnotes — so a footnote is a real, linked note, not the
-       raw "[^fn1]:" text showing through. */
+    /* ---- footnotes: pair inline markers with their notes ----
+       The composer drops a <sup data-fn> marker inline and keeps each note in a
+       structured "Footnotes" list at the foot of the page (read above into
+       fnRegionDefs). Here we number every marker by the order it's first
+       referenced (1, 2, 3…) and gather one { type:"footnotes", notes } block the
+       reader renders as linked endnotes. For back-compat we also lift any legacy
+       "[^key]: text" definition paragraph (older drafts wrote notes as prose). */
     const FN_DEF = /^\s*\[\^([^\]\s]+)\]:\s*([\s\S]*)$/;
-    const fnDefs = {};                 // key → definition text (first one wins)
+    const fnDefs = Object.assign({}, fnRegionDefs);   // key → note text (region wins)
     const kept = [];
     blocks.forEach(b => {
       if (b.type === "p") {
@@ -640,9 +651,14 @@
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";
       if (b.type === "verse") return '<pre class="verse">' + esc(b.text) + "</pre>";
-      // footnotes round-trip back to the composer as the "[^key]: text" paragraphs
-      // the author edits; the inline markers (data-cite=key) above re-pair with them.
-      if (b.type === "footnotes") return (b.notes || []).map(n => "<p>[^" + esc(n.key) + "]: " + esc(n.text || "") + "</p>").join("");
+      // footnotes round-trip back to the composer as the structured "Footnotes"
+      // list — one editable <li> per note, keyed so the inline markers (data-fn,
+      // data-cite=key) above re-pair with them and renumberFootnotes keeps order.
+      if (b.type === "footnotes") {
+        const items = (b.notes || []).map(n =>
+          '<li class="nr-fnote" data-fn-key="' + esc(n.key) + '" data-ph="Write the note…">' + esc(n.text || "") + "</li>").join("");
+        return items ? '<ol class="nr-fnotes" data-fnotes="1">' + items + "</ol>" : "";
+      }
       // editable image-slot (not a static <img>) so the edit surface can
       // replace it — a fresh drop uploads to the media store, then publish/save
       // moves it to archive.org. Primary src is the live media-store copy when
