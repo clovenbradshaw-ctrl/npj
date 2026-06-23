@@ -75,6 +75,23 @@ test("toggling citations off drops the inline markers", () => {
   assert.match(m, /The budget passed 7-2\./); // the claim text itself stays
 });
 
+test("an owned claim ({c, stance}) exports as plain prose — no footnote, no Sources entry", () => {
+  // Owning a claim grounds it by the author's declaration, not a citation, so it
+  // must travel as ordinary text: no superscript marker and nothing added to the
+  // Sources list. (The reader's transparency lens is the only surface that tints
+  // it.) Guards the new token shape against leaking a phantom citation on export.
+  const owned = {
+    ...ARTICLE, image: null,
+    body: [{ type: "p", tokens: ["The mayor ", { c: "was evasive", stance: "analysis", id: "o1" }, " all night."] }]
+  };
+  const m = NS.toMarkdown(owned, opts);
+  assert.match(m, /The mayor was evasive all night\./, "owned text rides as plain prose");
+  assert.ok(!/was evasive\[\[/.test(m), "no inline footnote marker on an owned claim");
+  const h = NS.toHtml(owned, opts);
+  assert.match(h, /was evasive/, "owned text present in HTML");
+  assert.ok(!/<sup/.test(h.split("Sources")[0]), "no superscript marker in the body for an owned claim");
+});
+
 test("the Sources list is numbered, labelled outlet — title, and linked", () => {
   const m = md();
   assert.match(m, /## Sources/);

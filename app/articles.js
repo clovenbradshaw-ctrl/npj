@@ -84,6 +84,15 @@
   // A footnote marker ({t:"sup"}) carries no reading text — it's a reference, so
   // it must not leak its "fn1"/number into plaintext, word counts or diffs.
   function tokenText(t) { return typeof t === "string" ? t : (t && (t.c != null ? t.c : (t.t === "sup" ? "" : t.text))) || ""; }
+  // Owned-claim stance, normalized to the three the editor records — analysis
+  // (⊢), testimony/account (⊨) and voice/position (⊩). Anything else → null
+  // (not an owned claim). An owned claim is grounded by the author's honest
+  // declaration, not a citation, and rides the published body as a {c, stance}
+  // token so the reader's transparency lens can show how it stands.
+  function stanceNorm(s) {
+    s = String(s || "").trim().toLowerCase();
+    return (s === "analysis" || s === "testimony" || s === "voice") ? s : null;
+  }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
     return body.map(b => {
@@ -476,21 +485,40 @@
           if (c.nodeType !== 1) return;
           const tag = c.tagName.toLowerCase();
           if (tag === "br") { flush(); toks.push({ t: "br" }); return; }
-          if (tag === "span" && c.classList.contains("eo-claim")) {
-            flush();
+          if (tag === "span" && (c.classList.contains("eo-claim") || c.classList.contains("claim-src"))) {
+            const isEo = c.classList.contains("eo-claim");
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
-            if (src.length) {
-              let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
-              // single-source spans carry the quote inline on data-quote; multi-source
-              // spans carry the data-quotes map. Either way, backfill anything still
-              // missing from the citation registry so reuse survives the round trip.
-              const inlineQ = (c.getAttribute("data-quote") || "").trim();
-              if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
-                q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
-                if (!Object.keys(q).length) q = undefined;
-              }
-              toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
-            } else buf += plain(c);
+            const stance = stanceNorm(c.getAttribute("data-stance"));
+            // an OWNED claim — declared as the author's analysis/account/position
+            // (data-stance, never a source). It used to flatten to plain prose at
+            // publish; now it carries its stance into the body so the reader's
+            // transparency lens can show it's grounded by declaration, not a cite.
+            if (stance && !src.length) {
+              flush();
+              toks.push({ c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() });
+              return;
+            }
+            // a SOURCED span in the edit surface's round-trip shape (eo-claim).
+            if (isEo) {
+              flush();
+              if (src.length) {
+                let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+                // single-source spans carry the quote inline on data-quote; multi-source
+                // spans carry the data-quotes map. Either way, backfill anything still
+                // missing from the citation registry so reuse survives the round trip.
+                const inlineQ = (c.getAttribute("data-quote") || "").trim();
+                if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
+                  q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
+                  if (!Object.keys(q).length) q = undefined;
+                }
+                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
+              } else buf += plain(c);
+              return;
+            }
+            // a SOURCED .claim-src from the live editor is a transparent wrapper:
+            // recurse so its trailing <sup class="md-cite"> builds the citation
+            // token — the long-standing path, unchanged.
+            walk(c);
             return;
           }
           if (tag === "sup" && c.classList.contains("md-cite")) {
@@ -671,7 +699,14 @@
   function tokensToHtml(tokens) {
     return (tokens || []).map(t => {
       if (typeof t === "string") return esc(t);
-      if (t.c != null) return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
+      if (t.c != null) {
+        // an owned claim round-trips with its stance (and no source) so the edit
+        // surface and the reader's transparency lens keep it; a sourced claim
+        // keeps its data-src + quotes exactly as before.
+        if (t.stance && (!t.src || !t.src.length))
+          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '" data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+        return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
+      }
       if (t.t === "br") return "<br/>";
       if (t.t === "strong") return "<strong>" + esc(t.text) + "</strong>";
       if (t.t === "em") return "<em>" + esc(t.text) + "</em>";

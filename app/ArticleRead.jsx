@@ -28,6 +28,34 @@ function srcOf(key) {
   return window.NPJ.SOURCES[key] || { id: key, type: "primary", title: key, outlet: "", retrieved: "", archive_url: "", original_url: "" };
 }
 
+/* ---- the transparency lens: colour every grounded span by HOW it's grounded ----
+   The reader (and the editor's Preview) can switch on a lens that tints each
+   claim by its grounding kind — cited to an archived snapshot, cited to a source,
+   or owned by the author as analysis (⊢) / account (⊨) / position (⊩). A
+   bound-but-unpinned claim (⊥, normally caught by the publish gate) shows red so
+   it's obvious in Preview. The hues mirror the editor's own grounding palette and
+   match the CSS in styles.css (.ground-lens …). */
+const GROUND_KINDS = {
+  "cited-archived": { glyph: "⊨", label: "Cited — archived",  color: "#1f6f4a", note: "Pinned to a passage in a primary source captured on archive.org." },
+  "cited-source":   { glyph: "⊤", label: "Cited — source",    color: "#2b5f8a", note: "Pinned to a passage in a source (no archived snapshot yet)." },
+  "own-analysis":   { glyph: "⊢", label: "Author's analysis", color: "#7c74de", note: "The author's reasoning — owned, not cited." },
+  "own-account":    { glyph: "⊨", label: "Author's account",  color: "#138086", note: "First-hand: the author witnessed this." },
+  "own-position":   { glyph: "⊩", label: "Author's position", color: "#9a6a12", note: "The author's stated position." },
+  "cited-unpinned": { glyph: "⊥", label: "Unverified",        color: "#b23a26", note: "Bound to a source but no passage pinned — the publish gate flags this." }
+};
+const GROUND_ORDER = ["cited-archived", "cited-source", "own-analysis", "own-account", "own-position", "cited-unpinned"];
+const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position" };
+// The grounding kind of a claim token — owned (by its stance) or cited (by
+// whether a passage is pinned, and whether any source is an archived snapshot).
+function groundKind(claim) {
+  if (!claim) return null;
+  if (claim.stance) return STANCE_KIND[claim.stance] || "own-analysis";
+  const q = claim.q || {};
+  const pinned = (claim.src || []).some(k => q[k] && String(q[k]).trim());
+  if (!pinned) return "cited-unpinned";
+  return (claim.src || []).some(k => srcOf(k).archive_url) ? "cited-archived" : "cited-source";
+}
+
 function useClaimModel(A) {
   return React.useMemo(() => {
     const claimList = [];
@@ -359,6 +387,22 @@ function ArticleRead(props) {
   const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
+  // the transparency lens — colour each claim by how it's grounded. Local to this
+  // reader instance, so the live page and the editor's Preview each carry their
+  // own. Off by default: a clean read.
+  const [transparency, setTransparency] = useState(false);
+  // a count per grounding kind, for the lens legend
+  const groundTally = React.useMemo(() => {
+    const tally = {};
+    const bump = (k) => { if (k) tally[k] = (tally[k] || 0) + 1; };
+    const scan = (t) => {
+      if (!t || t.c == null) return;
+      if (t.stance) bump(STANCE_KIND[t.stance] || "own-analysis");
+      else if (Array.isArray(t.src) && t.src.length) bump(groundKind({ src: t.src, q: t.q }));
+    };
+    (A.body || []).forEach(b => { (b.tokens || []).forEach(scan); (b.items || []).forEach(it => it.forEach(scan)); });
+    return tally;
+  }, [A]);
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
@@ -580,10 +624,23 @@ function ArticleRead(props) {
       }
       return <React.Fragment key={i}>{t.text || ""}</React.Fragment>;
     }
+    // an OWNED claim — the author's analysis/account/position. It publishes as
+    // prose and reads like it; the transparency lens is the only thing that tints
+    // it (and names the stance on hover). No source card — there's no citation.
+    if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
+      const kind = STANCE_KIND[t.stance] || "own-analysis";
+      return (
+        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind}
+          title={transparency ? GROUND_KINDS[kind].label : undefined}>
+          {ent ? markEntities(t.c, ent, "o" + i) : t.c}
+        </span>
+      );
+    }
     const claim = claimById[t.id];
     if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
     return (
       <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
+        data-ground={groundKind(claim)}
         data-active={claim.src.includes(activeSrc) ? "1" : "0"}
         tabIndex={0} role="button" aria-haspopup="dialog"
         aria-expanded={hover && hover.claim.id === t.id ? "true" : "false"}
@@ -606,7 +663,7 @@ function ArticleRead(props) {
   });
 
   const Body = (
-    <article ref={bodyRef} style={{ fontFamily: "var(--serif)" }}
+    <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
       onMouseUp={() => setTimeout(refreshBubble, 0)} onKeyUp={(e) => { if (e.shiftKey || e.key === "Shift") setTimeout(refreshBubble, 0); }}>
       {A.body.map((b, i) => {
         if (b.type === "h2" || b.type === "h3") {
@@ -752,14 +809,20 @@ function ArticleRead(props) {
       <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>◉</span> Preview · exactly as readers will see it
+            <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
+          <button className="btn btn-sm" onClick={() => setTransparency(v => !v)} aria-pressed={transparency}
+            title="Transparency — colour each claim by how it's grounded (cited / archived / the author's own)"
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
+            <I.swatches style={{ fontSize: 14 }} /> Transparency
+          </button>
           <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
         </div>
         <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
           {Main}
         </div>
+        {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
         {/* Grounding receipts on hover — the SAME citation card the public reader
            shows. Hover (or tap, on a phone) a claim and its source card floats
            up, so the author can audit the grounding in the preview exactly as a
@@ -778,7 +841,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ audit, setAudit, showSugg, setShowSugg,
+      <ControlBar {...{ audit, setAudit, transparency, setTransparency, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
@@ -811,6 +874,8 @@ function ArticleRead(props) {
       <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
         onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
 
+      {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
+
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
         entityData={entityData} active={activeEntity} setActive={setActiveEntity} />
 
@@ -838,8 +903,58 @@ function ArticleRead(props) {
   );
 }
 
+/* ---- the transparency lens legend ----
+   A small fixed key, shown only while the lens is on, that names each grounding
+   colour and tallies how many claims carry it. It lists the kinds the piece
+   actually uses (a piece with no owned claims doesn't show the owned rows),
+   falling back to the two cited kinds when nothing is grounded yet. */
+function GroundingLegend({ tally, onClose }) {
+  const isPhone = window.useIsMobile(760);
+  tally = tally || {};
+  const present = GROUND_ORDER.filter(k => (tally[k] || 0) > 0);
+  const rows = present.length ? present : GROUND_ORDER.slice(0, 2);
+  const total = GROUND_ORDER.reduce((n, k) => n + (tally[k] || 0), 0);
+  return (
+    <aside className="np-scroll fade-in" aria-label="Transparency lens — how each claim is grounded"
+      style={{ position: "fixed", left: isPhone ? 8 : 16, bottom: isPhone ? 8 : 16, zIndex: 3900,
+        width: isPhone ? "calc(100% - 16px)" : 264, maxWidth: 264, maxHeight: "62vh", overflowY: "auto",
+        background: "var(--card)", border: "1.5px solid var(--ink)", boxShadow: "0 10px 30px rgba(8,7,5,.34)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 11px", borderBottom: "1.5px solid var(--ink)", position: "sticky", top: 0, background: "var(--card)" }}>
+        <I.swatches style={{ fontSize: 14, color: "var(--ink-soft)" }} />
+        <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>How each claim is grounded</span>
+        {onClose && (
+          <button onClick={onClose} aria-label="Turn off the transparency lens"
+            style={{ background: "none", border: 0, cursor: "pointer", fontSize: 17, lineHeight: 1, color: "var(--ink)", padding: "0 2px" }}><I.x /></button>
+        )}
+      </div>
+      <div style={{ padding: "9px 11px", display: "flex", flexDirection: "column", gap: 9 }}>
+        {rows.map(k => {
+          const m = GROUND_KINDS[k];
+          return (
+            <div key={k} style={{ display: "flex", gap: 9, alignItems: "flex-start" }}>
+              <span aria-hidden="true" style={{ flex: "0 0 auto", marginTop: 2, width: 16, height: 15, borderRadius: 3,
+                background: "color-mix(in srgb, " + m.color + " 20%, transparent)", borderBottom: "2px solid " + m.color }} />
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13, display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ fontFamily: "var(--mono)", color: m.color }}>{m.glyph}</span>
+                  <span style={{ flex: 1 }}>{m.label}</span>
+                  {tally[k] ? <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{tally[k]}</span> : null}
+                </div>
+                <div style={{ fontFamily: "var(--serif)", fontSize: 11.5, lineHeight: 1.4, color: "var(--ink-soft)", marginTop: 1 }}>{m.note}</div>
+              </div>
+            </div>
+          );
+        })}
+        <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", borderTop: "1px solid var(--rule)", paddingTop: 7 }}>
+          {total ? total + " grounded " + (total === 1 ? "claim" : "claims") + " · unmarked text is uncited prose." : "No grounded claims in this piece yet."}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, transparency, setTransparency, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -874,6 +989,13 @@ function ControlBar({ audit, setAudit, showSugg, setShowSugg, suggCount, entityO
           style={{ display: "inline-flex", alignItems: "center", gap: 7,
             background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
           <I.shield style={{ fontSize: 14 }} /> Auditability
+        </button>
+
+        <button className="btn btn-sm" onClick={() => setTransparency(!transparency)} aria-pressed={transparency}
+          title="Transparency — colour every claim by how it's grounded: cited to an archived snapshot, cited to a source, or owned by the author as analysis / account / position. Off: a clean read."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7,
+            background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
+          <I.swatches style={{ fontSize: 14 }} /> Transparency
         </button>
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
