@@ -57,7 +57,19 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
     figCaps + '</figure><p><br/></p>';
-  const insertImage = () => { if (bodyRef.current) bodyRef.current.focus(); document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false)); };
+  // Insert an inline image at the caret. When focus was last in the Headline /
+  // Subtitle field (or nowhere), the body has no live caret and execCommand would
+  // drop the figure at offset 0, above the existing copy — so fall back to the end
+  // of the body. Read the selection BEFORE focusing: focus() can synthesize an
+  // offset-0 range that we'd otherwise mistake for a placed caret.
+  const insertImage = () => {
+    const root = bodyRef.current; if (!root) return;
+    const s = window.getSelection();
+    const inBody = !!(s && s.rangeCount && root.contains(s.getRangeAt(0).startContainer));
+    root.focus();
+    if (!inBody && s) { const r = document.createRange(); r.selectNodeContents(root); r.collapse(false); s.removeAllRanges(); s.addRange(r); }
+    document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false));
+  };
   const addBanner = () => { if (bodyRef.current) bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); };
 
   // ---- sourcing: bind the selected words to a (new) source, like the newsroom ----

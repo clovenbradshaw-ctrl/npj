@@ -522,13 +522,39 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return () => document.removeEventListener("selectionchange", f);
   }, []);
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
+  // Land a usable caret INSIDE the body before a programmatic insert. Toolbar
+  // buttons keep focus on the button (their onMouseDown preventDefaults), so when
+  // the author hasn't clicked into the prose yet — they only filled the Title /
+  // Subtitle fields, say, or just bound a source (which clears the saved range) —
+  // the live selection sits outside the editor and execCommand would drop the
+  // node at offset 0, above the non-editable banner figure (the "add image seems
+  // broken" report). Prefer a live in-body selection, then the last saved in-body
+  // range, else the very end of the document.
+  const caretIntoBody = () => {
+    const root = ed.current; if (!root) return;
+    const s = window.getSelection(); if (!s) return;
+    const inBody = (r) => !!(r && r.startContainer && root.contains(r.startContainer));
+    // Read the live selection BEFORE focusing: focus() on a contenteditable that
+    // was never given a caret can synthesize an offset-0 range (which sits above
+    // the banner), and we must not mistake that for a caret the author placed.
+    let r = s.rangeCount ? s.getRangeAt(0) : null;
+    if (!inBody(r)) r = inBody(selRange.current) ? selRange.current.cloneRange() : null;
+    root.focus();
+    if (!r) { r = document.createRange(); r.selectNodeContents(root); r.collapse(false); }
+    s.removeAllRanges(); s.addRange(r);
+  };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
-  const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  // Block-level components (image, embed, verse, poll) can't be nested inside the
+  // banner, headline or dek — put the caret in the body, then step past any such
+  // block, so the new block always lands in the prose flow rather than splitting a
+  // heading or vanishing into the non-editable banner figure.
+  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
   const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
-  const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
+  const insertImage = () => insertBlock(imageFigure("img-" + Date.now()));
 
   // ---- images come in by paste/drop too ----
   // A figure can't live inside the headline or the dek — if the caret is in
@@ -546,10 +572,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // was copied off the web WITH an archive.org URL in the html flavor, the
   // durable CDN link wins over the raw bytes.
   const insertImageFiles = (files, archiveUrl) => {
-    escapeBlock();
     files.forEach((f, i) => {
       const id = "img-" + Date.now().toString(36) + "-" + i;
-      insertHTML(imageFigure(id));
+      insertBlock(imageFigure(id));
       const el = ed.current && ed.current.querySelector("#" + id);
       if (!el) return;
       if (archiveUrl && files.length === 1) el.ingestUrl(archiveUrl);
@@ -794,7 +819,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) inner = `<audio controls src="${esc}" style="width:100%"></audio>`;
     else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) inner = `<video controls src="${esc}" style="width:100%;max-height:420px;background:#000"></video>`;
     else inner = `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
-    insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
+    insertBlock(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
   // A footnote attaches to a WORD, so the marker must land against text. If the
@@ -833,7 +858,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // everything live, exactly like Substack.
   const insertFootnote = () => {
     const key = "fn" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
-    ed.current && ed.current.focus(); restore();   // bring the saved caret live so we can anchor it
+    caretIntoBody();                                // bring a real in-body caret live so we can anchor it
     anchorFootnoteCaret();                          // never strand the marker on an empty line
     // the bullet is a placeholder glyph; renumberFootnotes overwrites it with the number
     insertHTML(`<sup class="md-cite" data-fn="1" data-cite="${key}" contenteditable="false" title="footnote">•</sup>&nbsp;`);
@@ -850,9 +875,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     }
     setFmtMenu(null); scheduleSave();
   };
-  const insertVerse = () => { insertHTML(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
+  const insertVerse = () => { insertBlock(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
   const insertPoll = () => {
-    insertHTML(`<div class="cmp-widget" data-widget="poll"><div class="cmp-widget-h"><span class="np-mono">◳ POLL</span><span class="cmp-tag">placeholder · interactive at publish</span></div><div class="cmp-widget-b"><strong>Ask the readers a question…</strong><span>Option one</span><br/><span>Option two</span></div><div class="cmp-widget-f">readers vote on the published page; results stay public</div></div><p><br/></p>`);
+    insertBlock(`<div class="cmp-widget" data-widget="poll"><div class="cmp-widget-h"><span class="np-mono">◳ POLL</span><span class="cmp-tag">placeholder · interactive at publish</span></div><div class="cmp-widget-b"><strong>Ask the readers a question…</strong><span>Option one</span><br/><span>Option two</span></div><div class="cmp-widget-f">readers vote on the published page; results stay public</div></div><p><br/></p>`);
     setFmtMenu(null);
   };
 
@@ -1705,7 +1730,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {/* media census — every image/embed in the piece; images open the viewer */}
           <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
             <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
-            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Paste an image straight into the page.</div>}
+            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Click <b>Image</b> in the toolbar to drop an image into the body where you're writing — or paste / drag a photo straight onto the page.</div>}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {media.map(m => m.kind === "image"
                 ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
