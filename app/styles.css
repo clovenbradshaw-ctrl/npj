@@ -587,3 +587,50 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   [data-citey-anim] *, [data-citey-anim] { animation: none !important; transition: none !important; }
 }
+
+/* ── Graph view (window.GraphView / NpjGraphRender) ───────────────────────────
+   The document read into an eoreader4 proposition graph: entities as nodes
+   (sized by sightings), subject-verb-object relations as edges. Themed off the
+   newsroom --nr-* palette so it flips with light/dark like everything else. */
+.graph-view, .graph-wrap { height: 100%; }
+.graph-wrap { display: flex; flex-direction: column; min-height: 0; }
+.graph-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--nr-line); flex: 0 0 auto; }
+.graph-bar .graph-cursor { flex: 1; min-width: 60px; accent-color: var(--yellow); }
+.graph-bar button { font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  background: transparent; color: var(--nr-soft); border: 1px solid var(--nr-line); padding: 3px 8px; cursor: pointer; }
+.graph-bar button:hover { color: var(--nr-text); border-color: var(--nr-soft); }
+.graph-readout { font-family: var(--mono); font-size: 10.5px; color: var(--nr-muted); min-width: 100px; }
+.graph-svg { flex: 1; width: 100%; min-height: 0; display: block; touch-action: none; }
+.graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; text-align: center;
+  font-family: var(--mono); font-size: 12px; color: var(--nr-muted); }
+
+.gedge { stroke: var(--nr-soft); stroke-opacity: .55; stroke-width: 1; }
+.gedge.con { stroke: var(--nr-link); }
+.gedge.hl { stroke: var(--yellow); stroke-opacity: 1; }
+.gedge.dim { stroke-opacity: .08; }
+
+.gnode { cursor: pointer; }
+.gnode circle { fill: var(--nr-link); stroke: var(--nr-bg); stroke-width: 1.5; transition: fill .12s; }
+.gnode .glabel { fill: var(--nr-text); font-family: var(--cond); font-size: 12px; text-anchor: middle; paint-order: stroke;
+  stroke: var(--nr-bg); stroke-width: 2.5px; stroke-linejoin: round; pointer-events: none; }
+.gnode:hover circle, .gnode.hl circle { fill: var(--yellow); }
+.gnode.sel circle { fill: var(--yellow); stroke: var(--nr-text); stroke-width: 2; }
+.graph-svg.focusing .gnode.dim { opacity: .25 !important; }
+.graph-svg.focusing .gnode.dim .glabel { opacity: 0; }
+
+.graph-tip { position: absolute; z-index: 20; max-width: 240px; background: var(--nr-panel); color: var(--nr-text);
+  border: 1px solid var(--nr-line); padding: 6px 8px; font-family: var(--mono); font-size: 10.5px; line-height: 1.5;
+  pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
+.graph-tip strong { font-family: var(--cond); font-size: 12px; }
+
+/* brief highlight when a graph node jumps you back to its place in the prose */
+.nr-jump-flash { animation: nrJumpFlash 1.2s ease-out; border-radius: 2px; }
+@keyframes nrJumpFlash { 0% { background: rgba(255,236,1,.38); box-shadow: 0 0 0 4px rgba(255,236,1,.18); } 100% { background: transparent; box-shadow: none; } }
+
+/* inline section prompts laid into the page by "Start →" (Phase E). Empty ⇒ the
+   ghost shows and nothing publishes (same mechanism as .nr-dek's placeholder). */
+.nr-page p.nr-prompt:empty::before,
+.nr-page p.nr-prompt:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); font-style: italic; pointer-events: none; }
+.nr-page h1.nr-ghost:empty::before, .nr-page h2.nr-ghost:empty::before, .nr-page h3.nr-ghost:empty::before,
+.nr-page h1.nr-ghost:has(> br:only-child)::before, .nr-page h2.nr-ghost:has(> br:only-child)::before, .nr-page h3.nr-ghost:has(> br:only-child)::before {
+  content: attr(data-ph); color: var(--nr-muted); font-style: italic; font-weight: inherit; pointer-events: none; }

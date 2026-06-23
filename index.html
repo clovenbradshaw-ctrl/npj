@@ -119,6 +119,13 @@
 <script src="app/citey-states.js"></script>
 <script src="app/CiteyBrain.js"></script>
 <script src="app/CiteyVoice.js"></script>
+<!-- proposition graph: eoreader4's model-free reading core, vendored + bridged
+     (window.EOReader4), the prose→doc adapter (window.NpjPropGraph) and the SVG
+     node-link renderer (window.NpjGraphRender). The bridge is an ES module that
+     publishes window.EOReader4 after load — consumers guard on its presence. -->
+<script src="app/prop-graph.js"></script>
+<script src="app/graph-render.js"></script>
+<script type="module" src="app/eoreader4-bridge.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
@@ -145,6 +152,9 @@
 <!-- the post-structure rail + blank-page type picker (window.StructureRail),
      fed an api by the Newsroom; the only UI for the structure layer -->
 <script type="text/babel" src="app/PostStructure.jsx"></script>
+<!-- the Graph view: the live document as an eoreader4 proposition graph
+     (window.GraphView), a top-level view beside prose/grounding/citations -->
+<script type="text/babel" src="app/GraphView.jsx"></script>
 <script type="text/babel" src="app/Newsroom.jsx"></script>
 <script type="text/babel" src="app/Standards.jsx"></script>
 <script type="text/babel" src="app/Contributors.jsx"></script>
