@@ -78,7 +78,7 @@ function CitedSpanList({ claims, onJump, currentId }) {
 // no hover and no room to pin a card to a tapped word, so it opens instead as a
 // dismissible bottom sheet (tap the backdrop or ✕ to close) — thumb-reachable
 // and full-width, which is how a touch reader actually opens the receipts.
-function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump }) {
+function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
@@ -128,12 +128,17 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
           <CitedSpanList claims={spans} onJump={onJump} currentId={claim.id} />
         </div>
       )}
-      <div style={{ display: "flex", borderTop: "1.5px solid var(--ink)", position: sheet ? "sticky" : "static", bottom: 0, background: "var(--card)" }}>
-        <button onClick={() => onSuggest(claim.id)} className="np-cond" style={{ flex: 1, padding: sheet ? "13px" : "8px", border: 0, background: "var(--card)",
-          fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-          <span style={{ fontFamily: "var(--mono)" }}>⊨</span> Suggest edit{suggCount ? ` · ${suggCount} open` : ""}
-        </button>
-      </div>
+      {/* Suggest-edit is a reader action; preview is a look-only render of the
+         draft (no feedback rail behind it), so the card drops the action there
+         and shows just the grounding receipts. */}
+      {!preview && (
+        <div style={{ display: "flex", borderTop: "1.5px solid var(--ink)", position: sheet ? "sticky" : "static", bottom: 0, background: "var(--card)" }}>
+          <button onClick={() => onSuggest(claim.id)} className="np-cond" style={{ flex: 1, padding: sheet ? "13px" : "8px", border: 0, background: "var(--card)",
+            fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 600, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <span style={{ fontFamily: "var(--mono)" }}>⊨</span> Suggest edit{suggCount ? ` · ${suggCount} open` : ""}
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -681,6 +686,15 @@ function ArticleRead(props) {
         <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
           {Main}
         </div>
+        {/* Grounding receipts on hover — the SAME citation card the public reader
+           shows. Hover (or tap, on a phone) a claim and its source card floats
+           up, so the author can audit the grounding in the preview exactly as a
+           reader will. Lives INSIDE the fixed preview overlay so it stacks above
+           it. The body already wires enterClaim on each .claim span; the reader
+           branch just renders this card off the same hover state. */}
+        <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
+          onClose={() => { setHover(null); setActiveSrc(null); }}
+          spansForSource={spansForSource} onJump={jumpToClaim} preview />
       </div>
     );
   }
