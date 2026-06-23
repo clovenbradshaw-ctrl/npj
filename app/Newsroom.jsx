@@ -587,8 +587,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // a numbered footnote: marker in the text, a markdown-ready definition at the end
   const insertFootnote = () => {
     const n = (ed.current ? ed.current.querySelectorAll("sup[data-fn]").length : 0) + 1;
-    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="fn${n}" contenteditable="false" title="footnote ${n}">fn${n}</sup>&nbsp;`);
-    if (ed.current) { const p = document.createElement("p"); p.textContent = `[^fn${n}]: footnote text…`; ed.current.appendChild(p); }
+    // marker shows the number; its stable key (fn{n}) rides on data-cite and pairs
+    // with the "[^fn{n}]:" definition appended at the foot of the document.
+    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="fn${n}" contenteditable="false" title="footnote ${n}">${n}</sup>&nbsp;`);
+    if (ed.current) { const p = document.createElement("p"); p.textContent = `[^fn${n}]: Write the note here…`; ed.current.appendChild(p); }
     setFmtMenu(null); scheduleSave();
   };
   const insertVerse = () => { insertHTML(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
