@@ -410,29 +410,53 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   };
 
   // ---- drag-select → staged pin: the author finds the words themself ----
-  const onSrcMouseUp = (refObj) => {
-    if (!modal) return;
+  // Captured at the DOCUMENT level (see the effect below), not just the reader's
+  // own mouseup, so a drag that RELEASES OUTSIDE the reader box still stages —
+  // overshooting a short snapshot, or letting go on the modal's padding, used to
+  // drop the grab silently. We stage only when the live selection actually lands
+  // inside a reader's citable body ([data-doctext]); a click, or a selection
+  // anywhere else, is a no-op. Offsets come off the untrimmed range, then step
+  // past any trimmed leading space so loc slices back to exactly the quote (the
+  // cited-mark render and conflict checks rely on that).
+  const readerRefs = [srcRefModal, srcRefPanel, srcRefMain];
+  const stageSelection = () => {
+    if (!layers.current.modal) return;
     const sel = window.getSelection();
     if (!sel || !sel.rangeCount || sel.isCollapsed) return;
-    const outer = refObj.current;
-    const cont = outer ? (outer.querySelector("[data-doctext]") || outer) : null;
     const r = sel.getRangeAt(0);
-    if (!cont || !cont.contains(r.commonAncestorContainer)) return;
-    const quote = r.toString().trim();
-    if (!quote || quote.length < 3) return;
+    let cont = null;
+    for (const ref of readerRefs) {
+      const outer = ref.current; if (!outer) continue;
+      const dt = outer.querySelector("[data-doctext]") || outer;
+      if (dt.contains(r.commonAncestorContainer)) { cont = dt; break; }
+    }
+    if (!cont) return;
+    const raw = r.toString();
+    const quote = raw.trim();
+    if (quote.length < 3) return;
+    const lead = raw.length - raw.replace(/^\s+/, "").length;
     const pre = document.createRange();
     pre.setStart(cont, 0); pre.setEnd(r.startContainer, r.startOffset);
-    const start = pre.toString().length;
-    const len = r.toString().length;
+    const start = pre.toString().length + lead;
     sel.removeAllRanges();
     setPending(p => {
       const spans = (p && p.spans) ? p.spans.slice() : [];
-      const span = { quote, loc: { start, end: start + len } };
+      const span = { quote, loc: { start, end: start + quote.length } };
       if (!spans.some(x => x.loc.start < span.loc.end && span.loc.start < x.loc.end)) spans.push(span);
       spans.sort((a, b) => a.loc.start - b.loc.start);
       return { spans };
     });
   };
+  // Grabbing works wherever the drag ends: listen at the document so releasing
+  // outside the small reader box still stages (a short snapshot's box is only a
+  // few lines tall, so the drag overshoots it constantly). The handler no-ops
+  // unless the cite modal is armed and the selection lands in a reader, so it's
+  // safe to keep mounted for the whole workspace.
+  useEffect(() => {
+    const onUp = () => stageSelection();
+    document.addEventListener("mouseup", onUp);
+    return () => document.removeEventListener("mouseup", onUp);
+  }, []); // eslint-disable-line
   // PDF selection → a staged span. PDFs carry no flat-text offsets, so the span
   // is quote-only (loc null); the verbatim words are what get cited.
   const stagePdfQuote = (quote) => {
@@ -717,7 +741,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     });
     kids.push(t.slice(pos));
     return (
-      <div ref={refObj} onMouseUp={() => onSrcMouseUp(refObj)} className="np-scroll"
+      <div ref={refObj} className="np-scroll"
         style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, fontFamily: "var(--serif)", fontSize: compact ? 13 : 14.5, lineHeight: 1.62, userSelect: "text", cursor: modal ? "text" : "default", maxHeight: compact ? 300 : 440, overflowY: "auto", boxShadow: modal ? "inset 0 0 0 2px var(--yellow)" : "none" }}>
         {letterhead}
         {imageBanner}
