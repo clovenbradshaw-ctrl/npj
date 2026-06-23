@@ -96,6 +96,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [archiveTarget, setArchiveTarget] = useState(null);
   const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null); // built article for the live "exactly as published" preview
   const [statusBusy, setStatusBusy] = useState(false); // an unpublish in flight
   const [statusErr, setStatusErr] = useState(null);
   const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
@@ -231,6 +232,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // entering a grounding view builds/extends the stable-id ledger (track()) — save
   // so those ids persist even if the author switches views without editing
   useEffect(() => { if (view !== "prose") scheduleSave(); }, [view, scheduleSave]);
+  // A plain Return is a paragraph break; pin the browser's block separator to <p>
+  // so Return splits into <p> blocks consistently (Chrome/Firefox/Safari differ on
+  // the default). The publish pipeline (htmlToBlocks) and the reader then render a
+  // Return as a spaced paragraph and a Shift+Return as a tight <br> — see onEditorKeyDown.
+  useEffect(() => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} }, []);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -465,6 +471,46 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (/\n/.test(text)) escapeBlock();
     window.NpjPlainText.insert(text);
     scanHeadings(); scheduleSave();
+  };
+
+  // ---- Return vs Shift+Return ----
+  // Return = a paragraph break (a new <p>, which publishes with paragraph
+  // spacing). Shift+Return = a soft line break (a <br>, which publishes tight,
+  // no extra space). The browser default already gives <br> for Shift+Return,
+  // and defaultParagraphSeparator="p" (set on mount/focus) makes Return split
+  // into <p> — so the only case worth intercepting is a Return inside a code /
+  // verse block, where it must drop a literal newline instead of escaping the
+  // block into a paragraph.
+  const ensureParaSep = () => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} };
+  const onEditorKeyDown = (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    const sel = window.getSelection();
+    const node = sel && sel.anchorNode;
+    const host = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (host && host.closest && host.closest("pre")) {
+      e.preventDefault();
+      document.execCommand("insertText", false, "\n");
+      scheduleSave();
+    }
+  };
+
+  // ---- live preview: the piece EXACTLY as it will publish ----
+  // Fold the editor's current content through the same builder publishing uses
+  // (genesisFromContent → the reader's article object), then hand it to the
+  // reader's own renderer in preview mode. No round-trip to GitHub, no archive
+  // freeze (image URLs render from where they already live) — just the words,
+  // laid out as the outside will lay them out.
+  const openPreview = () => {
+    if (!window.NpjArticles) return;
+    const html = ed.current ? ed.current.innerHTML : (htmlRef.current || "");
+    const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
+    try {
+      const gen = window.NpjArticles.genesisFromContent(
+        { html, title, tags, column, sources },
+        { slug: fileSlug || slugify(title), headline: title, actor }
+      );
+      setPreviewDoc(gen.article);
+    } catch (e) { setPreviewDoc(null); }
   };
 
   // image slots mutate themselves (src attribute, local fills) — onInput
@@ -1074,6 +1120,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>
         )}
+        <button onClick={openPreview} title="Preview — see the piece exactly as it will appear once published" className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "7px 13px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <I.eye style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Preview</span>
+        </button>
         <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? (isLive ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Republish — this piece is off the site; committing pushes the draft and brings it back live") : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> {isRepublish ? "Republish" : "Publish"}
         </button>
@@ -1227,6 +1276,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
           <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+            onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
@@ -1421,6 +1471,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
+      {previewDoc && window.ArticleRead && (
+        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} me={session && session.user_id} />
+      )}
     </div>
   );
 }

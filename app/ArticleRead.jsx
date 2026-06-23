@@ -262,10 +262,16 @@ function EmbedFigure({ url, caption }) {
 
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
-          suggestions, onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
-          me, onHome, onNewsroom, onEdited } = props;
+          suggestions = [], onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
+          me, onHome, onNewsroom, onEdited,
+          // Preview mode: render a draft EXACTLY as the public reader will, from a
+          // prebuilt article object (the editor's live content folded through the
+          // very same publish pipeline). Same Header + Body the reader uses, just
+          // dropped on the paper page with a Close affordance — no masthead,
+          // control bar, evidence rails or modals.
+          preview, previewArticle, onClose } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
-  const A = window.NPJ.ARTICLE;
+  const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
   const [hover, setHover] = useState(null);
@@ -381,6 +387,14 @@ function ArticleRead(props) {
     }, 60);
     return () => { clearTimeout(t); window.NpjFeedback.clearAnchors(); };
   }, [suggestions, audit]);
+
+  // Esc leaves the preview overlay (no-op in the normal reader)
+  useEffect(() => {
+    if (!preview) return;
+    const onKey = (e) => { if (e.key === "Escape" && onClose) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [preview, onClose]);
 
   const showInText = (s) => { if (s && s.anchor && bodyRef.current) window.NpjFeedback.flash(bodyRef.current, s.anchor); };
 
@@ -576,6 +590,28 @@ function ArticleRead(props) {
       <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
     </div>
   );
+
+  // ── Preview ── the reader's own Header + Body + MethodsFooter, on the paper
+  // page, with nothing but a Close bar around them. Because it renders the SAME
+  // components from the SAME folded article the publish pipeline produces, what
+  // the author sees here is byte-for-byte what ships: paragraph spacing, soft
+  // line breaks, images, byline, the sources footer — all of it.
+  if (preview) {
+    return (
+      <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
+          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <span style={{ fontFamily: "var(--mono)" }}>◉</span> Preview · exactly as readers will see it
+          </span>
+          <span style={{ flex: 1 }} />
+          <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
+        </div>
+        <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
+          {Main}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-in">
