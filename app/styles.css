@@ -144,28 +144,37 @@ a { color: inherit; }
 
 /* ---- the transparency lens ----
    The reader (and the editor's Preview) can switch on a lens that colours every
-   grounded span by HOW it stands: cited to an archived snapshot, cited to a
-   source, or owned by the author as analysis (⊢) / account (⊨) / position (⊩) —
-   plus a red flag for a bound-but-unpinned claim (⊥). Off, the prose is clean;
-   the class only lands on the article while the lens is on, so these rules never
-   touch a normal read. The hues mirror the editor's own grounding palette. */
+   grounded span by HOW it stands, using the SAME vocabulary as the editor's
+   Grounding workspace (GroundingWorkspace.jsx proseShade): a yellow fill for a
+   grounded/cited claim (⊤ / ⊨), violet for one the author owns (⊢ / ⊨ / ⊩),
+   orange + dashed for one that still needs a source (⊥), red for sources that
+   disagree (¬). Off, the prose is clean; the class only lands on the article
+   while the lens is on, so these rules never touch a normal read. */
 .ground-lens .claim[data-ground],
 .ground-lens .gowned[data-ground] {
   padding: 0 1px;
   border-radius: 2px;
   transition: background-color .15s ease, filter .15s ease;
 }
-.ground-lens .claim[data-ground="cited-archived"] { background: color-mix(in srgb, #1f6f4a 18%, transparent); border-bottom: 2px solid #1f6f4a; }
-.ground-lens .claim[data-ground="cited-source"]   { background: color-mix(in srgb, #2b5f8a 18%, transparent); border-bottom: 2px solid #2b5f8a; }
-.ground-lens .claim[data-ground="cited-unpinned"] { background: color-mix(in srgb, #b23a26 20%, transparent); border-bottom: 2px dashed #b23a26; }
-.ground-lens .gowned[data-ground="own-analysis"]  { background: color-mix(in srgb, #7c74de 20%, transparent); border-bottom: 2px solid #7c74de; }
-.ground-lens .gowned[data-ground="own-account"]   { background: color-mix(in srgb, #138086 20%, transparent); border-bottom: 2px solid #138086; }
-.ground-lens .gowned[data-ground="own-position"]  { background: color-mix(in srgb, #9a6a12 20%, transparent); border-bottom: 2px solid #9a6a12; }
+/* grounded / multiple sources — the cited yellow */
+.ground-lens .claim[data-ground="grounded"],
+.ground-lens .claim[data-ground="multi"] { background: rgba(255,236,1,.22); border-bottom: 1.5px solid #d8c520; }
+/* owned by the author — violet */
+.ground-lens .gowned[data-ground="own-analysis"],
+.ground-lens .gowned[data-ground="own-account"],
+.ground-lens .gowned[data-ground="own-position"] { background: rgba(124,116,222,.18); border-bottom: 1.5px solid #7C74DE; }
+/* needs a source — orange, dashed */
+.ground-lens .claim[data-ground="needs"] { background: rgba(216,99,46,.18); border-bottom: 1.5px dashed #D8632E; }
+/* sources disagree — red */
+.ground-lens .claim[data-ground="conflict"] { background: rgba(216,65,44,.18); border-bottom: 1.5px solid #D8412C; }
 /* hovering a claim keeps its grounding colour (it doesn't flip to the yellow
    citation-hint of audit/clean mode) — just a touch deeper so it still reads as
    interactive. */
 .ground-lens .claim[data-ground]:hover,
-.ground-lens .gowned[data-ground]:hover { filter: brightness(.96) saturate(1.2); }
+.ground-lens .gowned[data-ground]:hover { filter: brightness(.96) saturate(1.18); }
+/* the small logic glyph after a span (mirrors the workspace's proseSup); colour
+   is set inline per grounding kind. */
+.ground-lens .gmark { font-family: var(--mono); font-size: 8.5px; vertical-align: super; line-height: 0; margin-left: 2px; user-select: none; }
 
 /* a clickable passage snippet (source → its spans in the article) */
 .cite-span {
