@@ -690,6 +690,20 @@
   }
 
   /* ---------------- publish + edit (through the same n8n webhook) ---------------- */
+  // The publication-safe projection of a source record before it enters the
+  // public, committed log. For an INTERVIEW (a conversation with a named or
+  // anonymous source) the reporter's raw notes (rec.text) are private — only the
+  // exact words PINNED as citations belong in the public record, and those ride
+  // on the body tokens, not here. So we strip the transcript. Every other source
+  // type passes through unchanged. Defensive: works even if NpjInterview is the
+  // single source of truth for the rule, with a local fallback if it's absent.
+  function publishableSource(rec) {
+    if (!rec) return rec;
+    if (window.NpjInterview && window.NpjInterview.redactForPublish) return window.NpjInterview.redactForPublish(rec);
+    if (rec.type === "interview") { const o = Object.assign({}, rec); o.text = ""; return o; }
+    return rec;
+  }
+
   // Build the genesis event from the composer's content. Sources: only the
   // records the body actually cites ride in the log — the log must stand alone.
   function genesisFromContent(content, opts) {
@@ -702,7 +716,7 @@
       (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
     });
     const sources = {};
-    Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = window.NPJ.SOURCES[k]; });
+    Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = publishableSource(window.NPJ.SOURCES[k]); });
     const actor = o.actor || null;
     const mxids = (arr) => (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
     // Byline: authors default to the publisher; "Unsigned" is an explicit override
@@ -826,7 +840,7 @@
     META_STANDARD, checkMeta,
     listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
-    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
+    genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };
 })();

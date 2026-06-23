@@ -19,6 +19,7 @@ function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? 
 // source whose content the app can render inline (image / pdf / text). Web-link
 // snapshots are excluded — they keep their "open ↗".
 function nrIsFileSrc(rec) {
+  if (rec && rec.type === "interview") return false;   // a conversation isn't a file to open
   const SV = window.NpjSourceView;
   return !!(SV && rec && (/^doc-/.test(rec.id || "") || SV.isViewable(rec)));
 }
@@ -135,6 +136,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
+  const [interviewOpen, setInterviewOpen] = useState(false); // the "cite a conversation" composer
   const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
   const [previewDoc, setPreviewDoc] = useState(null); // built article for the live "exactly as published" preview
@@ -1186,6 +1188,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
     })).then(() => setBusy(false));
   };
+  // a conversation source (interview, named or anonymous) — built by the
+  // composer, registered like any other source so the bind + pin flow works on
+  // its notes. No URL to snapshot, so it never enters the archive/PII gate.
+  const addInterview = (rec) => {
+    if (!rec || !rec.id) return;
+    window.NPJ.SOURCES[rec.id] = rec;
+    setSources(s => [{ key: rec.id, archived: false, snapshotting: false }, ...s]);
+    setInterviewOpen(false);
+    setRev(v => v + 1); scheduleSave();
+  };
   // the consented archive action (ArchiveModal) — request + verify for real;
   // a source with no original URL (an uploaded file) can't be auto-archived
   const onArchived = async (key) => {
@@ -1211,7 +1223,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   // A source bound for archive.org that Citey can act on (an upload, or anything
   // with text/opaque bytes) must clear the review before it's archived.
-  const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
+  const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && rec.type !== "interview" && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
   const needsPiiReview = (key) => piiGated(key) && window.NpjPII && !window.NpjPII.gateClear(window.NPJ.SOURCES[key]);
   const piiReviewState = (key) => window.NpjPII ? window.NpjPII.reviewState(window.NPJ.SOURCES[key]) : "unscanned";
   // Archive: gated behind Citey's PII review. Pending → open the review first,
@@ -1664,6 +1676,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
               <I.doc style={{ fontSize: 15 }} /> Upload documents
             </label>
+            {/* a source that isn't a document or a link: a conversation with a
+                person — named, or anonymous. Citable on what they said. */}
+            {window.InterviewComposer && (
+              <button onClick={() => setInterviewOpen(true)} className="np-cond" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 8, border: "1px solid " + NR.line, background: "transparent", color: NR.text, padding: "8px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: "pointer" }}>
+                <I.chat style={{ fontSize: 15 }} /> Cite a conversation
+              </button>
+            )}
             <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual and two-sided: select the exact words in your draft, bind a source, then <b>pin the exact words IN the source</b> that back the claim. You can't cite a whole page. One source can back several spans.</div>
           </div>
 
@@ -1673,14 +1692,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
             const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
             const reviewSt = piiGated(s.key) ? piiReviewState(s.key) : null;
+            const iv = !!(window.NpjInterview && window.NpjInterview.isInterview(rec));
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  {s.uploading ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> storing file</span>
+                  {iv ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok, display: "inline-flex", alignItems: "center", gap: 4 }} title="A conversation — cited on what the source said">● conversation</span>
+                    : s.uploading ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> storing file</span>
                     : s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
                     : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
+                  {iv && <span className="np-mono" title={(rec.talk && rec.talk.anonymous) ? "Anonymous — identity is never stored in the draft" : "Named, cited source"} style={{ fontSize: 8.5, color: (rec.talk && rec.talk.anonymous) ? NR.warn : NR.soft, border: "1px solid " + ((rec.talk && rec.talk.anonymous) ? NR.warn : NR.line), padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{(rec.talk && rec.talk.anonymous) ? "Anonymous" : "Named"}</span>}
                   {nrIsFileSrc(rec) && <span className="np-mono" title={rec.file_url ? "Stored on your account" : "In this browser only — sign-in stores it to your account"} style={{ fontSize: 8.5, color: NR.soft, border: "1px solid " + NR.line, padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{window.NpjSourceView.kindLabel(rec)}{!rec.file_url && !s.uploading ? " · local" : ""}</span>}
                   {s.uploadErr && <span className="np-mono" title={s.uploadErr} style={{ fontSize: 8.5, color: NR.warn, border: "1px solid " + NR.warn, padding: "0 5px" }}>storage failed</span>}
                   {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Review this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
@@ -1710,7 +1732,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {nrIsFileSrc(rec) && <button onClick={() => setExplorer({ key: s.key })} title="Open and read this file" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.eye style={{ fontSize: 12 }} /> View</button>}
-                  {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Review this for PII first, then archive" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review & archive" : "Archive"}</button>}
+                  {!iv && !s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Review this for PII first, then archive" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review & archive" : "Archive"}</button>}
                 </div>
               </div>
             );
@@ -1752,7 +1774,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               {sources.filter(s => { const r = window.NPJ.SOURCES[s.key] || {}; const q = srcQuery.trim().toLowerCase(); return !q || ((r.title || "") + " " + (r.outlet || "") + " " + (r.id || s.key)).toLowerCase().includes(q); }).map(s => { const rec = window.NPJ.SOURCES[s.key] || { title: s.key, outlet: "" }; const n = citeNum(s.key); return (
                 <button key={s.key} onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} style={{ display: "flex", gap: 7, alignItems: "baseline", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "7px 4px", cursor: "pointer" }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  <span><span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5 }}>{rec.title}</span><span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {s.archived ? "· archived" : "· snapshot"}{n > 0 ? " · +span" : ""}</span></span>
+                  <span><span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5 }}>{rec.title}</span><span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {rec.type === "interview" ? "" : (s.archived ? "· archived" : "· snapshot")}{n > 0 ? " · +span" : ""}</span></span>
                 </button>); })}
               {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 8px" }}>Ingest a source first (left panel), or paste a URL:</div>}
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
@@ -1832,6 +1854,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
+      {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => setInterviewOpen(false)} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}

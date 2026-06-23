@@ -903,6 +903,8 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
       <div className="np-scroll" style={{ maxHeight: "calc(100vh - 140px)", overflowY: "auto", paddingRight: 4 }}>
         {sourceList.map(({ key, num }) => {
           const s = srcOf(key); const on = activeSrc === key; const spans = spansForSource(key);
+          const ivLink = window.NpjInterview && window.NpjInterview.isInterview(s);
+          const url = s.archive_url || s.original_url;
           // hovering the source lights up its exact spans in the body (data-active)
           // and reveals them here as click-to-jump passages
           return (
@@ -916,7 +918,9 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
                   <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <SourceTag type={s.type} />
                     {spans.length > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>· {spans.length} passage{spans.length !== 1 ? "s" : ""}</span>}
-                    <a href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="np-mono" title="Open the archived snapshot" style={{ fontSize: 9.5, color: "var(--verified)", textDecoration: "none" }}>snapshot ↗</a>
+                    {ivLink
+                      ? <span className="np-mono" style={{ fontSize: 9.5, color: "var(--review)" }}>{window.NpjInterview.outletLine(s.talk || {})}</span>
+                      : url ? <a href={url} target="_blank" rel="noopener" className="np-mono" title="Open the archived snapshot" style={{ fontSize: 9.5, color: "var(--verified)", textDecoration: "none" }}>snapshot ↗</a> : null}
                   </div>
                 </div>
               </div>
@@ -944,15 +948,23 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
       <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: "12px 24px", marginTop: 10 }}>
         {sourceList.map(({ key, num }) => {
           const s = srcOf(key); const spans = spansForSource ? spansForSource(key) : [];
+          // an interview has no snapshot to open — render it as a plain (non-link)
+          // reference line carrying its attribution + date instead of a dead link
+          const ivLink = window.NpjInterview && window.NpjInterview.isInterview(s);
+          const url = s.archive_url || s.original_url;
+          const inner = (
+            <React.Fragment>
+              <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
+              <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
+                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: ivLink ? "var(--review)" : "var(--verified)" }}>{ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved) : ((s.archive_url ? "archived " + (s.retrieved || "") : "live link") + " ↗")}</span>
+              </span>
+            </React.Fragment>
+          );
           return (
             <div key={key} style={{ borderBottom: "1px solid var(--rule)", paddingBottom: 6 }}>
-              <a href={s.archive_url || s.original_url} target="_blank" rel="noopener" className="headline-link"
-                style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none" }}>
-                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
-                <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                  <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)" }}>{s.archive_url ? "archived " + (s.retrieved || "") : "live link"} ↗</span>
-                </span>
-              </a>
+              {ivLink || !url
+                ? <div style={{ display: "flex", gap: 8, padding: "6px 6px" }}>{inner}</div>
+                : <a href={url} target="_blank" rel="noopener" className="headline-link" style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none" }}>{inner}</a>}
               {/* the exact passages this source grounds — click to jump back up */}
               <CitedSpanList claims={spans} onJump={onJump} />
             </div>

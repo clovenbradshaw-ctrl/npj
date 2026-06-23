@@ -116,7 +116,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
       (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
     });
     const sources = {};
-    Object.keys(usedKeys).forEach(k => { const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || (A.sources && A.sources[k]); if (rec) sources[k] = rec; });
+    const pub = (window.NpjArticles && window.NpjArticles.publishableSource) || ((r) => r);
+    Object.keys(usedKeys).forEach(k => { const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || (A.sources && A.sources[k]); if (rec) sources[k] = pub(rec); });
 
     // the REC operand carries ONLY what changed (plus body, which is the edit)
     const operand = { body: blocks };
