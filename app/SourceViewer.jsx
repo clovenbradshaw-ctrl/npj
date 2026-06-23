@@ -36,6 +36,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless }) 
   const [err, setErr] = useState(null);
   const [txt, setTxt] = useState(String(rec.text || ""));  // decoded text-file body
   const [txtLoading, setTxtLoading] = useState(false);
+  const [showOcr, setShowOcr] = useState(false);           // image: reveal the recognized (OCR) text
 
   // resolve a renderable URL (blob → resolved media-store → archive/original)
   useEffect(() => {
@@ -106,12 +107,21 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless }) 
   );
 
   if (kind === "image") {
+    const ocr = String(rec.text || "").trim();
     return (
       <div>
         <div style={{ ...mat, display: "flex", alignItems: "center", justifyContent: "center", maxHeight: H, minHeight: 120, overflow: "auto", padding: 8 }}>
           <img src={url} alt={rec.title || "uploaded image"} style={{ maxWidth: "100%", maxHeight: H - 16, objectFit: "contain", display: "block" }} />
         </div>
         {linkRow}
+        {ocr ? (
+          <div style={{ marginTop: 8 }}>
+            <button onClick={() => setShowOcr(v => !v)} className="np-mono" title="Text read from the image by OCR" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--data)", fontSize: 10.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
+              {showOcr ? "▾" : "▸"} Recognized text (OCR)
+            </button>
+            {showOcr && <div className="np-scroll" style={{ maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--rule)", padding: "10px 12px", marginTop: 6, fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.55 }}>{rec.text}</div>}
+          </div>
+        ) : null}
       </div>
     );
   }
