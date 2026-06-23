@@ -92,7 +92,12 @@ function HashChip({ row, NR }) {
 
 // ---- Citey, drawn: a bent-wire logic operator whose face IS the state ----
 // ⊥ falsum (worried, orange) · ⊢ turnstile (guiding, purple) · ⊤ verum (starry, green)
-function drawCitey(stateName, width, opts) {
+// Citey, the drawn mascot, is retired for now: the grounding bar, walk stage and
+// cite modal keep their copy and actions, just without the character. This stub
+// returns null so the sprite vanishes everywhere it was rendered. The original
+// drawing is kept (unused) below for an easy restore.
+function drawCitey() { return null; }
+function drawCiteyRetired(stateName, width, opts) {
   opts = opts || {};
   const star = (x, y) => (
     <path d="M0 -7.5 L1.9 -2.4 L7.2 -2.3 L3 0.9 L4.5 6 L0 2.9 L-4.5 6 L-3 0.9 L-7.2 -2.3 L-1.9 -2.4 Z"
@@ -242,7 +247,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     if (!needs.length) {
       const conf = fresh.filter(r => statusOf(r).key === "conflict").length;
       setWalk(null);
-      say("⊤ Every sentence is grounded or owned — Citey can rest." + (conf ? " Resolve the conflict and the gate opens." : ""));
+      say("⊤ Every sentence is grounded or owned." + (conf ? " Resolve the conflict and the gate opens." : ""));
       return;
     }
     const ord = fresh.map(r => r.sid);
@@ -623,7 +628,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       } else if (it.type === "hit") {
         const active = it.j === armIdx;
         kids.push(
-          <mark key={"h" + it.j} data-hit={it.j} title="Citey scents this passage — read it; select the words yourself if they back the claim"
+          <mark key={"h" + it.j} data-hit={it.j} title="Likely match — read it; select the words yourself if they back the claim"
             style={{ background: active ? "rgba(255,236,1,.42)" : "rgba(255,236,1,.16)", color: "#16140d", padding: "0 1px", borderBottom: "2px dotted " + (active ? "#9a8500" : "rgba(154,133,0,.55)") }}>
             {t.slice(it.start, it.end)}
           </mark>);
@@ -682,7 +687,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const hitNav = armHits.length > 0 && (
     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7 }}>
       <span className="np-mono" style={{ flex: 1, fontSize: 10, color: NR.soft, lineHeight: 1.45 }}>
-        {"Citey scents " + armHits.length + " passage" + (armHits.length === 1 ? "" : "s") + " — read them, then grab the spans that actually support the claim"}
+        {armHits.length + " likely passage" + (armHits.length === 1 ? "" : "s") + " — read them, then grab the spans that actually support the claim"}
       </span>
       <button onClick={() => stepHit(-1)} title="Previous scented passage" style={chipBtn({ padding: "3px 8px" })}>‹</button>
       <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>{((armIdx % armHits.length) + 1) + " / " + armHits.length}</span>
@@ -1057,7 +1062,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const walkSub = walk
     ? "“" + clip(curWalkRow ? curWalkRow.text : "", 70) + "” — pin a quote or own it · " + counts.needs + " left"
     : counts.needs
-      ? counts.needs + " sentence" + (counts.needs === 1 ? "" : "s") + " need" + (counts.needs === 1 ? "s" : "") + " a source" + (counts.conflict ? " · " + counts.conflict + " conflict to resolve" : "") + " — Citey will walk you through them"
+      ? counts.needs + " sentence" + (counts.needs === 1 ? "" : "s") + " need" + (counts.needs === 1 ? "s" : "") + " a source" + (counts.conflict ? " · " + counts.conflict + " conflict to resolve" : "") + " — walk through them one at a time"
       : counts.conflict
         ? "no missing sources — but " + counts.conflict + " conflict still blocks the gate"
         : "every sentence is grounded or owned — the gate is open";
@@ -1065,7 +1070,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 14px", borderTop: "1.5px solid " + (walk ? "#7C74DE" : NR.line), background: NR.rail }}>
       {drawCitey(citeyState, walk ? 44 : 36, { wave: !!walk, hop })}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, color: NR.text }}>{walk ? "Citey has the floor" : "Citey — cite everything"}</div>
+        <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, color: NR.text }}>{walk ? "Walking through claims" : "Cite everything"}</div>
         <div className="np-mono" style={{ fontSize: 10, color: walk ? "#7C74DE" : blockers === 0 ? "#1f8a55" : NR.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{walkSub}</div>
       </div>
       {walk
@@ -1081,7 +1086,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         {drawCitey("turnstile", 96, { wave: true, hop })}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Citey — cite everything</span>
+            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Cite everything</span>
             <span style={{ flex: 1 }} />
             <span className="np-mono" style={{ fontSize: 9.5, color: "#7C74DE", fontWeight: 700 }}>{counts.needs === 1 ? "LAST ONE" : counts.needs + " TO GO"}</span>
           </div>

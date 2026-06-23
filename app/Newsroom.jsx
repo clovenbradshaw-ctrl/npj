@@ -76,6 +76,41 @@ function NrMediaImg({ url, alt, style, ...rest }) {
   return <img src={resolved} alt={alt || ""} style={style} {...rest} />;
 }
 
+// A small, clickable PREVIEW of an uploaded file on its source card — the
+// screenshot/scan you cited, shown inline so you can see the content (and click
+// into the full viewer) instead of guessing from a filename. Images render as a
+// thumbnail; a PDF shows a labelled tile. The image URL resolves the same way
+// the reader does (session blob → token-fetched media-store blob → archive /
+// original), via NrMediaImg. Returns null for kinds with no useful thumbnail.
+function NrSourceThumb({ srcKey, rec, onOpen }) {
+  const SV = window.NpjSourceView;
+  if (!SV) return null;
+  const key = (rec && (rec.id || rec.key)) || srcKey || "";
+  const kind = SV.kindOf(rec);
+  if (kind === "image") {
+    const url = SV.blobUrl(key) || rec.file_url || rec.archive_url || rec.original_url || "";
+    if (!url) return null;
+    return (
+      <button onClick={onOpen} title="Open this image" style={{ display: "block", width: "100%", padding: 0, border: "1px solid " + NR.line, background: NR.bg, cursor: "pointer", position: "relative", overflow: "hidden", lineHeight: 0 }}>
+        <NrMediaImg url={url} alt={rec.title || "uploaded image"} style={{ width: "100%", height: 132, objectFit: "cover", display: "block" }} />
+        <span className="np-mono" style={{ position: "absolute", right: 5, bottom: 5, fontSize: 8.5, color: "#fff", background: "rgba(8,7,5,.66)", padding: "1px 5px", display: "inline-flex", alignItems: "center", gap: 3, pointerEvents: "none", lineHeight: 1.4 }}><I.eye style={{ fontSize: 10 }} /> view</span>
+      </button>
+    );
+  }
+  if (kind === "pdf") {
+    return (
+      <button onClick={onOpen} title="Open this PDF" style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, cursor: "pointer", padding: "10px 11px", textAlign: "left" }}>
+        <I.doc style={{ fontSize: 22, color: NR.warn, flex: "0 0 auto" }} />
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.filename || rec.title || "PDF document"}</span>
+          <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>PDF · click to read &amp; cite</span>
+        </span>
+      </button>
+    );
+  }
+  return null;
+}
+
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me, isAdmin } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -926,8 +961,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setSources(s => s.map(x => x.key === m.key ? { ...x, uploading: false, uploadErr: (e && e.message) || "upload failed" } : x));
       }
     });
-    // read text out of text-like files so Citey can scan them and you can cite
-    // them, then stamp a pending PII review and open Citey on the first upload.
+    // read text out of text-like files so it can be scanned + cited, then stamp a
+    // pending PII review and open the review on the first upload.
     Promise.all(made.map(m => new Promise(resolve => {
       if (!isTextFile(m.file)) return resolve();
       const r = new FileReader();
@@ -940,6 +975,25 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (made[0]) setRedactTarget(made[0].key);
       scheduleSave();
     });
+    // Screenshots & scans carry no machine-readable text. OCR them (lazy
+    // Tesseract) so an uploaded image becomes CITABLE — its words flow into the
+    // pin reader — and SCANNABLE — the PII review sees what's in it. Runs off the
+    // session blob, so it doesn't wait on the media-store upload. Best-effort: a
+    // failure leaves the image as-is (cite it by transcribing).
+    const SVocr = window.NpjSourceView;
+    if (SVocr && SVocr.extractImageText) {
+      made.filter(m => SVocr.kindOf(window.NPJ.SOURCES[m.key]) === "image").forEach(m => {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: true } : x));
+        SVocr.extractImageText(window.NPJ.SOURCES[m.key]).then(t => {
+          const rec = window.NPJ.SOURCES[m.key];
+          if (rec && t && t.trim()) { rec.text = t; rec.binary = false; scanSource(m.key); }
+          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
+          scheduleSave();
+        }).catch(() => {
+          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
+        });
+      });
+    }
   };
 
   // ---- Matrix: projects (shared rooms) + invites ----
@@ -1262,7 +1316,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__citey && window.__citey.suggest()} title="Citey: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "2px 6px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}><I.sparkle /></button></div>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Tags</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
               {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
               <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
@@ -1309,7 +1363,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
           {(() => { const nq = needsQuoteCount(); return nq ? (
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
-              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — Citey can find them.
+              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — the picker can help you find them.
             </div>
           ) : null; })()}
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
@@ -1344,19 +1398,34 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
                   {nrIsFileSrc(rec) && <span className="np-mono" title={rec.file_url ? "Stored on your account" : "In this browser only — sign-in stores it to your account"} style={{ fontSize: 8.5, color: NR.soft, border: "1px solid " + NR.line, padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{window.NpjSourceView.kindLabel(rec)}{!rec.file_url && !s.uploading ? " · local" : ""}</span>}
                   {s.uploadErr && <span className="np-mono" title={s.uploadErr} style={{ fontSize: 8.5, color: NR.warn, border: "1px solid " + NR.warn, padding: "0 5px" }}>storage failed</span>}
-                  {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Citey reviews this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
-                  {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="Citey's PII review is done — cleared to archive">✓ PII reviewed</span>}
+                  {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Review this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
+                  {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="PII review done — cleared to archive">✓ PII reviewed</span>}
                   <span style={{ flex: 1 }} />
                   {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: unpinned ? NR.warn : NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}{unpinned ? " · " + unpinned + " ⚑" : ""}</span>}
                 </div>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</div>
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
+                {/* a clickable preview of the file itself — the screenshot/scan/PDF you cited */}
+                {(() => {
+                  const k = window.NpjSourceView ? window.NpjSourceView.kindOf(rec) : "unknown";
+                  if (k !== "image" && k !== "pdf") return null;
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <NrSourceThumb srcKey={s.key} rec={rec} onOpen={() => setExplorer({ key: s.key })} />
+                      {s.ocr
+                        ? <div className="np-mono" style={{ fontSize: 9, color: NR.warn, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 5 }}><Spinner /> reading the text in this image…</div>
+                        : (k === "image" && String(rec.text || "").trim()
+                          ? <div className="np-mono" style={{ fontSize: 9, color: NR.ok, marginTop: 4 }}>✓ text recognized — cite it below</div>
+                          : null)}
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {nrIsFileSrc(rec) && <button onClick={() => setExplorer({ key: s.key })} title="Open and read this file" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.eye style={{ fontSize: 12 }} /> View</button>}
-                  {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Citey reviews this for PII first, then archives" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review &amp; archive" : "Archive"}</button>}
+                  {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Review this for PII first, then archive" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review & archive" : "Archive"}</button>}
                 </div>
               </div>
             );

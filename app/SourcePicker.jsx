@@ -20,6 +20,7 @@ function SourcePicker({ srcKey, claimText, onPick }) {
   const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || {};
   const [text, setText] = React.useState(String(rec.text || ""));
   const [paste, setPaste] = React.useState("");
+  const [extracting, setExtracting] = React.useState(false);   // reading text out of an image/text file
   const ref = React.useRef(null);
   const SV = window.NpjSourceView;
   const kind = SV ? SV.kindOf(rec) : "text";
@@ -27,14 +28,20 @@ function SourcePicker({ srcKey, claimText, onPick }) {
 
   React.useEffect(() => { setText(String(((window.NPJ.SOURCES || {})[srcKey] || {}).text || "")); }, [srcKey]);
 
-  // an uploaded text file with no text on record yet → read its bytes back so the
-  // reader shows the words instead of a paste box (PDFs load via the viewer above)
+  // a source with no text on record yet → recover it so the reader shows words
+  // to highlight instead of a blank paste box: decode a stored text file, or OCR
+  // an uploaded image (a screenshot/scan). PDFs load via the page renderer above.
   React.useEffect(() => {
     const SV = window.NpjSourceView;
     const live = (window.NPJ.SOURCES || {})[srcKey] || {};
-    if (!SV || !SV.ensureText || String(live.text || "").trim() || SV.kindOf(live) !== "text" || !SV.hasFile(live)) return;
-    let alive = true;
-    SV.ensureText(live).then(t => { if (alive && t && t.trim()) { live.text = t; setText(t); } }).catch(() => {});
+    const k = SV && SV.kindOf(live);
+    if (!SV || !SV.ensureText || String(live.text || "").trim() || !SV.hasFile(live) || (k !== "text" && k !== "image")) { setExtracting(false); return; }
+    let alive = true; setExtracting(true);
+    SV.ensureText(live).then(t => {
+      if (!alive) return;
+      setExtracting(false);
+      if (t && t.trim()) { live.text = t; live.binary = false; setText(t); }
+    }).catch(() => { if (alive) setExtracting(false); });
     return () => { alive = false; };
   }, [srcKey]);
 
@@ -80,8 +87,8 @@ function SourcePicker({ srcKey, claimText, onPick }) {
   let inner;
   if (!text.trim()) {
     inner = React.createElement("div", { key: "in" },
-      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: "rgba(255,255,255,.6)", marginBottom: 4, marginTop: viewerEl ? 8 : 0 } },
-        visual ? "Cite from the image above — type or paste the exact words below." : "No source text on record yet — paste a passage and Citey will rank it."),
+      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: extracting ? "var(--yellow)" : "rgba(255,255,255,.6)", marginBottom: 4, marginTop: viewerEl ? 8 : 0 } },
+        extracting ? "Reading the text in this image…" : (visual ? "Cite from the image above — its text is read automatically; or type/paste the exact words." : "No source text on record yet — paste a passage and it'll be ranked.")),
       React.createElement("textarea", { rows: 3, value: paste, onChange: e => setPaste(e.target.value), placeholder: "Paste the source passage here…",
         style: { width: "100%", resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "6px 7px", outline: "none", boxSizing: "border-box" } }),
       React.createElement("button", { onClick: seed, className: "np-cond", style: { marginTop: 5, border: "1px solid " + Y, background: Y, color: "var(--ink)", padding: "4px 9px", fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", cursor: "pointer" } }, "Load & rank"));
@@ -99,7 +106,7 @@ function SourcePicker({ srcKey, claimText, onPick }) {
 
     inner = React.createElement("div", { key: "in" },
       React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: Y, margin: (viewerEl ? "8px 0 4px" : "0 0 4px") } },
-        "The source — highlight the words that back your claim" + (top ? " (Citey's best match is shaded)" : "")),
+        "The source — highlight the words that back your claim" + (top ? " (best match is shaded)" : "")),
       React.createElement("div", { ref: ref, onMouseUp: onMouseUp,
         style: { maxHeight: 150, overflowY: "auto", whiteSpace: "pre-wrap", background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.25)", padding: "8px 9px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.5, userSelect: "text", cursor: "text" } }, body),
       hits.length > 0 && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },

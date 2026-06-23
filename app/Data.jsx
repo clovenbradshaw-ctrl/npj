@@ -55,21 +55,21 @@ function ArchiveModal({ items, onClose, onDone, srcKey }) {
               You're about to archive <strong style={{ color: "var(--ink)" }}>{list.length} source{list.length !== 1 ? "s" : ""}</strong> to <em>archive.org</em>. Each becomes part of the permanent public record, and every citation that points to it will resolve to its archived snapshot.
             </p>
             <div style={{ padding: "10px 12px", background: "color-mix(in srgb, var(--review) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--review) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, color: "var(--review)", marginBottom: 8 }}>
-              <strong style={{ fontWeight: 700 }}>Permanent &amp; public. </strong>An archived source can't be edited or deleted later. Citey reviews each upload for PII first and <strong>hard-redacts</strong> anything you don't want public — there's no taking it back once it's on archive.org.
+              <strong style={{ fontWeight: 700 }}>Permanent &amp; public. </strong>An archived source can't be edited or deleted later. Each upload is reviewed for PII first and <strong>hard-redacts</strong> anything you don't want public — there's no taking it back once it's on archive.org.
             </div>
             <Chk k="permanence" label="Permanence">This is uploaded permanently to the Internet Archive and cannot be deleted.</Chk>
             {gateable ? (
               <div style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--rule)", alignItems: "flex-start" }}>
                 <span style={{ marginTop: 1, color: reviewed ? "var(--verified)" : "var(--review)", fontSize: 16, width: 16, textAlign: "center", flex: "0 0 auto" }}>{reviewed ? <I.check /> : "⚑"}</span>
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>Privacy — Citey's PII review. </span>
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>Privacy — PII review. </span>
                   <span style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.45, color: "var(--ink-soft)" }}>
                     {reviewed
                       ? <React.Fragment>Reviewed — {(rec.piiReview.redactions || []).length} redacted, {(rec.piiReview.affirmations || []).length} kept on purpose.</React.Fragment>
-                      : "Citey has to scan this, and you have to redact or affirm each flagged span, before it can be archived."}
+                      : "This has to be scanned, and each flagged span redacted or affirmed, before it can be archived."}
                   </span>
                   <div style={{ marginTop: 6 }}>
-                    <button className="btn btn-sm btn-primary" onClick={() => setReviewOpen(true)} style={reviewed ? { background: "transparent", color: "var(--ink)", borderColor: "var(--ink)" } : {}}>{reviewed ? "Re-open review" : "Review with Citey"}</button>
+                    <button className="btn btn-sm btn-primary" onClick={() => setReviewOpen(true)} style={reviewed ? { background: "transparent", color: "var(--ink)", borderColor: "var(--ink)" } : {}}>{reviewed ? "Re-open review" : "Review for PII"}</button>
                   </div>
                 </div>
               </div>

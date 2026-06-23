@@ -26,12 +26,12 @@
    Loads via in-browser Babel after Data.jsx. Publishes window.CiteyRedactModal.
    ============================================================ */
 
-// Templated Citey lines — leashed, no model (same discipline as CiteyVoice).
+// Neutral, templated review lines — mechanical recognizers, no model.
 const RX_SAY = {
-  some: (n) => "i scanned this. " + n + " span" + (n === 1 ? "" : "s") + " could identify someone or expose private data. redact what shouldn't be public — or keep it on purpose.",
-  clean: "i scanned this and found nothing obvious. read it over, then mark it reviewed — i'm not a guarantee.",
-  binary: "i can't read inside this file type in the browser. paste its text and i'll scan it, or check it yourself and affirm there's no PII.",
-  reviewed: "reviewed. this can go to the archive now.",
+  some: (n) => "Scanned. " + n + " span" + (n === 1 ? "" : "s") + " could identify someone or expose private data — redact what shouldn't be public, or keep it on purpose.",
+  clean: "Scanned — nothing obvious found. Read it over, then mark it reviewed. This is a first pass, not a guarantee.",
+  binary: "This file type can't be read inside the browser. Paste its text to scan it, or check it yourself and affirm there's no PII.",
+  reviewed: "Reviewed. This can go to the archive now.",
 };
 
 function rxNowIso() { return new Date().toISOString(); }
@@ -59,6 +59,16 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
   const [showKept, setShowKept] = useState(false);
   const [, bump] = useState(0);
   const bodyRef = useRef(null);
+
+  // OCR (or another async seed) can fill rec.text AFTER this modal opened on a
+  // binary upload — e.g. a screenshot whose text is still being read. Sync it in
+  // so the review flips from paste-to-scan to the real words (and live PII
+  // findings) without a reopen. Only adopted while we have none; redactions own
+  // the text after that.
+  useEffect(() => {
+    const live = String((rec && rec.text) || "");
+    if (live && !text.trim()) setText(live);
+  }, [rec && rec.text]); // eslint-disable-line
 
   if (!rec || !PII) return null;
 
@@ -182,9 +192,9 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
       <div onClick={(e) => e.stopPropagation()} style={{ width: "min(720px,96vw)", maxHeight: "92vh", display: "flex", flexDirection: "column", background: "var(--card)", color: "var(--ink)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         {/* header */}
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", borderBottom: "2px solid var(--ink)", background: "var(--yellow)" }}>
-          <span style={{ fontFamily: "var(--mono, monospace)", fontWeight: 800, fontSize: 26, lineHeight: 1, color: hd.color, textShadow: "0 0 14px " + hd.color + "44" }}>{hd.glyph}</span>
+          <I.shield style={{ fontSize: 24, color: hd.color, flex: "0 0 auto" }} />
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "var(--display)", fontSize: 20, lineHeight: 1 }}>Citey — review for PII</div>
+            <div style={{ fontFamily: "var(--display)", fontSize: 20, lineHeight: 1 }}>Review for PII</div>
             <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || srcKey}{rec.outlet ? " · " + rec.outlet : ""}</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: 0, fontSize: 18, cursor: "pointer" }}><I.x /></button>
@@ -204,7 +214,7 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
                 <I.warning style={{ fontSize: 18, color: "var(--review)", flex: "0 0 auto", marginTop: 1 }} />
                 <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink-soft)" }}>{RX_SAY.binary}</div>
               </div>
-              <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={6} placeholder="Paste the document's text here and Citey will scan it…"
+              <textarea value={paste} onChange={(e) => setPaste(e.target.value)} rows={6} placeholder="Paste the document's text here and it'll be scanned…"
                 style={{ width: "100%", resize: "vertical", border: "1.5px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 10px", outline: "none", boxSizing: "border-box" }} />
               <button className="btn btn-sm btn-primary" onClick={seedText} disabled={!paste.trim()} style={{ marginTop: 8, opacity: paste.trim() ? 1 : .5 }}>Scan pasted text</button>
             </div>
