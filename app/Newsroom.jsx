@@ -35,7 +35,7 @@ const FIG_CAPS =
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
 // so the author fills in fields, not loose formatted prose.
 const START_DOC =
-  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot>' + FIG_CAPS + '</figure>' +
+  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol conform shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot>' + FIG_CAPS + '</figure>' +
   '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';

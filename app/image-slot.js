@@ -38,6 +38,13 @@
  *                attributes (`fit`, `data-crop="s,x,y,ar"`) and reported on the
  *                'image-slot-change' event, so a host that persists the slot's
  *                HTML (NPJ drafts/publish) carries the framing without a sidecar.
+ *   conform      Boolean — once filled, size the box to the IMAGE's aspect ratio
+ *                instead of the author-declared height, so the slot shows the
+ *                whole image (matching what the reader publishes) rather than a
+ *                fixed-height letterbox crop. A saved crop's aspect wins over the
+ *                image's natural ratio. Empty slots keep the declared height as
+ *                the drop target. Used by the NPJ banner; reframe (cover) still
+ *                zoom-crops within the image's own ratio.
  *   placeholder  Empty-state caption.                      (default 'Drop an image')
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
@@ -289,7 +296,7 @@
 
   class ImageSlot extends HTMLElement {
     static get observedAttributes() {
-      return ['shape', 'radius', 'mask', 'fit', 'position', 'placeholder', 'src', 'id', 'fitcontrol'];
+      return ['shape', 'radius', 'mask', 'fit', 'position', 'placeholder', 'src', 'id', 'fitcontrol', 'conform'];
     }
 
     constructor() {
@@ -299,6 +306,10 @@
       // on the frame (circle, pill, rounded) can't clip them.
       root.innerHTML =
         '<style>' + stylesheet + '</style>' +
+        // Holds the dynamic `conform` rule (a :host aspect-ratio sized to the
+        // filled image). Kept in the shadow DOM — never an inline style on the
+        // host — so the light-DOM HTML the newsroom persists stays pristine.
+        '<style class="conform"></style>' +
         '<div class="frame" part="frame">' +
         '  <img part="image" alt="" draggable="false" style="display:none">' +
         '  <div class="empty" part="empty">' + icon +
@@ -326,6 +337,7 @@
       this._spill = root.querySelector('.spill');
       this._ghost = root.querySelector('.ghost');
       this._fitbtn = root.querySelector('.fitbtn');
+      this._conformSheet = root.querySelector('style.conform');
       this._err = null;
       this._input = root.querySelector('input');
       this._depth = 0;
@@ -376,8 +388,9 @@
         this._input.value = '';
       });
       // naturalWidth/Height aren't known until load — re-apply so the cover
-      // baseline is computed from real dimensions, not the 100%×100% fallback.
-      this._img.addEventListener('load', () => this._applyView());
+      // baseline (and the `conform` box ratio) are computed from real
+      // dimensions, not the 100%×100% fallback.
+      this._img.addEventListener('load', () => { this._applyView(); this._applyConform(); });
       // Load resilience: try the primary src; on error fall back to the
       // `data-alt` URL (e.g. the archive.org copy behind a media-store src),
       // then to a token-fetched blob: URL for an auth-gated homeserver.
@@ -843,6 +856,30 @@
       this._spill.style.left = l; this._spill.style.top = t;
     }
 
+    // `conform` slots take the IMAGE's shape: once filled, the box's height is
+    // driven by an aspect ratio (the saved crop's, else the image's natural
+    // ratio) so the editor shows the whole image — what the reader publishes —
+    // instead of the fixed author-declared letterbox. Written as a shadow :host
+    // rule with !important (which outranks the host's non-important inline
+    // height) rather than mutating the host's inline style, so the light-DOM
+    // HTML the newsroom persists as a draft is never rewritten. An empty slot
+    // (no aspect known) falls back to the declared height as the drop target.
+    _applyConform() {
+      if (!this._conformSheet) return;
+      let ar = 0;
+      if (this.hasAttribute('conform') && this.hasAttribute('data-filled')) {
+        const crop = this._parseCrop(this.getAttribute('data-crop'));
+        if (crop && crop.ar) ar = crop.ar;
+        else {
+          const iw = this._img.naturalWidth, ih = this._img.naturalHeight;
+          if (iw && ih) ar = iw / ih;
+        }
+      }
+      this._conformSheet.textContent = ar
+        ? ':host{height:auto!important;aspect-ratio:' + (Math.round(ar * 10000) / 10000) + '!important}'
+        : '';
+    }
+
     _commitView() {
       const v = { s: this._view.s, x: this._view.x, y: this._view.y };
       if (this._userUrl) v.u = this._userUrl;
@@ -881,6 +918,8 @@
       const parts = [r3(v.s || 1), r3(v.x || 0), r3(v.y || 0)];
       if (ar) parts.push(r3(ar));
       this.setAttribute('data-crop', parts.join(','));
+      // a cropped cover now has its own aspect — reflect it in a conform box
+      this._applyConform();
       this._announce(this.getAttribute('src') || this._userUrl || null);
     }
 
@@ -969,6 +1008,7 @@
         this._empty.style.display = 'flex';
         this.removeAttribute('data-filled');
       }
+      this._applyConform();
     }
   }
 
