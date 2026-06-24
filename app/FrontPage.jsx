@@ -107,30 +107,6 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
   );
 }
 
-/* ---- Archive status strip ---- */
-function ArchiveStrip() {
-  const mobile = window.useIsMobile();
-  const snaps = (window.NPJ && window.NPJ.SOURCES) ? Object.keys(window.NPJ.SOURCES).length : null;
-  if (snaps === 0) return null;
-  return (
-    <div style={{ background: "var(--paper)", borderBottom: "1px solid var(--rule)" }}>
-      <div className="npj-strip-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "11px 16px" : "11px 0", display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--reject)", display: "inline-block", flexShrink: 0 }} />
-        {snaps !== null
-          ? <span><strong style={{ color: "var(--ink)" }}>{snaps}</strong> sources captured</span>
-          : <span>Sources archived to web.archive.org</span>
-        }
-        <span style={{ flex: 1 }} />
-        <button onClick={() => window.__nav && window.__nav.explore && window.__nav.explore()} style={{
-          background: "none", border: 0, padding: 0, cursor: "pointer",
-          color: "var(--ink)", fontFamily: "var(--mono)", fontWeight: 600,
-          fontSize: 12, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3
-        }}>OPEN THE ARCHIVE →</button>
-      </div>
-    </div>
-  );
-}
-
 /* ---- Front Page ---- */
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
@@ -157,7 +133,6 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
     <div className="fade-in">
       <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
         activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
-      <ArchiveStrip />
       <main style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 0 0" : "34px 0 0" }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
