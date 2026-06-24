@@ -1694,9 +1694,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
         {/* RIGHT zone: autosave status + tools + publish */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, justifySelf: "end", flexWrap: "wrap", minWidth: 0 }}>
-        <span className="npj-hide-sm" style={{ display: "inline-flex" }}>
+        {/* fixed-width status slot — the pill's text cycles on every keystroke
+            (idle → saving… → backing up… → ✓ saved), so we reserve its widest
+            footprint up front; otherwise each change resizes the pill and slides
+            (or re-wraps) every tool + publish control to its right. */}
+        <span className="npj-hide-sm" style={{ display: "inline-flex", flex: "0 0 auto" }}>
           <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
-            what="text, title, tags, column and bound sources" />
+            what="text, title, tags, column and bound sources"
+            style={{ minWidth: "48ch", textAlign: "left" }} />
         </span>
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
           {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} <span className="npj-hide-sm">{theme === "dark" ? "Light" : "Dark"}</span>
