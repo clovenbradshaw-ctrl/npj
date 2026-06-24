@@ -684,6 +684,12 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     const rec = srcRec(selSrc);
     const t = srcText(selSrc);
     const armed = !!modal;
+    // Where this source actually lives — so a web page is reachable from the reader
+    // (open it / its snapshot in a new tab) instead of being a dead title.
+    const liveUrl = rec.original_url && /^https?:/i.test(rec.original_url) ? rec.original_url : "";
+    const snapUrl = rec.archive_url && /^https?:/i.test(rec.archive_url) ? rec.archive_url : "";
+    const prettyUrl = (u) => String(u || "").replace(/^https?:\/\//i, "").replace(/^www\./i, "");
+    const lhLink = { color: "#2b5f8a", textDecoration: "underline", textUnderlineOffset: 2, whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 3, cursor: "pointer" };
     const letterhead = (
       <div key="lh" style={{ position: "sticky", top: 0, zIndex: 2, background: "#f6f1e4", borderBottom: "2px solid #16140d", padding: compact ? "9px 12px 7px" : "11px 16px 9px", userSelect: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
@@ -692,6 +698,13 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <span style={{ fontFamily: "var(--mono)", fontSize: 8, letterSpacing: ".1em", color: rec.archive_url ? "rgba(22,20,13,.55)" : "#b3261e" }}>{rec.archive_url ? "ARCHIVED SOURCE" : "NOT ARCHIVED"}</span>
         </div>
         <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: compact ? 14.5 : 16.5, lineHeight: 1.15, color: "#16140d" }}>{rec.title || selSrc}</div>
+        {(liveUrl || snapUrl) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 5, fontFamily: "var(--mono)", fontSize: 10 }}>
+            {liveUrl && <a href={liveUrl} target="_blank" rel="noopener noreferrer" style={lhLink}>↗ Open the page</a>}
+            {snapUrl && <a href={snapUrl} target="_blank" rel="noopener noreferrer" style={lhLink}>⌖ Archived snapshot</a>}
+            <span style={{ color: "rgba(22,20,13,.5)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0, flex: "1 1 120px" }}>{prettyUrl(liveUrl || snapUrl)}</span>
+          </div>
+        )}
       </div>
     );
     const SV = window.NpjSourceView;
@@ -723,10 +736,25 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       // an image you can transcribe to cite, or a text source we don't have the
       // words for yet — show the picture (if any) above a paste box.
       const hasImage = SV && SV.hasFile(rec) && fileKind === "image";
+      const isWeb = !!(liveUrl || snapUrl);
       return (
         <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 300 : 440, overflowY: "auto" }}>
           {letterhead}
           {hasImage && imageBanner}
+          {isWeb && !hasImage && (
+            <div style={{ padding: compact ? "12px 12px 0" : "14px 16px 0" }}>
+              <div style={{ border: "1px solid rgba(22,20,13,.25)", background: "#fffdf6", padding: "12px 13px" }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, color: "#16140d", marginBottom: 5 }}>This is a web page — its text isn't on record</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 10, color: "rgba(22,20,13,.7)", lineHeight: 1.55, marginBottom: 10 }}>
+                  Open it to read the article in a new tab. To search and cite the exact words right here, paste the passage below — it sticks to this source.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {liveUrl && <a href={liveUrl} target="_blank" rel="noopener noreferrer" className="np-cond" style={{ border: "1.5px solid #16140d", background: "var(--yellow)", color: "#16140d", padding: "5px 12px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>↗ Open the page</a>}
+                  {snapUrl && <a href={snapUrl} target="_blank" rel="noopener noreferrer" className="np-cond" style={{ border: "1.5px solid #16140d", background: "transparent", color: "#16140d", padding: "5px 12px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".03em", textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}>⌖ Snapshot</a>}
+                </div>
+              </div>
+            </div>
+          )}
           <SeedBox onSeed={(txt) => { api.seedSourceText(selSrc, txt); bump(); }} />
         </div>
       );
