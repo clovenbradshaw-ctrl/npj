@@ -1093,6 +1093,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
   const [pinQuote, setPinQuote] = useState("");
   const pinLoc = useRef(null);                      // char offsets into the source, from the picker
+  // hover-to-remove: a floating × that tracks the cited span the pointer is over,
+  // so dropping a citation is one click in the prose — no popover, no menu.
+  const [citeHover, setCiteHover] = useState(null); // { cid, x, y }
+  const citeHideT = useRef(null);
+  // inline rename of a source straight from its rail card (the title is often a
+  // filename or a guess — fix it where you see it)
+  const [renameSrcKey, setRenameSrcKey] = useState(null);
+  const [renameSrcText, setRenameSrcText] = useState("");
   const openPin = (cid, key, claimText) => {
     // re-opening an existing binding? read back this source's pinned quote (a span
     // can carry several, so read the one for THIS key, not just source #1)
@@ -1150,6 +1158,46 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (left.length) openPin(cid, left[0], pinTarget.claimText); else closePin();
     }
   };
+  // Drop a citation ENTIRELY and hand the sentence back as plain prose: detach
+  // every source the span cites, delete its markers, and unwrap the span (the
+  // words stay, the binding goes). The reusable citation RECORDS survive in the
+  // registry — reusable on other sentences — so this only unbinds THIS span. It
+  // also clears an owned-claim stance / context the same way (unwrap drops both).
+  const removeCitation = (span) => {
+    if (!span) return;
+    const cid = span.getAttribute("data-cid");
+    if (window.NpjCitations) (window.NpjCitations.citationsFor(span) || []).forEach(c => window.NpjCitations.detach(span, c.id));
+    if (cid && ed.current) Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).forEach(s => s.remove());
+    const parent = span.parentNode;
+    if (parent) { while (span.firstChild) parent.insertBefore(span.firstChild, span); parent.removeChild(span); if (parent.normalize) parent.normalize(); }
+    if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; }
+    setCiteHover(null);
+    setRev(v => v + 1); scheduleSave(); renumberCites();
+    if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+  };
+  // a span carries a CITATION (a source binding) when it points at a source or a
+  // citation record, or is bound-but-unpinned — but NOT a pure owned-claim stance.
+  const spanIsCite = (span) => !!(span && (span.getAttribute("data-cite-id") || (span.getAttribute("data-src") || "").trim() || span.classList.contains("needs-quote")) && !span.getAttribute("data-stance"));
+  // track the cited span under the pointer so the floating × can anchor to it.
+  // Anchor to the span's last citation marker when it has one (the × sits right
+  // by the little superscript), else the end of the span's last line.
+  const onBodyOver = (e) => {
+    if (!ed.current) return;
+    const cs = e.target.closest && e.target.closest(".claim-src, sup.md-cite[data-cid]");
+    const cid = cs && cs.getAttribute("data-cid");
+    const span = cid ? ed.current.querySelector('.claim-src[data-cid="' + cid + '"]') : null;
+    if (!span || !spanIsCite(span)) { if (citeHover && !citeHideT.current) citeHideT.current = setTimeout(() => setCiteHover(null), 220); return; }
+    if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; }
+    const marker = Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).pop();
+    let r;
+    if (marker) r = marker.getBoundingClientRect();
+    else { const rects = span.getClientRects(); r = rects[rects.length - 1] || span.getBoundingClientRect(); }
+    const cy = r.top + r.height / 2;   // vertical center, so the × sits beside the marker, not over the line above
+    setCiteHover(prev => (prev && prev.cid === cid && Math.abs(prev.x - r.right) < 1 && Math.abs(prev.y - cy) < 1) ? prev : { cid, x: r.right, y: cy });
+  };
+  const onBodyLeave = () => { if (citeHideT.current) clearTimeout(citeHideT.current); citeHideT.current = setTimeout(() => setCiteHover(null), 220); };
+  // commit / cancel an inline source rename started from a rail card
+  const commitSrcRename = (key) => { const t = renameSrcText.trim(); if (t) tableApi.renameSource(key, t); setRenameSrcKey(null); setRenameSrcText(""); };
   // The source-span ranking + paste flow now lives in the SourcePicker component
   // (app/SourcePicker.jsx), rendered inside the pin popover and the table.
   // Citey's grounding bridge — the popover's pin / own / unown act here so React
@@ -1938,6 +1986,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
           <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
+            onMouseOver={onBodyOver} onMouseLeave={onBodyLeave}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
@@ -2014,7 +2063,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   <span style={{ flex: 1 }} />
                   {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: unpinned ? NR.warn : NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}{unpinned ? " · " + unpinned + " ⚑" : ""}</span>}
                 </div>
-                <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</div>
+                {renameSrcKey === s.key ? (
+                  <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                    <input autoFocus value={renameSrcText} onChange={e => setRenameSrcText(e.target.value)} onMouseDown={e => e.stopPropagation()}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitSrcRename(s.key); } else if (e.key === "Escape") { e.preventDefault(); setRenameSrcKey(null); setRenameSrcText(""); } }}
+                      placeholder="Source title" className="np-cond"
+                      style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13.5, padding: "3px 6px", outline: "none" }} />
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => commitSrcRename(s.key)} title="Save name" style={{ flex: "0 0 auto", background: "var(--yellow)", border: "1px solid var(--yellow)", color: "var(--ink)", fontWeight: 700, fontSize: 11, padding: "3px 7px", cursor: "pointer" }}>Save</button>
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => { setRenameSrcKey(null); setRenameSrcText(""); }} title="Cancel" style={{ flex: "0 0 auto", background: "transparent", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "3px 7px", cursor: "pointer" }}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</span>
+                    <button onClick={() => { setRenameSrcKey(s.key); setRenameSrcText(rec.title || ""); }} title="Rename this source" style={{ flex: "0 0 auto", background: "transparent", border: 0, color: NR.muted, cursor: "pointer", fontSize: 12, padding: "0 1px", lineHeight: 1 }}>✎</button>
+                  </div>
+                )}
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
                 {/* a clickable preview of the file itself — the screenshot/scan/PDF you cited */}
                 {(() => {
@@ -2043,6 +2106,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           })}
         </div>
       </div>
+
+      {/* the hover-to-remove × — floats by the cited span the pointer is over, so
+          dropping a citation is one click in the prose (no popover). Rendered
+          OUTSIDE the contenteditable, so it never lands in the saved/published HTML. */}
+      {citeHover && (() => {
+        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + citeHover.cid + '"]');
+        if (!span || !spanIsCite(span)) return null;
+        return (
+          <button key="cite-x" onMouseDown={e => e.preventDefault()}
+            onMouseEnter={() => { if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; } }}
+            onMouseLeave={onBodyLeave}
+            onClick={() => removeCitation(span)}
+            title="Remove this citation — the words stay, the source binding is dropped"
+            className="np-mono" style={{ position: "fixed", left: citeHover.x + 3, top: citeHover.y - 8.5, zIndex: 4500, width: 17, height: 17, padding: 0, lineHeight: "15px", textAlign: "center", borderRadius: "50%", border: "1px solid var(--ink)", background: NR.warn, color: "var(--paper)", fontSize: 12, cursor: "pointer", boxShadow: "0 1px 5px rgba(0,0,0,.4)" }}>×</button>
+        );
+      })()}
 
       {/* selection toolbar */}
       {sel && (
@@ -2148,6 +2227,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
+              className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
             {others.length > 0 && (
               <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
                 title="Add another source to this same span — one claim can rest on several"
@@ -2186,6 +2267,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           title="Source files — this article"
           initialKey={explorer.key}
           items={sources.filter(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])).map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
+          onRename={(key, t) => tableApi.renameSource(key, t)}
           onClose={() => { setExplorer(null); setSources(x => [...x]); }} />
       )}
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
