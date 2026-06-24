@@ -1454,13 +1454,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     });
     setSources(s => [...made, ...s]); setUrlInput("");
     // real snapshots: confirm an existing wayback capture, or request one and
-    // wait for the availability API to verify it — "archived" is a fact here
+    // wait for the availability API to verify it — "archived" is a fact here.
+    // Each source is self-contained (try/catch) so one failure can't strand a
+    // sibling's row spinning, and the button always clears via finally — the bug
+    // where "Snapshotting…" spun forever (the source was already saved, hence
+    // "it's there on refresh") was a throw between setSources and setBusy(false).
     Promise.all(made.map(async m => {
-      const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
-      if (snap) window.NPJ.SOURCES[m.key].archive_url = snap;
-      setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
-      refineSourceTitle(m.key);   // now that there may be an archived capture, read its real title
-    })).then(() => setBusy(false));
+      try {
+        const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
+        if (snap && window.NPJ.SOURCES[m.key]) window.NPJ.SOURCES[m.key].archive_url = snap;
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        await refineSourceTitle(m.key).catch(() => {});   // titling is best-effort, never blocks the spinner
+      } catch (e) {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false } : x));
+      }
+    })).finally(() => setBusy(false));
   };
   // a conversation source (interview, named or anonymous) — built by the
   // composer, registered like any other source so the bind + pin flow works on
