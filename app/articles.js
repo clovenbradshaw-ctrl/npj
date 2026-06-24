@@ -32,8 +32,9 @@
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
  *
- * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN. */
-(function () {
+ * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN.
+ * Also module.exports the pure fold/revert helpers for node tests. */
+(function (root) {
   'use strict';
 
   const SCHEMA = "npj/article-eo/1";
@@ -91,7 +92,9 @@
   // token so the reader's transparency lens can show how it stands.
   function stanceNorm(s) {
     s = String(s || "").trim().toLowerCase();
-    return (s === "analysis" || s === "testimony" || s === "voice") ? s : null;
+    // absence = an ASSERTED ABSENCE: the claim is grounded not by a citation but
+    // by a documented search that found nothing (its `note` records what/where).
+    return (s === "analysis" || s === "testimony" || s === "voice" || s === "absence") ? s : null;
   }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
@@ -216,9 +219,22 @@
       }
       versions.unshift({
         sha: lineSha(line), ts: ev.ts || "", author: ev.actor || "",
+        op: ev.op,
+        note: ev.note || "",
         message: ev.note || (ev.op === "INS" ? "Published" : "Edited"),
         headline: state.headline || "", dek: state.dek || "",
-        text: plainText(state.body)
+        text: plainText(state.body),
+        // A full, restorable snapshot of the folded state AT this version, so the
+        // changelog can REVERT to it (re-emit it as a REC) without re-reading the
+        // log. A shallow clone is exact here: every event REPLACES a field's value
+        // wholesale (state[k] = o[k]) rather than mutating it in place, and the
+        // accumulating `sources` is copied out so a later add can't leak backward.
+        snapshot: Object.assign({}, state, { sources: Object.assign({}, sources) }),
+        // The structured revert marker, present iff this event was itself a revert
+        // (the changelog's revert/undo writes operand.revert). A non-fold operand
+        // key, so it rides the event without disturbing the folded state — it just
+        // lets the changelog label the entry and offer a one-click "undo revert".
+        revert: (o && o.revert) || null
       });
     });
     if (!state || !state.headline) return { article: null, sources, versions, events: events.map(e => e.ev) };
@@ -261,6 +277,41 @@
       sources, versions
     };
     return { article, sources, versions, events: events.map(e => e.ev) };
+  }
+
+  /* ---------------- revert: restore a prior version, append-only ----------------
+     A revert is not a delete and not a rewrite — it is one more REC event that
+     re-asserts an earlier version's folded state, so the document reads as it did
+     then while the whole history (including the revert itself) stays in GitHub.
+     Undo-a-revert is the same move aimed at the pre-revert version, so it needs no
+     special path. snapshotOperand turns a version's `snapshot` (see foldLog) back
+     into the operand a REC must carry to reproduce it exactly. */
+  function snapshotOperand(snapshot) {
+    const snap = snapshot || {};
+    const o = {};
+    FOLD_FIELDS.forEach(k => {
+      // status is set explicitly below (so a revert also restores whether the
+      // piece was live); assignees are the access-control list, NOT content — a
+      // revert must never change who can edit, so it's left to the current state.
+      if (k === "status" || k === "assignees") return;
+      if (snap[k] != null) o[k] = snap[k];
+    });
+    o.status = snap.status === "unpublished" ? "unpublished" : "published";
+    // Sources MERGE on fold, so re-asserting the snapshot's sources is enough to
+    // resolve the restored body's citations. A source introduced by a later (now
+    // reverted) edit lingers in the merged ledger but is unreferenced by the
+    // restored body — harmless, and never silently dropped from the record.
+    if (snap.sources && Object.keys(snap.sources).length) o.sources = snap.sources;
+    return o;
+  }
+  // The same operand, tagged so the event self-identifies as a revert: `to`/`ts`
+  // name the version restored; `undo:true` marks an undo-of-a-revert. The marker
+  // is a non-fold key (foldLog ignores it), surfaced back on the version object so
+  // the changelog can label it and offer "undo revert".
+  function revertOperand(snapshot, meta) {
+    const o = snapshotOperand(snapshot);
+    o.revert = { to: (meta && meta.to) || null, ts: (meta && meta.ts) || null, undo: !!(meta && meta.undo) };
+    return o;
   }
 
   /* ---------------- the published index (drives the front page) ---------------- */
@@ -495,7 +546,13 @@
             // transparency lens can show it's grounded by declaration, not a cite.
             if (stance && !src.length) {
               flush();
-              toks.push({ c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() });
+              const owned = { c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
+              // an asserted absence carries the documented search it rests on (what
+              // the author looked through, and found nothing) — that note IS its
+              // grounding, so it rides the published token like a quote would.
+              const aNote = (c.getAttribute("data-note") || "").trim();
+              if (aNote) owned.note = aNote;
+              toks.push(owned);
               return;
             }
             // a SOURCED span in the edit surface's round-trip shape (eo-claim).
@@ -704,7 +761,7 @@
         // surface and the reader's transparency lens keep it; a sourced claim
         // keeps its data-src + quotes exactly as before.
         if (t.stance && (!t.src || !t.src.length))
-          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '" data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '"' + (t.note ? ' data-note="' + esc(t.note) + '"' : '') + ' data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
         return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
       }
       if (t.t === "br") return "<br/>";
@@ -909,13 +966,17 @@
     try { const all = JSON.parse(localStorage.getItem(RECEIPT_KEY) || "{}") || {}; return all[filename] || null; } catch (e) { return null; }
   }
 
-  window.NpjArticles = {
+  root.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
+    snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
     genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };
-})();
+  // node tests require() the pure fold/revert helpers; the browser path is
+  // unchanged (root === window). No DOM/network runs at load time.
+  if (typeof module !== "undefined" && module.exports) module.exports = root.NpjArticles;
+})(typeof window !== "undefined" ? window : globalThis);

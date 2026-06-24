@@ -144,8 +144,91 @@ function VersionMeta({ v, size = 9.5 }) {
   );
 }
 
-/* ---- the history overlay: pick two versions, see the diff ---- */
-function VersionHistory({ versions, onClose }) {
+/* ---- the human-readable changelog ----
+   Each version is also a row in a plain-language edit log: a few chips that name
+   what changed from the version before it — "title", "body +42 −7", "republished",
+   "↩ revert" — read mechanically by diffing the two folded snapshots. No model.
+   The chips complement the word-level diff in the right pane: the diff is the
+   what-exactly, the chips are the at-a-glance. */
+const chNorm = (s) => String(s == null ? "" : s).trim();
+function leadImageSrc(body) {
+  if (!Array.isArray(body)) return "";
+  const imgs = body.filter(b => b && b.type === "img" && b.src);
+  const lead = imgs.find(b => b.banner) || imgs[0];
+  return lead ? lead.src : "";
+}
+// the comparable fields of a version — from its full snapshot when foldLog gave
+// one, falling back to the flat fields a lighter version object carries
+function versionFields(v) {
+  const s = (v && v.snapshot) || null;
+  return {
+    headline: s ? (s.headline || "") : (v && v.headline) || "",
+    dek: s ? (s.dek || "") : (v && v.dek) || "",
+    text: (v && v.text) || "",
+    column: s ? (s.column || "") : "",
+    tags: s && Array.isArray(s.tags) ? s.tags : [],
+    authors: s && Array.isArray(s.authors) ? s.authors : [],
+    editors: s && Array.isArray(s.editors) ? s.editors : [],
+    byline: s ? (s.byline || "") : "",
+    status: s && s.status === "unpublished" ? "unpublished" : "published",
+    image: leadImageSrc(s && s.body)
+  };
+}
+function changeChips(prev, cur) {
+  const chips = [];
+  if (cur && cur.revert) chips.push({ tone: "revert", label: cur.revert.undo ? "↺ undo revert" : "↩ revert" });
+  if (!prev) { chips.push({ tone: "add", label: "created" }); return chips; }
+  const A = versionFields(prev), B = versionFields(cur);
+  if (A.status !== B.status) chips.push(B.status === "unpublished" ? { tone: "unpub", label: "unpublished" } : { tone: "pub", label: "republished" });
+  if (chNorm(A.headline) !== chNorm(B.headline)) chips.push({ tone: "neutral", label: "title" });
+  if (chNorm(A.dek) !== chNorm(B.dek)) chips.push({ tone: "neutral", label: "subtitle" });
+  if (A.text !== B.text) {
+    const { add, del } = diffStats(diffWords(A.text, B.text));
+    if (add || del) chips.push({ tone: add && !del ? "add" : del && !add ? "del" : "neutral", label: "body " + [add ? "+" + add : "", del ? "−" + del : ""].filter(Boolean).join(" ") });
+    else chips.push({ tone: "neutral", label: "body" });
+  }
+  if (chNorm(A.column) !== chNorm(B.column)) chips.push({ tone: "neutral", label: "section" });
+  if (JSON.stringify(A.tags) !== JSON.stringify(B.tags)) chips.push({ tone: "neutral", label: "tags" });
+  if (chNorm(A.byline) !== chNorm(B.byline) || JSON.stringify(A.authors) !== JSON.stringify(B.authors) || JSON.stringify(A.editors) !== JSON.stringify(B.editors)) chips.push({ tone: "neutral", label: "byline" });
+  if (chNorm(A.image) !== chNorm(B.image)) chips.push({ tone: "neutral", label: A.image && B.image ? "photo" : B.image ? "photo added" : "photo removed" });
+  if (!chips.length) chips.push({ tone: "neutral", label: "no textual change" });
+  return chips;
+}
+function Chip({ tone, children }) {
+  const map = {
+    add:     { fg: "var(--verified,#1f8a5b)", bd: "var(--verified,#1f8a5b)", bg: "transparent" },
+    del:     { fg: "var(--reject,#b23a26)",   bd: "var(--reject,#b23a26)",   bg: "transparent" },
+    pub:     { fg: "var(--verified,#1f8a5b)", bd: "var(--verified,#1f8a5b)", bg: "transparent" },
+    unpub:   { fg: "var(--reject,#b23a26)",   bd: "var(--reject,#b23a26)",   bg: "transparent" },
+    revert:  { fg: "var(--ink)",              bd: "var(--ink)",              bg: "var(--yellow)" },
+    neutral: { fg: "var(--ink-soft)",         bd: "var(--rule)",             bg: "transparent" }
+  };
+  const c = map[tone] || map.neutral;
+  return <span className="np-mono" style={{ fontSize: 9.5, lineHeight: 1.25, padding: "1.5px 5px", border: "1px solid " + c.bd, color: c.fg, background: c.bg, whiteSpace: "nowrap" }}>{children}</span>;
+}
+// a two-tap revert/undo button: tap arms it, tap "Confirm" commits — so restoring
+// the document to an older state is never a single stray click
+function RevertControl({ label, title, busy, onConfirm }) {
+  const [armed, setArmed] = useState(false);
+  if (busy) return <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>working…</span>;
+  if (!armed) return (
+    <button onClick={() => setArmed(true)} title={title} className="np-cond"
+      style={{ fontSize: 10.5, padding: "3px 8px", border: "1px solid var(--ink)", background: "transparent", color: "var(--ink)", cursor: "pointer", textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</button>
+  );
+  return (
+    <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+      <button onClick={() => { setArmed(false); onConfirm(); }} className="np-cond" style={{ fontSize: 10.5, padding: "3px 8px", border: "1px solid var(--ink)", background: "var(--ink)", color: "var(--yellow)", cursor: "pointer", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 700 }}>Confirm</button>
+      <button onClick={() => setArmed(false)} className="np-mono" style={{ fontSize: 10, background: "none", border: 0, color: "var(--ink-soft)", cursor: "pointer" }}>cancel</button>
+    </span>
+  );
+}
+
+/* ---- the history overlay: changelog + diff; reverts when an editor opens it ----
+   onRevert(version, { undo }) commits the revert (ArticleRead owns the webhook
+   call + refold); canRevert gates the controls; reverting holds the sha (or
+   "undo") in flight; revertErr is a one-line failure to surface. All optional —
+   the Newsroom opens this as a pure read-only draft viewer and passes none. */
+function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, revertErr }) {
   const list = (versions && versions.length) ? versions : [];
   const [a, setA] = useState(list.length > 1 ? 1 : 0); // older (compare-from)
   const [b, setB] = useState(0);                        // newer (compare-to)
@@ -186,18 +269,38 @@ function VersionHistory({ versions, onClose }) {
         <div style={{ display: "grid", gridTemplateColumns: "232px 1fr", minHeight: 0 }}>
           {/* timeline */}
           <div style={{ borderRight: "1.5px solid var(--ink)", padding: "12px 12px 24px" }}>
-            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Versions</div>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Changelog</div>
+            {revertErr && <div className="np-mono" style={{ fontSize: 10, color: "var(--reject,#b23a26)", border: "1px solid var(--reject,#b23a26)", padding: "6px 7px", marginBottom: 8, lineHeight: 1.4 }}>{revertErr}</div>}
+            {/* if the newest entry was a revert, offer to undo it — itself just a
+                revert aimed at the version the revert replaced (list[1]) */}
+            {onRevert && canRevert && list[0] && list[0].revert && list[1] && list[1].snapshot && (
+              <div style={{ border: "1.5px solid var(--ink)", background: "var(--yellow)", padding: "8px 9px", marginBottom: 9 }}>
+                <div className="np-cond" style={{ fontSize: 11.5, fontWeight: 700, lineHeight: 1.3, marginBottom: 6 }}>Latest change was a revert.</div>
+                <RevertControl label="↺ Undo it" title={"Undo the revert — restore v." + list[1].sha} busy={reverting === "undo"} onConfirm={() => onRevert(list[1], { undo: true })} />
+              </div>
+            )}
             {list.map((v, i) => {
               const isFrom = i === a, isTo = i === b;
               return (
                 <div key={v.sha + i} style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
                   <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>⊛ v.{v.sha}{i === 0 ? " · current" : ""}</div>
                   <VersionMeta v={v} />
-                  {v.message && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35 }}>{v.message}</div>}
+                  {(v.note || v.op === "INS") && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35 }}>{v.note || "Published"}</div>}
+                  {/* what changed from the version before this one, in plain words */}
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                    {changeChips(list[i + 1], v).map((c, ci) => <Chip key={ci} tone={c.tone}>{c.label}</Chip>)}
+                  </div>
                   <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
                     <button onClick={() => setA(i)} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isFrom ? "var(--ink)" : "transparent", color: isFrom ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>from</button>
                     <button onClick={() => setB(i)} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isTo ? "var(--ink)" : "transparent", color: isTo ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>to</button>
                   </div>
+                  {/* revert the whole document to this version — an editor-only,
+                      append-only REC; the current version has nothing to revert to */}
+                  {onRevert && canRevert && i !== 0 && v.snapshot && (
+                    <div style={{ marginTop: 6 }}>
+                      <RevertControl label="↩ Revert to this" title={"Revert the document to v." + v.sha} busy={reverting === v.sha} onConfirm={() => onRevert(v, {})} />
+                    </div>
+                  )}
                 </div>
               );
             })}

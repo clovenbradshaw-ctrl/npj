@@ -42,11 +42,12 @@ const GROUND_KINDS = {
   "own-analysis":  { glyph: "⊢", label: "The author's analysis", color: "#7C74DE", mark: "#6b5bd6", note: "Owned reasoning — grounded by declaration, not a citation." },
   "own-account":   { glyph: "⊨", label: "The author's account",  color: "#7C74DE", mark: "#6b5bd6", note: "First-hand: the author witnessed this." },
   "own-position":  { glyph: "⊩", label: "The author's position", color: "#7C74DE", mark: "#6b5bd6", note: "The author's stated position." },
+  absence:         { glyph: "∅", label: "Asserted absence",      color: "#4D7EA8", mark: "#3a6488", note: "A documented search did not find this — absence of evidence, declared (what was searched is on hover)." },
   needs:           { glyph: "⊥", label: "Needs a source",        color: "#D8632E", mark: "#b5701b", note: "Bound to a source but no passage pinned — the publish gate flags this." },
   conflict:        { glyph: "¬", label: "Sources disagree",      color: "#D8412C", mark: "#b3261e", note: "Two pinned quotes pull opposite ways." }
 };
-const GROUND_ORDER = ["grounded", "multi", "own-analysis", "own-account", "own-position", "needs", "conflict"];
-const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position" };
+const GROUND_ORDER = ["grounded", "multi", "own-analysis", "own-account", "own-position", "absence", "needs", "conflict"];
+const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position", absence: "absence" };
 // The grounding kind of a claim token, read the same mechanical way the
 // workspace's statusOf does — owned (by its declared stance), else by how many
 // of its sources carry a pinned quote (none → needs, one → grounded, more →
@@ -427,6 +428,8 @@ function ArticleRead(props) {
   const [editing, setEditing] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusErr, setStatusErr] = useState(null);
+  const [reverting, setReverting] = useState(null);   // sha being restored | "undo" | null
+  const [revertErr, setRevertErr] = useState(null);
   // below this width the source rail stacks under the article instead of
   // squeezing the reading column
   const isNarrow = window.useIsMobile(900);
@@ -587,6 +590,62 @@ function ArticleRead(props) {
     if (onEdited) onEdited(updated);
   };
 
+  // editor-only: revert the whole document to an earlier version (or undo a
+  // revert — same move, aimed at the version the revert replaced). Append-only:
+  // one REC re-asserts that version's folded state, so the piece reads as it did
+  // then while the revert itself stays in the log. Mirrors changeStatus — the
+  // webhook re-verifies the token; we optimistically refold via onEdited so the
+  // reader and front page reflect the restore at once.
+  const revertTo = async (version, opts) => {
+    opts = opts || {};
+    if (!version || !version.snapshot) return;
+    setRevertErr(null);
+    const token = window.MatrixAuth && window.MatrixAuth.token();
+    if (!token) { setRevertErr("Sign in with Matrix to revert — the webhook re-verifies the token server-side."); return; }
+    const when = String(version.ts || "").slice(0, 10);
+    const note = opts.undo
+      ? "Undid revert — restored v." + version.sha
+      : "Reverted to v." + version.sha + (when ? " · " + when : "");
+    const operand = window.NpjArticles.revertOperand(version.snapshot, { to: version.sha, ts: version.ts, undo: !!opts.undo });
+    setReverting(opts.undo ? "undo" : version.sha);
+    let out;
+    try {
+      out = await window.NpjArticles.appendEdit({ slug: A.slug, operand, actor: me, note, token, message: (opts.undo ? "undo-revert: " : "revert: ") + A.slug + " → v." + version.sha });
+    } catch (e) {
+      setReverting(null);
+      setRevertErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
+      return;
+    }
+    if (out.res.status === 401 || out.res.status === 403) { setReverting(null); setRevertErr("Rejected (" + out.res.status + ") — that Matrix account isn't authorized to edit this article."); return; }
+    if (!out.res.ok) { setReverting(null); setRevertErr("The webhook answered HTTP " + out.res.status + " — nothing changed."); return; }
+    // Re-derive the restored article through the SAME fold the reader loads with,
+    // so image/read-time/body all match a fresh load; then splice the real history
+    // back on (foldLog of a lone event only knows its own one version).
+    const refolded = window.NpjArticles.foldLog(window.NpjArticles.genesisLine(operand, me));
+    const restored = refolded.article || {};
+    const ts = new Date().toISOString();
+    const head = {
+      sha: out.sha, ts, author: me, op: "REC", note, message: note,
+      headline: restored.headline || "", dek: restored.dek || "",
+      text: window.NpjArticles.plainText(restored.body),
+      snapshot: Object.assign({}, version.snapshot),
+      revert: { to: version.sha, ts: version.ts, undo: !!opts.undo }
+    };
+    // the restored body's citations join the live ledger so they resolve at once
+    Object.keys(refolded.sources || {}).forEach(k => { window.NPJ.SOURCES[k] = Object.assign(window.NPJ.SOURCES[k] || {}, refolded.sources[k]); });
+    const updated = Object.assign({}, A, restored, {
+      // a revert restores content + publish-state, never the access list — keep
+      // the current assignees so an editor can't revert away their own rights
+      assignees: A.assignees,
+      sources: Object.assign({}, A.sources || {}, restored.sources || {}),
+      base_sha: out.sha, updated: ts.slice(0, 10),
+      storage: A.storage, logPath: A.logPath,
+      versions: [head].concat(A.versions || [])
+    });
+    setReverting(null);
+    if (onEdited) onEdited(updated);
+  };
+
   // a spoken description of a claim's grounding, for screen readers — the
   // citation card is visual, so the label carries the same promise: what backs
   // this claim, and how to open the receipts.
@@ -634,11 +693,14 @@ function ArticleRead(props) {
     if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
       const kind = STANCE_KIND[t.stance] || "own-analysis";
       const gm = GROUND_KINDS[kind];
+      // an asserted absence names the documented search on hover (its grounding),
+      // and shows its ∅ mark even with the lens off — it's a distinct epistemic claim
+      const isAbsence = t.stance === "absence";
+      const title = isAbsence ? (gm.label + (t.note ? " — searched: " + t.note : "")) : (transparency ? gm.label : undefined);
       return (
-        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind}
-          title={transparency ? gm.label : undefined}>
+        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind} title={title}>
           {ent ? markEntities(t.c, ent, "o" + i) : t.c}
-          {transparency && <sup className="gmark" style={{ color: gm.mark }}>{gm.glyph}</sup>}
+          {(transparency || isAbsence) && <sup className="gmark" style={{ color: gm.mark }}>{gm.glyph}</sup>}
         </span>
       );
     }
@@ -900,7 +962,8 @@ function ArticleRead(props) {
         composeDraft={compose}
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
         onCancelCompose={() => setCompose(null)} me={me} />
-      {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)} />}
+      {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
+        onRevert={revertTo} canRevert={canEditArticle} reverting={reverting} revertErr={revertErr} />}
       {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
       {editing && window.ArticleEdit && (
         <window.ArticleEdit article={A} me={me} isAdmin={isAdmin}

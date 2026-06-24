@@ -716,7 +716,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     // body. hideOcr suppresses SourceViewer's own text reveal — the doctext is it.
     const imageBanner = (SV && SV.hasFile(rec) && fileKind === "image" && window.SourceViewer) ? (
       <div style={{ padding: compact ? "9px 11px 1px" : "11px 14px 2px", background: "#f6f1e4" }}>
-        <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 200 : 300} frameless hideOcr />
+        {/* zoomable + grabbable: drag a box on the scan (Area mode) to OCR the
+            exact words and stage them — the recognized text below is the fallback */}
+        <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 260 : 440} frameless hideOcr onSelectText={armed ? stagePdfQuote : null} />
       </div>
     ) : null;
     // A PDF is shown as the REAL document — rendered pages with a selectable text

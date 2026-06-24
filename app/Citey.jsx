@@ -207,6 +207,19 @@ class CiteyAgent extends React.Component {
   _addTag = (t) => { if (window.__draftTags && window.__draftTags.add) window.__draftTags.add(t); };
   _pin = () => { if (lastClaim && window.__npjGround && window.__npjGround.pin) window.__npjGround.pin(lastClaim); this.setState({ menu: false }); this._walkAdvance(); };
   _own = (stance) => { if (lastClaim && window.__npjGround && window.__npjGround.own) window.__npjGround.own(lastClaim, stance); this.setState({ menu: false }); setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0); this._walkAdvance(); };
+  // an asserted absence grounds a NEGATIVE — so it asks for the one thing that
+  // makes it honest: the documented search that came up empty (what / where / when)
+  _ownAbsence = () => {
+    if (!lastClaim) return;
+    var ask = (typeof window !== 'undefined' && window.prompt)
+      ? window.prompt('Asserted absence — name the documented search that came up empty: what did you look through, and over what period?\n\ne.g. "Searched the Nashville Banner, the Tennessean, Metro public records and social media, 2024–2026 — found no other occurrence."', '')
+      : '';
+    if (ask == null) return; // cancelled — leave the claim untouched
+    if (lastClaim && window.__npjGround && window.__npjGround.own) window.__npjGround.own(lastClaim, 'absence', String(ask).trim());
+    this.setState({ menu: false });
+    setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0);
+    this._walkAdvance();
+  };
   _unown = () => { if (lastClaim && window.__npjGround && window.__npjGround.unown) window.__npjGround.unown(lastClaim); this.setState({ menu: false }); setTimeout(() => { if (lastClaim) evaluateSpan(lastClaim); refreshGate(); }, 0); };
   _setTier = (t) => { CiteyStore.setTier(t); if (lastClaim) evaluateSpan(lastClaim); };
   _hide = () => CiteyStore.setHidden(true);
@@ -275,6 +288,7 @@ class CiteyAgent extends React.Component {
       needsWork ? React.createElement('button', { key: 't', onClick: () => this._own('testimony'), style: chip() }, '⊨  I witnessed this') : null,
       needsWork ? React.createElement('button', { key: 'v', onClick: () => this._own('voice'), style: chip() }, '⊩  My stated position') : null,
       needsWork ? React.createElement('button', { key: 'cx', onClick: () => this._own('context'), style: chip({ borderColor: '#2E8B86' }) }, '⊪  In context — continuing coverage') : null,
+      needsWork ? React.createElement('button', { key: 'ab', onClick: this._ownAbsence, style: chip({ borderColor: '#4D7EA8' }) }, '∅  Asserted absence — searched, not found') : null,
       isOwned ? React.createElement('button', { key: 'un', onClick: this._unown, style: chip() }, '↩  Unmark — back to a claim') : null,
       isGrounded ? React.createElement('button', { key: 're', onClick: this._pin, style: chip() }, '✎  Re-pin the source line') : null,
       React.createElement('button', { key: 'tags', onClick: this._suggest, style: chip({ borderColor: '#4a4733' }) }, '✦  Suggest tags'),

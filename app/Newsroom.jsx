@@ -1159,16 +1159,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     window.__npjGround = {
       focused: () => window.__citey && window.__citey.focused ? window.__citey.focused() : null,
       pin: (el) => { if (!el) return; const cid = el.getAttribute("data-cid"); if (!cid) return; openPin(cid, el.getAttribute("data-src") || el.getAttribute("data-cite"), (el.textContent || "").trim()); },
-      own: (el, stance) => {
+      own: (el, stance, note) => {
         if (!el) return; const cid = el.getAttribute("data-cid");
         if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
         el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
         el.classList.remove("needs-quote");
-        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : "analysis";
+        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : stance === "absence" ? "absence" : "analysis";
         el.setAttribute("data-stance", norm);
+        // an asserted absence records the documented search it rests on (what the
+        // author looked through, found nothing) on the span, so it publishes + reads
+        if (norm === "absence") { if (note != null) el.setAttribute("data-note", String(note)); else el.removeAttribute("data-note"); }
+        else el.removeAttribute("data-note");
         el.setAttribute("title", norm === "context"
           ? "Continuing coverage — the article substantiates this, set against prior reporting"
-          : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
+          : norm === "absence"
+            ? "Asserted absence — a documented search did not find this" + (note ? ". Searched: " + note : "")
+            : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
         setRev(v => v + 1); scheduleSave(); renumberCites();
       },
       unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.removeAttribute("data-context"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
@@ -1435,8 +1441,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
     const key = "web-" + Date.now().toString(36);
     window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web source");
-    bindSource(key);
+    bindSource(key);            // binds the span + opens "pin the source-span"
     refineSourceTitle(key);
+    // …and snapshot the URL in the background, so the flow is the one you asked
+    // for: add a URL → it snapshots → pin the span. Non-blocking — the pin step
+    // opens now; the row flips to "archived" when the wayback capture confirms.
+    if (window.NpjArchiveCDN && window.NpjArchiveCDN.ensureSnapshot) {
+      setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: true } : x));
+      window.NpjArchiveCDN.ensureSnapshot(u).then(snap => {
+        if (snap && window.NPJ.SOURCES[key]) window.NPJ.SOURCES[key].archive_url = snap;
+        setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        setRev(v => v + 1); scheduleSave();
+      }).catch(() => setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false } : x)));
+    }
   };
   const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } setLinkUrl(""); setMenu(null); setSel(null); };
   const insertJump = (id, text) => { restore(); document.execCommand("insertHTML", false, `<a href="#${id}" class="jumplink">${text}</a>&nbsp;`); setMenu(null); setSel(null); };
@@ -1454,13 +1471,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     });
     setSources(s => [...made, ...s]); setUrlInput("");
     // real snapshots: confirm an existing wayback capture, or request one and
-    // wait for the availability API to verify it — "archived" is a fact here
+    // wait for the availability API to verify it — "archived" is a fact here.
+    // Each source is self-contained (try/catch) so one failure can't strand a
+    // sibling's row spinning, and the button always clears via finally — the bug
+    // where "Snapshotting…" spun forever (the source was already saved, hence
+    // "it's there on refresh") was a throw between setSources and setBusy(false).
     Promise.all(made.map(async m => {
-      const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
-      if (snap) window.NPJ.SOURCES[m.key].archive_url = snap;
-      setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
-      refineSourceTitle(m.key);   // now that there may be an archived capture, read its real title
-    })).then(() => setBusy(false));
+      try {
+        const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
+        if (snap && window.NPJ.SOURCES[m.key]) window.NPJ.SOURCES[m.key].archive_url = snap;
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        await refineSourceTitle(m.key).catch(() => {});   // titling is best-effort, never blocks the spinner
+      } catch (e) {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false } : x));
+      }
+    })).finally(() => setBusy(false));
   };
   // a conversation source (interview, named or anonymous) — built by the
   // composer, registered like any other source so the bind + pin flow works on

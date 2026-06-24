@@ -270,6 +270,20 @@
     catch (e) { _imgText[key] = { state: 'error', error: (e && e.message) || 'OCR failed' }; throw e; }
   }
 
+  // OCR an arbitrary image — a dataURL string, a Blob, or an <canvas> — with the
+  // shared English worker. This is what makes a SCANNED document (no text layer
+  // to drag-select) citable: the author drags a box on the page, we crop that
+  // region to a canvas and read just those words here. Best-effort by contract —
+  // throws only if the engine can't load at all; an unreadable crop returns ''
+  // and the author transcribes it. Reuses the same worker as extractImageText,
+  // so the multi-MB core/lang download happens once for the whole session.
+  async function ocrImage(input) {
+    if (!input) return '';
+    var w = await tessWorker();
+    var res = await w.recognize(input);
+    return cleanOcrText(res && res.data && res.data.text);
+  }
+
   // Decode a blob as UTF-8 text (Blob.text where available, else FileReader).
   async function decodeText(blob) {
     if (!blob) return '';
