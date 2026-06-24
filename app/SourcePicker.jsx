@@ -79,9 +79,11 @@ function SourcePicker({ srcKey, claimText, onPick }) {
       React.createElement(window.PdfView, { rec: rec, height: 300, onSelectText: (q) => onPick(q, null) }));
   }
 
-  // the document itself — an image inline (cite by transcribing the words)
+  // the document itself — an image inline. Drag a box on it (Area mode) to OCR
+  // the exact words; that text flows straight into the pinned quote, the same as
+  // a PDF text drag — so a scanned screenshot is grabbable, not just transcribed.
   const viewerEl = (visual && window.SourceViewer) ? React.createElement(window.SourceViewer, {
-    key: "sv", srcKey: srcKey, rec: rec, height: 220
+    key: "sv", srcKey: srcKey, rec: rec, height: 300, onSelectText: (q) => onPick(q, null)
   }) : null;
 
   let inner;

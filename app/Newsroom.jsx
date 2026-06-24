@@ -1435,8 +1435,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
     const key = "web-" + Date.now().toString(36);
     window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web source");
-    bindSource(key);
+    bindSource(key);            // binds the span + opens "pin the source-span"
     refineSourceTitle(key);
+    // …and snapshot the URL in the background, so the flow is the one you asked
+    // for: add a URL → it snapshots → pin the span. Non-blocking — the pin step
+    // opens now; the row flips to "archived" when the wayback capture confirms.
+    if (window.NpjArchiveCDN && window.NpjArchiveCDN.ensureSnapshot) {
+      setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: true } : x));
+      window.NpjArchiveCDN.ensureSnapshot(u).then(snap => {
+        if (snap && window.NPJ.SOURCES[key]) window.NPJ.SOURCES[key].archive_url = snap;
+        setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        setRev(v => v + 1); scheduleSave();
+      }).catch(() => setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false } : x)));
+    }
   };
   const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } setLinkUrl(""); setMenu(null); setSel(null); };
   const insertJump = (id, text) => { restore(); document.execCommand("insertHTML", false, `<a href="#${id}" class="jumplink">${text}</a>&nbsp;`); setMenu(null); setSel(null); };
