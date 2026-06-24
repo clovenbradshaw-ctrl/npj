@@ -265,8 +265,68 @@ function SourceTag({ type }) {
   );
 }
 
+/* ---------- inline preview of an uploaded source file ----------
+   The card's job is to let you SEE the source, not just name it. When a claim is
+   backed by an uploaded document — a scan, a photo, a screenshot, a PDF — the
+   bytes are in hand the instant it's dropped (a session blob) and ride a
+   media-store URL after that, long BEFORE publish moves them onto archive.org.
+   So in a draft PREVIEW, where the archive.org snapshot is still pending, this
+   shows the actual file right in the card: the very image that becomes the
+   archive.org copy. Best-effort — resolves a renderable URL through
+   NpjSourceView.displayUrl; if the bytes can't render in an <img> (or all we
+   have is a details page), it falls back to an "open it" link, never a broken
+   frame. The point is the SOURCE, so we render the document, not just its name. */
+function SourceFilePreview({ rec }) {
+  const SV = window.NpjSourceView;
+  const kind = SV ? SV.kindOf(rec) : "unknown";
+  const [url, setUrl] = useState(null);
+  const [done, setDone] = useState(false);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    setUrl(null); setDone(false); setBroken(false);
+    if (!SV || !SV.displayUrl) { setDone(true); return; }
+    SV.displayUrl(rec)
+      .then(u => { if (alive) { setUrl(u || null); setDone(true); } })
+      .catch(() => { if (alive) setDone(true); });
+    return () => { alive = false; };
+  }, [rec && (rec.id || rec.key), rec && rec.file_url, rec && rec.archive_url]); // eslint-disable-line
+
+  const archived = !!rec.archive_url;
+  const mat = { background: "repeating-conic-gradient(#e9e4d6 0% 25%, #f3eee1 0% 50%) 50% / 18px 18px", border: "1px solid var(--rule)" };
+  // the access path, in words: once it's on archive.org the snapshot link is it;
+  // before that (this preview) opening the in-hand file is.
+  const note = archived
+    ? "The document itself — open the archive.org snapshot to read it full size."
+    : "The document itself — uploaded, and moved onto archive.org when this story publishes.";
+  const openLink = url ? (
+    <a href={url} target="_blank" rel="noopener" className="np-mono"
+      style={{ fontSize: 10, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5 }}>
+      <I.ext style={{ fontSize: 12 }} /> Open the document
+    </a>
+  ) : null;
+  const showImg = kind === "image" && url && !broken;
+
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 4 }}>The source — the document itself</div>
+      {showImg ? (
+        <a href={url} target="_blank" rel="noopener" title="Open the source document" style={{ display: "block", ...mat, padding: 6, lineHeight: 0 }}>
+          <img src={url} alt={rec.title || "uploaded source"} onError={() => setBroken(true)}
+            style={{ display: "block", width: "100%", maxHeight: 168, objectFit: "contain", margin: "0 auto" }} />
+        </a>
+      ) : (kind === "image" && !done) ? (
+        <div className="np-mono" style={{ ...mat, padding: "22px 12px", textAlign: "center", color: "var(--ink-soft)", fontSize: 10.5 }}>loading the document…</div>
+      ) : null}
+      <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: showImg ? 5 : 4, lineHeight: 1.45 }}>{note}</div>
+      {/* the image is itself the open link; for a pdf/text (or a broken image) make the open action explicit */}
+      {!showImg && openLink}
+    </div>
+  );
+}
+
 /* ---------- the source hover/click card ---------- */
-function SourceCard({ srcKey, onClose, pinned, quote }) {
+function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
   const s = window.NPJ.SOURCES[srcKey];
   if (!s) return null;
   // the pinned source-span for THIS claim wins over the source's generic pull
@@ -278,6 +338,16 @@ function SourceCard({ srcKey, onClose, pinned, quote }) {
   const iv = !!(NI && NI.isInterview(s));
   const talk = s.talk || {};
   const archived = !!s.archive_url;
+  // An uploaded document (scan/photo/screenshot/PDF) carries its own bytes — a
+  // session blob the moment it's dropped, a media-store URL after — so in a
+  // draft PREVIEW we can SHOW the source itself even though its archive.org
+  // snapshot is still pending. Gated to preview: the live reader reaches the
+  // archived copy through the snapshot link below, so the card stays unchanged
+  // for published stories. We key off the upload signals (a doc- id, a stored
+  // file, or a session blob) — never a web/data source that merely has a URL.
+  const SV = window.NpjSourceView;
+  const isUpload = /^doc-/.test(s.id || "") || !!s.file_url || !!(SV && SV.hasBlob && SV.hasBlob(SV.recKey(s)));
+  const showFile = !!preview && !iv && isUpload && !!(SV && SV.isViewable && SV.isViewable(s));
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -300,6 +370,7 @@ function SourceCard({ srcKey, onClose, pinned, quote }) {
         <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 4 }}>{s.id}</div>
         <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
+        {showFile && <SourceFilePreview rec={s} />}
         {cited ? (
           <div style={{ marginBottom: 10 }}>
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 3 }}>The cited passage — in the source</div>
