@@ -92,6 +92,11 @@
           "</div>"
         : "") +
       '<svg class="graph-svg" viewBox="0 0 ' + W + " " + H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
+      '<div class="graph-zoom">' +
+        '<button type="button" data-z="in" title="Zoom in">+</button>' +
+        '<button type="button" data-z="out" title="Zoom out">−</button>' +
+        '<button type="button" data-z="fit" title="Fit the whole graph">⟲</button>' +
+      "</div>" +
       '<div class="graph-tip" hidden></div>';
     root.appendChild(wrap);
 
@@ -99,9 +104,43 @@
     var slider = wrap.querySelector(".graph-cursor");
     var readout = wrap.querySelector(".graph-readout");
     var tip = wrap.querySelector(".graph-tip");
+    // gView carries the camera (pan/zoom); nodes keep their world coordinates in
+    // the fixed WxH layout, so the simulation and node-drag math never change —
+    // we only move a viewport over that world.
+    var gView = document.createElementNS(NS, "g");
+    gView.setAttribute("class", "gview");
     var gEdges = document.createElementNS(NS, "g");
     var gNodes = document.createElementNS(NS, "g");
-    svg.appendChild(gEdges); svg.appendChild(gNodes);
+    gView.appendChild(gEdges); gView.appendChild(gNodes);
+    svg.appendChild(gView);
+
+    // ---- camera: translate + uniform scale on gView ----
+    var cam = { k: 1, tx: 0, ty: 0 }, userMoved = false, fitted = false;
+    function applyCam() { gView.setAttribute("transform", "translate(" + cam.tx.toFixed(2) + "," + cam.ty.toFixed(2) + ") scale(" + cam.k.toFixed(4) + ")"); }
+    // a client point in an element's own coordinate system (svg viewBox, or gView world)
+    function ptIn(el, e) { var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; var m = el.getScreenCTM(); return m ? p.matrixTransform(m.inverse()) : { x: e.offsetX || 0, y: e.offsetY || 0 }; }
+    function zoomAt(vx, vy, factor) {
+      var nk = clamp(cam.k * factor, 0.25, 6); if (nk === cam.k) return;
+      cam.tx = vx - (vx - cam.tx) * (nk / cam.k);
+      cam.ty = vy - (vy - cam.ty) * (nk / cam.k);
+      cam.k = nk; applyCam();
+    }
+    // frame every node (with its label room) inside the viewport, padded
+    function fitView() {
+      userMoved = false;
+      if (!nodes.length) { cam.k = 1; cam.tx = 0; cam.ty = 0; applyCam(); return; }
+      var minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+      nodes.forEach(function (n) {
+        var r = (n.r || 6) + 18;
+        if (n.x - r < minx) minx = n.x - r; if (n.y - r < miny) miny = n.y - r;
+        if (n.x + r > maxx) maxx = n.x + r; if (n.y + r > maxy) maxy = n.y + r;
+      });
+      var bw = Math.max(1, maxx - minx), bh = Math.max(1, maxy - miny), pad = 16;
+      cam.k = clamp(Math.min((W - pad * 2) / bw, (H - pad * 2) / bh), 0.3, 2.2);
+      cam.tx = (W - cam.k * (minx + maxx)) / 2;
+      cam.ty = (H - cam.k * (miny + maxy)) / 2;
+      applyCam();
+    }
 
     links.forEach(function (l) {
       l.el = document.createElementNS(NS, "line");
@@ -160,7 +199,8 @@
       }
       draw();
       alpha *= 0.985;
-      if (!destroyed && ++ticks < 600 && alpha > 0.02) raf = requestAnimationFrame(step); else raf = 0;
+      if (!destroyed && ++ticks < 600 && alpha > 0.02) { raf = requestAnimationFrame(step); }
+      else { raf = 0; if (!userMoved && !fitted) { fitted = true; fitView(); } }
     }
     function draw() {
       links.forEach(function (l) {
@@ -253,13 +293,9 @@
       tip.style.top = (e.clientY - box.top + 12) + "px";
     }
     function hideTip() { tip.hidden = true; }
-    function toSvg(e) {
-      var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
-      var m = svg.getScreenCTM();
-      return m ? p.matrixTransform(m.inverse()) : { x: e.offsetX, y: e.offsetY };
-    }
+    function toSvg(e) { return ptIn(gView, e); }
     function startDrag(n, e) {
-      e.preventDefault(); dragging = n; n.fixed = true;
+      e.preventDefault(); userMoved = true; dragging = n; n.fixed = true;
       function move(ev) { var pt = toSvg(ev); n.x = clamp(pt.x, 16, W - 16); n.y = clamp(pt.y, 16, H - 16); draw(); }
       function up() { dragging = null; n.fixed = false; reheat(); window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }
       window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
@@ -279,6 +315,30 @@
       });
     }
 
+    // ---- pan / zoom interaction ----
+    svg.addEventListener("wheel", function (e) {
+      e.preventDefault(); userMoved = true;
+      var p = ptIn(svg, e);
+      zoomAt(p.x, p.y, e.deltaY < 0 ? 1.12 : 1 / 1.12);
+    }, { passive: false });
+    svg.addEventListener("pointerdown", function (e) {
+      if (e.target && e.target.closest && e.target.closest(".gnode")) return; // a node drags itself
+      e.preventDefault(); userMoved = true;
+      var ctm = svg.getScreenCTM(), sc = (ctm && ctm.a) || 1;
+      var sx = e.clientX, sy = e.clientY, tx0 = cam.tx, ty0 = cam.ty;
+      svg.classList.add("panning");
+      function mv(ev) { cam.tx = tx0 + (ev.clientX - sx) / sc; cam.ty = ty0 + (ev.clientY - sy) / sc; applyCam(); }
+      function up() { svg.classList.remove("panning"); window.removeEventListener("pointermove", mv); window.removeEventListener("pointerup", up); }
+      window.addEventListener("pointermove", mv); window.addEventListener("pointerup", up);
+    });
+    var zoomCtrls = wrap.querySelector(".graph-zoom");
+    if (zoomCtrls) zoomCtrls.addEventListener("click", function (e) {
+      var b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.z === "fit") { fitView(); return; }
+      userMoved = true; zoomAt(W / 2, H / 2, b.dataset.z === "in" ? 1.25 : 1 / 1.25);
+    });
+
+    applyCam();
     styleLinks(baseLinks);
     reheat();
 
