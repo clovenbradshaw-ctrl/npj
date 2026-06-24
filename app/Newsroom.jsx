@@ -1159,16 +1159,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     window.__npjGround = {
       focused: () => window.__citey && window.__citey.focused ? window.__citey.focused() : null,
       pin: (el) => { if (!el) return; const cid = el.getAttribute("data-cid"); if (!cid) return; openPin(cid, el.getAttribute("data-src") || el.getAttribute("data-cite"), (el.textContent || "").trim()); },
-      own: (el, stance) => {
+      own: (el, stance, note) => {
         if (!el) return; const cid = el.getAttribute("data-cid");
         if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
         el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
         el.classList.remove("needs-quote");
-        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : "analysis";
+        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : stance === "absence" ? "absence" : "analysis";
         el.setAttribute("data-stance", norm);
+        // an asserted absence records the documented search it rests on (what the
+        // author looked through, found nothing) on the span, so it publishes + reads
+        if (norm === "absence") { if (note != null) el.setAttribute("data-note", String(note)); else el.removeAttribute("data-note"); }
+        else el.removeAttribute("data-note");
         el.setAttribute("title", norm === "context"
           ? "Continuing coverage — the article substantiates this, set against prior reporting"
-          : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
+          : norm === "absence"
+            ? "Asserted absence — a documented search did not find this" + (note ? ". Searched: " + note : "")
+            : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
         setRev(v => v + 1); scheduleSave(); renumberCites();
       },
       unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.removeAttribute("data-context"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },

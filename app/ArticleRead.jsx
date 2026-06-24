@@ -42,11 +42,12 @@ const GROUND_KINDS = {
   "own-analysis":  { glyph: "⊢", label: "The author's analysis", color: "#7C74DE", mark: "#6b5bd6", note: "Owned reasoning — grounded by declaration, not a citation." },
   "own-account":   { glyph: "⊨", label: "The author's account",  color: "#7C74DE", mark: "#6b5bd6", note: "First-hand: the author witnessed this." },
   "own-position":  { glyph: "⊩", label: "The author's position", color: "#7C74DE", mark: "#6b5bd6", note: "The author's stated position." },
+  absence:         { glyph: "∅", label: "Asserted absence",      color: "#4D7EA8", mark: "#3a6488", note: "A documented search did not find this — absence of evidence, declared (what was searched is on hover)." },
   needs:           { glyph: "⊥", label: "Needs a source",        color: "#D8632E", mark: "#b5701b", note: "Bound to a source but no passage pinned — the publish gate flags this." },
   conflict:        { glyph: "¬", label: "Sources disagree",      color: "#D8412C", mark: "#b3261e", note: "Two pinned quotes pull opposite ways." }
 };
-const GROUND_ORDER = ["grounded", "multi", "own-analysis", "own-account", "own-position", "needs", "conflict"];
-const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position" };
+const GROUND_ORDER = ["grounded", "multi", "own-analysis", "own-account", "own-position", "absence", "needs", "conflict"];
+const STANCE_KIND = { analysis: "own-analysis", testimony: "own-account", voice: "own-position", absence: "absence" };
 // The grounding kind of a claim token, read the same mechanical way the
 // workspace's statusOf does — owned (by its declared stance), else by how many
 // of its sources carry a pinned quote (none → needs, one → grounded, more →
@@ -692,11 +693,14 @@ function ArticleRead(props) {
     if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
       const kind = STANCE_KIND[t.stance] || "own-analysis";
       const gm = GROUND_KINDS[kind];
+      // an asserted absence names the documented search on hover (its grounding),
+      // and shows its ∅ mark even with the lens off — it's a distinct epistemic claim
+      const isAbsence = t.stance === "absence";
+      const title = isAbsence ? (gm.label + (t.note ? " — searched: " + t.note : "")) : (transparency ? gm.label : undefined);
       return (
-        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind}
-          title={transparency ? gm.label : undefined}>
+        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind} title={title}>
           {ent ? markEntities(t.c, ent, "o" + i) : t.c}
-          {transparency && <sup className="gmark" style={{ color: gm.mark }}>{gm.glyph}</sup>}
+          {(transparency || isAbsence) && <sup className="gmark" style={{ color: gm.mark }}>{gm.glyph}</sup>}
         </span>
       );
     }

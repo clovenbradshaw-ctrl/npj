@@ -92,7 +92,9 @@
   // token so the reader's transparency lens can show how it stands.
   function stanceNorm(s) {
     s = String(s || "").trim().toLowerCase();
-    return (s === "analysis" || s === "testimony" || s === "voice") ? s : null;
+    // absence = an ASSERTED ABSENCE: the claim is grounded not by a citation but
+    // by a documented search that found nothing (its `note` records what/where).
+    return (s === "analysis" || s === "testimony" || s === "voice" || s === "absence") ? s : null;
   }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
@@ -544,7 +546,13 @@
             // transparency lens can show it's grounded by declaration, not a cite.
             if (stance && !src.length) {
               flush();
-              toks.push({ c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() });
+              const owned = { c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
+              // an asserted absence carries the documented search it rests on (what
+              // the author looked through, and found nothing) — that note IS its
+              // grounding, so it rides the published token like a quote would.
+              const aNote = (c.getAttribute("data-note") || "").trim();
+              if (aNote) owned.note = aNote;
+              toks.push(owned);
               return;
             }
             // a SOURCED span in the edit surface's round-trip shape (eo-claim).
@@ -753,7 +761,7 @@
         // surface and the reader's transparency lens keep it; a sourced claim
         // keeps its data-src + quotes exactly as before.
         if (t.stance && (!t.src || !t.src.length))
-          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '" data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '"' + (t.note ? ' data-note="' + esc(t.note) + '"' : '') + ' data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
         return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
       }
       if (t.t === "br") return "<br/>";
