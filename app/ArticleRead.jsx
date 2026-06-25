@@ -1009,7 +1009,7 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, showSugg, 
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
         {!isPhone && <span style={{ flex: 1 }} />}
 
-        <button className="btn btn-sm" onClick={onExport} title="Export for Substack — copy with images, headings & sourcing intact, or download a .md"
+        <button className="btn btn-sm" onClick={onExport} title="Export & copy — the whole article as plain text or Markdown, a rich copy for Substack (images + sourcing intact), or a .html/.md/.txt file"
           style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
           <I.ext style={{ fontSize: 14 }} /> Export
         </button>

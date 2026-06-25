@@ -35,11 +35,18 @@ function SubstackExport({ article, onClose }) {
   const NS = window.NpjSubstack;
   const [citations, setCitations] = useState(true);
   const [sourcesList, setSourcesList] = useState(true);
-  const [copied, setCopied] = useState(null); // "rich" | "text" | "title" | "subtitle" | "md" | "file"
-  // hooks run unconditionally (before any early return) — guard inside instead
-  const preview = React.useMemo(
+  const [format, setFormat] = useState("md"); // which the preview shows: "md" | "txt"
+  const [copied, setCopied] = useState(null); // "rich" | "text" | "title" | "subtitle" | "md" | "plain" | "file" | "txtfile" | "html"
+  // hooks run unconditionally (before any early return) — guard inside instead.
+  // Both serializations are kept live so the preview can switch and each Copy
+  // button has its text ready; they're cheap pure string passes.
+  const previewMd = React.useMemo(
     () => (article && NS) ? NS.toMarkdown(article, { citations, sourcesList }) : "",
     [article, NS, citations, sourcesList]);
+  const previewTxt = React.useMemo(
+    () => (article && NS && NS.toPlainText) ? NS.toPlainText(article, { citations, sourcesList }) : "",
+    [article, NS, citations, sourcesList]);
+  const preview = format === "txt" ? previewTxt : previewMd;
   const sourceCount = React.useMemo(
     () => (article && NS) ? NS.indexSources(article.body, (window.NPJ && window.NPJ.SOURCES) || {}).ordered.length : 0,
     [article, NS]);
@@ -57,6 +64,7 @@ function SubstackExport({ article, onClose }) {
     flash(how === "text" ? "text" : how === "rich" ? "rich" : "fail");
   };
   const downloadMd = () => { try { NS.download(article, opts); flash("file"); } catch (e) {} };
+  const downloadTxt = () => { try { NS.downloadText(article, opts); flash("txtfile"); } catch (e) {} };
   const downloadHtmlFile = () => { try { NS.downloadHtml(article, opts); flash("html"); } catch (e) {} };
 
   const eyebrow = { fontFamily: "var(--mono)", fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".08em", color: "var(--ink-soft)" };
@@ -121,6 +129,26 @@ function SubstackExport({ article, onClose }) {
             </span>
           </div>
 
+          {/* copy the whole article as text — plain text or markdown */}
+          <div>
+            <div style={eyebrow}>Copy the whole article</div>
+            <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center", marginTop: 7 }}>
+              <button onClick={() => copyText(previewTxt, "plain")} className="btn"
+                title="Copy the entire article as clean plain text — headline, body and (while the toggles above are on) the sources, with no markup."
+                style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <I.copy style={{ fontSize: 14 }} /> {copied === "plain" ? "Copied!" : "Copy plain text"}
+              </button>
+              <button onClick={() => copyText(previewMd, "md")} className="btn"
+                title="Copy the entire article as Markdown — headings, links, lists and the sourcing kept as markdown syntax."
+                style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <I.copy style={{ fontSize: 14 }} /> {copied === "md" ? "Copied!" : "Copy markdown"}
+              </button>
+            </div>
+            <span className="np-mono" style={{ display: "block", marginTop: 8, fontSize: 10.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
+              <strong>Plain text</strong> is the words alone; <strong>Markdown</strong> keeps headings, links &amp; lists as markup. Both carry each sourced claim’s number and the Sources list while the toggles above are on.
+            </span>
+          </div>
+
           {/* save a file */}
           <div>
             <div style={eyebrow}>Save a file</div>
@@ -130,22 +158,35 @@ function SubstackExport({ article, onClose }) {
                 style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
                 <I.ext style={{ fontSize: 14 }} /> {copied === "html" ? "Downloaded!" : "Download .html"}
               </button>
-              <button onClick={downloadMd} className="btn" title="Plain-text markdown — the archival record (title &amp; subtitle included)."
+              <button onClick={downloadMd} className="btn" title="Markdown — the archival record (title &amp; subtitle included)."
                 style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                 <I.archive style={{ fontSize: 14 }} /> {copied === "file" ? "Downloaded!" : "Download .md"}
               </button>
-              <button onClick={() => copyText(preview, "md")} className="btn btn-ghost" style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                <I.copy style={{ fontSize: 14 }} /> {copied === "md" ? "Copied!" : "Copy markdown"}
+              <button onClick={downloadTxt} className="btn" title="Plain text — the words alone (title &amp; subtitle included)."
+                style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+                <I.archive style={{ fontSize: 14 }} /> {copied === "txtfile" ? "Downloaded!" : "Download .txt"}
               </button>
             </div>
             <span className="np-mono" style={{ display: "block", marginTop: 8, fontSize: 10.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
-              <strong>.html</strong> is the file that copies perfectly — open it, hit <em>Copy article</em>, paste into Substack (images, headings &amp; sourcing intact). <strong>.md</strong> is the plain-text record; pasted markdown stays literal in Substack.
+              <strong>.html</strong> copies perfectly into Substack (images, headings &amp; sourcing intact). <strong>.md</strong> and <strong>.txt</strong> are the plain records.
             </span>
           </div>
 
-          {/* preview */}
+          {/* preview — switch between markdown and plain text */}
           <div>
-            <div style={eyebrow}>Markdown preview</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={eyebrow}>Preview</span>
+              <div style={{ display: "inline-flex", border: "1.5px solid var(--ink)" }}>
+                {[["md", "Markdown"], ["txt", "Plain text"]].map(([key, label], i) => (
+                  <button key={key} onClick={() => setFormat(key)} aria-pressed={format === key}
+                    style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12, padding: "4px 11px", cursor: "pointer",
+                      border: 0, borderLeft: i ? "1.5px solid var(--ink)" : 0,
+                      background: format === key ? "var(--ink)" : "var(--paper)", color: format === key ? "var(--yellow)" : "var(--ink)" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea readOnly value={preview} spellCheck={false}
               onFocus={(e) => e.target.select()}
               className="np-mono np-scroll"
