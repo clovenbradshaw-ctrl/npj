@@ -140,7 +140,7 @@ function ImageCite({ rec, url, alt, H, frameless, onSelectText }) {
   );
 }
 
-function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hideOcr }) {
+function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hideOcr, onEditText }) {
   const SV = window.NpjSourceView;
   rec = rec || (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || {};
   const key = (rec && (rec.id || rec.key)) || srcKey || "";
@@ -153,6 +153,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
   const [txt, setTxt] = useState(String(rec.text || ""));  // decoded text-file body
   const [txtLoading, setTxtLoading] = useState(false);
   const [showOcr, setShowOcr] = useState(false);           // image: reveal the recognized (OCR) text
+  const [ocrEdit, setOcrEdit] = useState(null);            // image: editing the OCR text in place (null = viewing)
 
   // resolve a renderable URL (blob → resolved media-store → archive/original)
   useEffect(() => {
@@ -230,10 +231,23 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
         {linkRow}
         {ocr && !hideOcr ? (
           <div style={{ marginTop: 8 }}>
-            <button onClick={() => setShowOcr(v => !v)} className="np-mono" title="Text read from the image by OCR" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--data)", fontSize: 10.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
-              {showOcr ? "▾" : "▸"} Recognized text (OCR)
-            </button>
-            {showOcr && <div className="np-scroll" style={{ maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--rule)", padding: "10px 12px", marginTop: 6, fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.55 }}>{rec.text}</div>}
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button onClick={() => { setShowOcr(v => !v); setOcrEdit(null); }} className="np-mono" title="Text read from the image by OCR" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--data)", fontSize: 10.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
+                {showOcr ? "▾" : "▸"} Recognized text (OCR)
+              </button>
+              {showOcr && onEditText && ocrEdit == null && <button onClick={() => setOcrEdit(String(rec.text || ""))} className="np-mono" title="Fix what the OCR read wrong — the words you cite come from here" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink-soft)", fontSize: 10.5 }}>✎ Edit</button>}
+            </div>
+            {showOcr && (ocrEdit == null
+              ? <div className="np-scroll" style={{ maxHeight: 180, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--rule)", padding: "10px 12px", marginTop: 6, fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.55 }}>{rec.text}</div>
+              : <div style={{ marginTop: 6 }}>
+                  <textarea autoFocus value={ocrEdit} onChange={e => setOcrEdit(e.target.value)}
+                    style={{ width: "100%", boxSizing: "border-box", minHeight: 140, background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--rule)", padding: "10px 12px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.55, outline: "none", resize: "vertical" }}
+                    placeholder="The words read from this image. Fix anything OCR got wrong." />
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 6 }}>
+                    <button onClick={() => setOcrEdit(null)} className="np-mono" style={{ background: "none", border: "1px solid var(--rule)", color: "var(--ink-soft)", fontSize: 11, padding: "4px 9px", cursor: "pointer" }}>Cancel</button>
+                    <button onClick={() => { onEditText(ocrEdit); if (rec) rec.text = ocrEdit; setOcrEdit(null); }} className="np-mono" style={{ background: "var(--yellow)", border: "1px solid var(--ink)", color: "var(--ink)", fontWeight: 700, fontSize: 11, padding: "4px 9px", cursor: "pointer" }}>Save text</button>
+                  </div>
+                </div>)}
           </div>
         ) : null}
       </div>
