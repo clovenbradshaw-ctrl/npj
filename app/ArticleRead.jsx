@@ -309,6 +309,8 @@ function ArticleRead(props) {
   const [showVersions, setShowVersions] = useState(false);
   const [showExport, setShowExport] = useState(false);
   const [editing, setEditing] = useState(false);
+  // the Contents outline is a disclosure: collapsed by default, expand to jump
+  const [tocOpen, setTocOpen] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
   const [statusErr, setStatusErr] = useState(null);
   const [reverting, setReverting] = useState(null);   // sha being restored | "undo" | null
@@ -326,7 +328,11 @@ function ArticleRead(props) {
   const leaveTimer = useRef(null);
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
-  const jump = (id) => { const el = document.getElementById(id); if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 80, behavior: "smooth" }); };
+  // scrollIntoView walks to the element's actual scroll container — the window
+  // in the live read, but the fixed overlay in Preview — so it moves the page
+  // the reader is looking at, not whatever's behind it. The headings carry
+  // scrollMarginTop: 90, so block:"start" leaves room under the masthead.
+  const jump = (id) => { const el = document.getElementById(id); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
   const artVersions = A.versions && A.versions.length ? A.versions : [{ sha: A.base_sha || "v1", ts: A.published, author: (A.authors || [])[0], message: "Published", headline: A.headline || "", dek: A.dek || "", text: window.NPJ.articlePlainText() }];
 
   const showMarkers = audit;
@@ -733,11 +739,19 @@ function ArticleRead(props) {
         <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleLogUrl(A)}`} title={A.headline} />
       </div>
       {headings.length >= 2 && (
-        <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 8 }}>Contents</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {headings.map(h => <button key={h.id} onClick={() => jump(h.id)} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
-          </div>
+        <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)" }}>
+          <button onClick={() => setTocOpen(o => !o)} aria-expanded={tocOpen} aria-controls="article-toc-list"
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+              background: "none", border: 0, cursor: "pointer", padding: "12px 14px" }}>
+            <span aria-hidden="true" style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>{tocOpen ? "▾" : "▸"}</span>
+            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Contents</span>
+            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{headings.length}</span>
+          </button>
+          {tocOpen && (
+            <div id="article-toc-list" style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 14px 12px" }}>
+              {headings.map(h => <button key={h.id} onClick={() => { jump(h.id); setTocOpen(false); }} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
+            </div>
+          )}
         </nav>
       )}
     </header>
