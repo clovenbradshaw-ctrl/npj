@@ -470,7 +470,10 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
    locks the page scroll while open, and restores it on close. SourceViewer lives
    in the READ bundle (loaded before the reader renders), so by the time a reader
    can open this it's present; a stub message covers the vanishingly-rare race. */
-function SourceLightbox({ srcKey, rec, onClose, keys, start }) {
+function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited }) {
+  // renderCited(key) is an optional host hook returning the passages this source
+  // backs, as click-to-jump snippets shown under the document — so a reader can
+  // hop back into the story without ever leaving the page (no new tab).
   // Gallery mode: opened with an ordered list of source keys, the sheet lets you
   // tab through every source at full size — the ‹ › buttons, the ← → arrow keys,
   // and an "n / total" counter. Opened with a lone srcKey (a citation card's
@@ -542,6 +545,7 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start }) {
           {window.SourceViewer
             ? <window.SourceViewer key={activeKey || (s.id || s.key)} srcKey={activeKey} rec={s} height={bodyH} />
             : <div className="np-mono" style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>Loading the document viewer…</div>}
+          {(() => { const cited = renderCited ? renderCited(activeKey) : null; return cited ? <div className="srclb-cited">{cited}</div> : null; })()}
         </div>
       </div>
     </div>

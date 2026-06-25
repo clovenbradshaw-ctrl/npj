@@ -313,12 +313,13 @@ function ArticleRead(props) {
   const [lightbox, setLightbox] = useState(null);
   // a citation card's "View document" opens just that one source (no nav)
   const openLightbox = useCallback((key) => { setLightbox({ keys: [key], start: 0 }); setHover(null); setActiveSrc(null); }, []);
-  // the Sources footer opens the full set at the clicked source, so you can tab
-  // through every receipt full-size with ‹ › / ← →
-  const openSourceGallery = useCallback((i) => {
-    const keys = sourceList.map(x => x.key);
-    if (!keys.length) return;
-    setLightbox({ keys, start: Math.max(0, Math.min(keys.length - 1, i || 0)) });
+  // the Sources explorer opens a set of sources (whatever the reader has filtered
+  // to) at the one they clicked, so they read it full-size IN THE APP and tab
+  // through that exact set with ‹ › / ← → — never navigated off the page.
+  const openSourceGallery = useCallback((keys, i) => {
+    const list = (Array.isArray(keys) ? keys : sourceList.map(x => x.key)).filter(Boolean);
+    if (!list.length) return;
+    setLightbox({ keys: list, start: Math.max(0, Math.min(list.length - 1, i || 0)) });
     setHover(null); setActiveSrc(null);
   }, [sourceList]);
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
@@ -415,6 +416,21 @@ function ArticleRead(props) {
     el.classList.remove("claim-flash"); void el.offsetWidth; el.classList.add("claim-flash");
     setTimeout(() => el.classList.remove("claim-flash"), 1800);
   }, []);
+  // the passages a source backs, rendered inside the in-app viewer — clicking one
+  // closes the sheet and jumps to that exact span in the story (it stays on the
+  // page; nothing opens a new tab)
+  const renderCitedForSource = useCallback((key) => {
+    const spans = spansForSource(key);
+    if (!spans || !spans.length) return null;
+    return (
+      <React.Fragment>
+        <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "0 0 5px" }}>
+          Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} in the story — click to jump
+        </div>
+        <CitedSpanList claims={spans} onJump={(id) => { setLightbox(null); jumpToClaim(id); }} />
+      </React.Fragment>
+    );
+  }, [spansForSource, jumpToClaim]);
 
   // Open the composer pinned to a bound claim (from the hover card) — the whole
   // claim span is the anchor, by its stable id.
@@ -820,7 +836,7 @@ function ArticleRead(props) {
       )}
       {Header}
       {Body}
-      <SourcesFooter sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />
+      <SourcesExplorer sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />
     </div>
   );
 
@@ -859,7 +875,7 @@ function ArticleRead(props) {
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
           onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
-        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} onClose={() => setLightbox(null)} />}
+        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
       </div>
     );
   }
@@ -930,7 +946,7 @@ function ArticleRead(props) {
       {/* a source's document, expanded to fill the screen in-app — opened from a
          citation card or the Sources footer (where you can tab through them all);
          ✕ / Esc / backdrop to exit */}
-      {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} onClose={() => setLightbox(null)} />}
+      {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -1088,60 +1104,180 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
   );
 }
 
-// The Sources footer — every cited source, in reading order, each openable at
-// full size. The old "Methods & receipts" preamble (build-passed line, snapshot
-// methodology blurb) and the "How this was written" composition strip are gone:
-// what's left is the receipts themselves. A row is a button that opens the source
-// in the lightbox GALLERY (onOpen(i)), so a reader can read the document full-size
-// and tab through every other source with ‹ › / ← →. Under each row sit the exact
-// passages it grounds — click one to jump back up to that span in the story.
-function SourcesFooter({ sourceList, spansForSource, onJump, onOpen }) {
+/* ---- the Sources explorer ----
+   The receipts, made browsable. The old "Methods & receipts" preamble and the
+   "How this was written" composition strip are gone — what's left is the sources
+   themselves, as a tool you can actually use when a piece cites two dozen of them:
+
+     • a one-line read of HOW the piece is sourced (n documents · n web · n …),
+     • filter chips by what a source IS — a document you read here, a web page, a
+       person, a dataset — each with a live count,
+     • a search that matches titles, outlets AND the exact passages quoted,
+     • a sort: in reading order, or heaviest-cited first (what it's built on),
+     • cards that open the source FULL-SIZE IN THE APP (never a new tab) and, in
+       the viewer, tab ‹ ›/← → through exactly the set you've filtered to.
+
+   The chrome only appears when it earns its keep (≥6 sources, ≥2 kinds; search at
+   ≥10) — a three-source piece is just the cards. */
+const CAT_ORDER = ["document", "web", "interview", "data", "other"];
+const CAT_LABEL = { document: "Documents", web: "Web pages", interview: "Interviews", data: "Data", other: "Other" };
+// icons resolved at call time (window.I exists by render) — never at module load
+function catIcon(k) { return ({ document: I.doc, web: I.link, interview: I.chat, data: I.data, other: I.doc })[k] || I.doc; }
+// what a source IS, from the reader's point of view: can I read it here, follow a
+// web reference, hear from a person, or dig into data. An uploaded file we can
+// render in-app is a "document"; an interview is a person; a dataset is data; a
+// captured page/link is "web". This is the facet the chips filter on.
+function sourceCategory(s) {
+  if (!s) return "other";
+  if (window.NpjInterview && window.NpjInterview.isInterview(s)) return "interview";
+  const SV = window.NpjSourceView;
+  if (SV && SV.isViewable && SV.isViewable(s)) return "document";
+  if (s.type === "data") return "data";
+  if (s.archive_url || s.original_url) return "web";
+  if (SV && SV.hasFile && SV.hasFile(s)) return "document";
+  return "other";
+}
+
+function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {
   const isPhone = window.useIsMobile(760);
-  if (!sourceList || !sourceList.length) return null;
-  const many = sourceList.length > 1;
-  const hint = (isPhone ? "tap any to view full-size" : "click any to view full-size")
-    + (many && !isPhone ? " · then ← → to move between them" : "");
+  const [query, setQuery] = useState("");
+  const [cat, setCat] = useState("all");        // active filter facet
+  const [sort, setSort] = useState("order");     // "order" | "cited"
+  const [openKey, setOpenKey] = useState(null);  // which card's passages are expanded
+
+  // decorate every source once: record, category, passages, search haystack
+  const rows = React.useMemo(() => (sourceList || []).map((e, i) => {
+    const s = srcOf(e.key);
+    const spans = spansForSource ? spansForSource(e.key) : [];
+    const hay = [s.title, s.outlet, s.id].concat(spans.map(sp => sp.text)).filter(Boolean).join(" ").toLowerCase();
+    return { key: e.key, num: e.num, order: i, s, spans, category: sourceCategory(s), hay };
+  }), [sourceList, spansForSource]);
+
+  const counts = React.useMemo(() => {
+    const c = {}; rows.forEach(r => { c[r.category] = (c[r.category] || 0) + 1; }); return c;
+  }, [rows]);
+  const cats = CAT_ORDER.filter(k => counts[k]);
+
+  const q = query.trim().toLowerCase();
+  const view = React.useMemo(() => {
+    let v = rows;
+    if (cat !== "all") v = v.filter(r => r.category === cat);
+    if (q) v = v.filter(r => r.hay.indexOf(q) !== -1);
+    if (sort === "cited") v = v.slice().sort((a, b) => b.spans.length - a.spans.length || a.order - b.order);
+    return v;
+  }, [rows, cat, q, sort]);
+
+  if (!rows.length) return null;
+  const viewKeys = view.map(r => r.key);
+  const total = rows.length;
+  const showControls = total >= 6 && cats.length >= 2;
+  const showSearch = total >= 10;
+  // the one-line "how this is sourced" read
+  const summary = cats.map(k => counts[k] + " " + CAT_LABEL[k].toLowerCase()).join(" · ");
+
   return (
     <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>SOURCES</h3>
-        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{sourceList.length} source{many ? "s" : ""} · {hint}</span>
+        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{total} · {summary}</span>
       </div>
-      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: "12px 24px" }}>
-        {sourceList.map(({ key, num }, i) => {
-          const s = srcOf(key); const spans = spansForSource ? spansForSource(key) : [];
-          // an interview carries an attribution + date instead of a snapshot; a
-          // redacted source withholds its original — say which, in plain colour
-          const ivLink = window.NpjInterview && window.NpjInterview.isInterview(s);
-          const meta = ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved)
-            : s.redacted ? "redacted — original withheld"
-            : s.archive_url ? "archived " + (s.retrieved || "")
-            : s.original_url ? "live link"
-            : "no snapshot yet";
-          const metaColor = (ivLink || s.redacted) ? "var(--review)" : s.archive_url ? "var(--verified)" : "var(--ink-soft)";
-          return (
-            <li key={key} style={{ borderBottom: "1px solid var(--rule)", paddingBottom: 6 }}>
-              <button type="button" onClick={() => onOpen(i)} className="src-cite"
-                title="View this source full-size" aria-label={"View source " + num + ", " + (s.title || s.id || key) + ", full-size"}>
-                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content", flex: "0 0 auto" }}>{num}</span>
-                <span style={{ minWidth: 0, flex: 1 }}>
-                  <span style={{ display: "block", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                    {s.outlet ? <strong style={{ fontWeight: 600 }}>{s.outlet}. </strong> : null}{s.title}
+      <p className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", margin: "0 0 14px", lineHeight: 1.5 }}>
+        {isPhone ? "Tap" : "Click"} any source to read it full-size, right here{total > 1 ? " — then ← → to move through them" : ""}. Nothing opens a new tab.
+      </p>
+
+      {showControls && (
+        <div className="srcx-bar">
+          {showSearch && (
+            <div className="srcx-search">
+              <I.search style={{ fontSize: 14, color: "var(--ink-soft)", flex: "0 0 auto" }} />
+              <input value={query} onChange={e => setQuery(e.target.value)} aria-label="Search sources and quoted passages"
+                placeholder="Search sources & quoted passages…" />
+              {query && <button type="button" className="srcx-clear" onClick={() => setQuery("")} aria-label="Clear search"><I.x /></button>}
+            </div>
+          )}
+          <div className="srcx-chips" role="group" aria-label="Filter sources by kind">
+            <button type="button" className="srcx-chip" aria-pressed={cat === "all"} onClick={() => setCat("all")}>All <span className="srcx-n">{total}</span></button>
+            {cats.map(k => {
+              const Icon = catIcon(k);
+              return (
+                <button key={k} type="button" className="srcx-chip" aria-pressed={cat === k} onClick={() => setCat(cat === k ? "all" : k)}>
+                  <Icon style={{ fontSize: 13 }} /> {CAT_LABEL[k]} <span className="srcx-n">{counts[k]}</span>
+                </button>
+              );
+            })}
+          </div>
+          <span style={{ flex: 1 }} />
+          <button type="button" className="srcx-sort" onClick={() => setSort(sort === "order" ? "cited" : "order")}
+            title="Order by appearance in the story, or by how many passages each source backs">
+            ⇅ {sort === "order" ? "In order" : "Most cited"}
+          </button>
+        </div>
+      )}
+
+      {view.length === 0 ? (
+        <div className="np-mono" style={{ fontSize: 12, color: "var(--ink-soft)", border: "1px dashed var(--rule-strong)", padding: "22px 16px", textAlign: "center", lineHeight: 1.6 }}>
+          No sources match {query ? "“" + query + "”" : "this filter"}{cat !== "all" ? " in " + CAT_LABEL[cat].toLowerCase() : ""}.{" "}
+          <button type="button" className="srcx-reset" onClick={() => { setQuery(""); setCat("all"); }}>Clear filters</button>
+        </div>
+      ) : (
+        <ol className="srcx-list">
+          {view.map((r, i) => {
+            const { key, num, s, spans, category } = r;
+            const CatIcon = catIcon(category);
+            const iv = category === "interview";
+            const SV = window.NpjSourceView;
+            const kind = SV && SV.kindOf ? SV.kindOf(s) : "unknown";
+            const medium = iv ? ((window.NpjInterview && window.NpjInterview.outletLine && window.NpjInterview.outletLine(s.talk || {})) || "Interview")
+              : category === "web" ? "Web page"
+              : category === "data" ? "Dataset"
+              : kind === "pdf" ? "PDF" : kind === "image" ? "Image / scan" : kind === "text" ? "Text" : "Document";
+            const prov = iv ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved)
+              : s.redacted ? "Redacted"
+              : s.archive_url ? "Archived " + (s.retrieved || "")
+              : s.original_url ? "Reference"
+              : "";
+            const provColor = (iv || s.redacted) ? "var(--review)" : s.archive_url ? "var(--verified)" : "var(--ink-soft)";
+            // the source → spans connection is the point: show the passages it
+            // grounds right on the card (capped, with a "+N more"), each a click
+            // away from the exact spot in the story it backs
+            const cap = 4;
+            const overflow = spans.length > cap + 1;
+            const expanded = openKey === key;
+            const shown = (expanded || !overflow) ? spans : spans.slice(0, cap);
+            return (
+              <li key={key} className="srcx-card">
+                <button type="button" className="srcx-open" onClick={() => onOpen(viewKeys, i)}
+                  title="Read this source full-size, here in the app"
+                  aria-label={"Open source " + num + ", " + (s.title || s.id || key) + ", full-size in the app"}>
+                  <span className="claim-marker srcx-num">{num}</span>
+                  <span className="srcx-main">
+                    <span className="srcx-title">{s.title || s.id || key}</span>
+                    {s.outlet ? <span className="srcx-outlet">{s.outlet}</span> : null}
+                    <span className="srcx-meta">
+                      <span className="srcx-medium"><CatIcon style={{ fontSize: 12 }} /> {medium}</span>
+                      {prov ? <span style={{ color: provColor }}>· {prov}</span> : null}
+                    </span>
                   </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
-                    <SourceTag type={s.type} />
-                    {spans.length > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{spans.length} passage{spans.length !== 1 ? "s" : ""}</span>}
-                    <span className="np-mono" style={{ fontSize: 9.5, color: metaColor }}>{meta}</span>
-                  </span>
-                </span>
-                <span aria-hidden="true" className="src-cite-go"><I.expand style={{ fontSize: 14 }} /></span>
-              </button>
-              {/* the exact passages this source grounds — click to jump back up */}
-              <CitedSpanList claims={spans} onJump={onJump} />
-            </li>
-          );
-        })}
-      </ol>
+                  <span className="srcx-view" aria-hidden="true"><I.expand style={{ fontSize: 15 }} /></span>
+                </button>
+                {spans.length > 0 && (
+                  <div className="srcx-foot">
+                    <div className="srcx-foot-h">
+                      Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} in the story — click one to jump there
+                    </div>
+                    <CitedSpanList claims={shown} onJump={onJump} />
+                    {overflow && (
+                      <button type="button" className="srcx-more" aria-expanded={expanded} onClick={() => setOpenKey(expanded ? null : key)}>
+                        {expanded ? "Show fewer" : "+ " + (spans.length - cap) + " more passage" + (spans.length - cap !== 1 ? "s" : "")}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      )}
     </footer>
   );
 }
