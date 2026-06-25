@@ -83,6 +83,31 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   };
   const addBanner = () => { if (bodyRef.current) { bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); upgradeSlots(); } };
 
+  // ---- embeds: paste a URL → a live player (same resolver the composer + reader
+  // use). YouTube/Vimeo keep 16:9; a Google Drive / Docs / archive.org file
+  // takes a fixed height. data-embed-url keeps the original permalink so the
+  // edit round-trips through htmlToBlocks like any other embed block. ----
+  const addEmbed = () => {
+    const raw = prompt("Embed URL — YouTube, Vimeo, a Google Drive or archive.org file, .mp4/.mp3 …");
+    const url = (raw || "").trim(); if (!/^https?:\/\//.test(url)) return;
+    const esc = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+    let host = ""; try { host = new URL(url).hostname.replace(/^www\./, ""); } catch (e) {}
+    const r = window.NpjEmbed && window.NpjEmbed.resolve(url);
+    let height = null;
+    if (r && r.panel) {
+      const def = (window.NpjEmbed && window.NpjEmbed.DEFAULT_HEIGHT) || 600;
+      height = parseInt(prompt("Frame height in pixels", String(def)), 10) || def;
+    }
+    const inner = window.NpjEmbed ? window.NpjEmbed.innerHtml(url, { height }) : '<a href="' + esc + '">' + (host || esc) + "</a>";
+    const heightAttr = (r && r.panel && height) ? ' data-embed-height="' + height + '"' : "";
+    const root = bodyRef.current; if (!root) return;
+    const s = window.getSelection();
+    const inBody = !!(s && s.rangeCount && root.contains(s.getRangeAt(0).startContainer));
+    root.focus();
+    if (!inBody && s) { const rg = document.createRange(); rg.selectNodeContents(root); rg.collapse(false); s.removeAllRanges(); s.addRange(rg); }
+    document.execCommand("insertHTML", false, '<figure contenteditable="false" class="cmp-embed" data-embed-url="' + esc + '"' + heightAttr + ">" + inner + "</figure><p><br/></p>");
+  };
+
   // ---- sourcing: bind the selected words to a (new) source, like the newsroom ----
   const bindSourceUrl = () => {
     setErr(null);
@@ -238,6 +263,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addLink}>Link</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={insertImage}>▣ Image</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addBanner}>▤ Banner</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addEmbed}>▶ Embed</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={bindSourceUrl}>⊥ Source</button>
             <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>select text → ⊥ Source to cite it · drop a photo to add an image · dotted spans are existing claims</span>
           </div>

@@ -190,6 +190,55 @@ function nrTidyHtml(html) {
   return { html: nrSerializeHtml(doc), fixes: fixes };
 }
 
+// Raw media the author typed/pasted into the HTML source view — a bare <iframe>,
+// <video> or <audio> (e.g. a Google Drive or archive.org embed snippet) — is
+// lifted into a REAL embed block: a contenteditable=false <figure class="cmp-embed"
+// data-embed-url> the composer treats as a void block and htmlToBlocks round-trips
+// into the published record. Without this the <iframe> shows in the editor but the
+// text-only htmlToBlocks drops it, so it never reaches preview or publish. Media
+// already inside a managed embed figure is left untouched. Returns how many it
+// normalized. Self-contained (module scope) so it runs over a detached tree too.
+function nrNormalizeEmbeds(root) {
+  if (!root) return 0;
+  var E = window.NpjEmbed, n = 0;
+  var med = root.querySelectorAll("iframe, video, audio");
+  for (var i = 0; i < med.length; i++) {
+    var el = med[i];
+    if (el.closest && el.closest("figure[data-embed-url]")) continue;   // already a managed embed
+    var src = el.getAttribute("src") || "";
+    if (!src) { var s0 = el.querySelector && el.querySelector("source[src]"); if (s0) src = s0.getAttribute("src") || ""; }
+    if (!/^https?:\/\//.test(src)) continue;
+    var r = E && E.resolve(src), height = 0;
+    if (r && r.panel) {
+      var sh = (el.getAttribute("style") || "").match(/height:\s*(\d+)/i);
+      height = sh ? parseInt(sh[1], 10) : parseInt(el.getAttribute("height") || "0", 10);
+    }
+    var fig = document.createElement("figure");
+    fig.className = "cmp-embed"; fig.setAttribute("contenteditable", "false"); fig.setAttribute("data-embed-url", src);
+    if (r && r.panel && height > 0) fig.setAttribute("data-embed-height", String(height));
+    fig.innerHTML = E ? E.innerHtml(src, { height: height }) : "";
+    var host = ""; try { host = new URL(src).hostname.replace(/^www\./, ""); } catch (e) {}
+    var cap = document.createElement("figcaption");
+    cap.className = "np-mono cmp-embed-hint"; cap.setAttribute("style", "font-size:11px;margin-top:4px;color:var(--ink-soft)");
+    cap.textContent = (host || "media") + " · embedded — the published article keeps the link";
+    fig.appendChild(cap);
+    // swap the media element — or a wrapper the author pasted around it (a lone
+    // <p>/<div>, or a <figure> with no data-embed-url) — for our figure, so we
+    // never nest figures, and make sure an editable paragraph follows so the
+    // caret has somewhere to land
+    var target = el, p = el.parentElement;
+    if (p && p.tagName === "FIGURE") target = p;
+    else if (p && (p.tagName === "P" || p.tagName === "DIV") && p.children.length === 1 && !(p.textContent || "").trim()) target = p;
+    if (!target.parentNode) continue;
+    target.parentNode.replaceChild(fig, target);
+    if (!fig.nextElementSibling || fig.nextElementSibling.tagName === "FIGURE") {
+      var np = document.createElement("p"); np.innerHTML = "<br/>"; fig.parentNode.insertBefore(np, fig.nextSibling);
+    }
+    n++;
+  }
+  return n;
+}
+
 // edge-dashes stripped AFTER the length cap — a cap that lands mid-word used
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
@@ -477,7 +526,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
       const embed = f.getAttribute("data-embed-url");
-      const cap = f.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
+      const cap = f.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc):not(.cmp-embed-hint)");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
       if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
@@ -1298,17 +1347,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const insertEmbed = () => {
     const u = embedUrl.trim(); if (!/^https?:\/\//.test(u)) return;
+    const esc = u.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
     let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
-    const esc = u.replace(/"/g, "&quot;");
-    const yt = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
-    const vm = u.match(/vimeo\.com\/(\d+)/);
-    let inner;
-    if (yt) inner = `<iframe src="https://www.youtube-nocookie.com/embed/${yt[1]}" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen></iframe>`;
-    else if (vm) inner = `<iframe src="https://player.vimeo.com/video/${vm[1]}" style="width:100%;aspect-ratio:16/9;border:0" allowfullscreen></iframe>`;
-    else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) inner = `<audio controls src="${esc}" style="width:100%"></audio>`;
-    else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) inner = `<video controls src="${esc}" style="width:100%;max-height:420px;background:#000"></video>`;
-    else inner = `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
-    insertBlock(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
+    // one resolver builds the player here, in blocksToHtml and in the reader, so
+    // a pasted Google Drive / Docs / archive.org / video link embeds identically
+    // everywhere. `panel` embeds (no knowable aspect) take the author's height.
+    const r = window.NpjEmbed && window.NpjEmbed.resolve(u);
+    const h = parseInt(embedHeight, 10);
+    const inner = window.NpjEmbed ? window.NpjEmbed.innerHtml(u, { height: h }) : `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
+    const heightAttr = (r && r.panel && h) ? ` data-embed-height="${h}"` : "";
+    insertBlock(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}"${heightAttr}>${inner}<figcaption class="np-mono cmp-embed-hint" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
   // A footnote attaches to a WORD, so the marker must land against text. If the
@@ -1379,6 +1427,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
+  const [embedHeight, setEmbedHeight] = useState(String((window.NpjEmbed && window.NpjEmbed.DEFAULT_HEIGHT) || 600)); // px height for panel embeds (Drive/Docs/archive)
   const [htmlMode, setHtmlMode] = useState(false);  // editing the document's raw HTML in the source view
   const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
   const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
@@ -1493,6 +1542,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // citations and footnotes renumbered, structure reconciled, fields rehydrated.
   const reconcileAfterReplace = () => {
     const root = ed.current; if (!root) return;
+    // lift any raw <iframe>/<video>/<audio> the author wrote in the HTML source
+    // view into real embed figures before the rest of the reconcile runs
+    nrNormalizeEmbeds(root);
     if (!root.querySelector(".nr-dek")) {
       const h1 = root.querySelector("h1");
       if (h1) { const p = document.createElement("p"); p.className = "nr-dek"; p.setAttribute("data-ph", DEK_PH); p.innerHTML = "<br/>"; h1.after(p); }
@@ -2627,17 +2679,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <TB onClick={insertImage} title="Inline image"><I.image style={{ fontSize: 14 }} /> Image</TB>
         <TB onClick={insertCarousel} title="Image carousel — a swipeable gallery of photos"><I.images style={{ fontSize: 14 }} /> Carousel</TB>
         <div style={{ position: "relative", display: "inline-block" }}>
-          <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed video, audio or a link card"><I.play style={{ fontSize: 14 }} /> Embed</TB>
-          {fmtMenu === "embed" && (
-            <div style={{ ...popStyle, width: 280 }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed a video, a Google Drive / archive.org file, audio or a link"><I.play style={{ fontSize: 14 }} /> Embed</TB>
+          {fmtMenu === "embed" && (() => {
+            // a Drive / Docs / archive.org file has no knowable aspect, so it
+            // takes a height; YouTube/Vimeo keep their 16:9 and ignore it.
+            const er = window.NpjEmbed && window.NpjEmbed.resolve(embedUrl.trim());
+            return (
+            <div style={{ ...popStyle, width: 300 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Embed media</div>
               <div style={{ display: "flex", gap: 6 }}>
-                <input autoFocus value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && insertEmbed()} placeholder="YouTube, Vimeo, .mp3, .mp4, URL…" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 11.5, outline: "none" }} />
+                <input autoFocus value={embedUrl} onChange={e => setEmbedUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && insertEmbed()} placeholder="YouTube, Vimeo, Google Drive, archive.org, .mp4…" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 11.5, outline: "none" }} />
                 <button className="btn btn-sm btn-primary" onClick={insertEmbed}>Add</button>
               </div>
-              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>video &amp; audio play in the draft; the published article keeps the permalink</div>
+              {er && er.panel && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 7 }}>
+                  <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>Height</span>
+                  <input type="number" min="120" step="20" value={embedHeight} onChange={e => setEmbedHeight(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && insertEmbed()} className="np-mono" style={{ width: 64, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "5px 7px", fontSize: 11.5, outline: "none" }} />
+                  <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>px · the frame's height</span>
+                </label>
+              )}
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>Drive / Docs / archive.org files &amp; video / audio embed in the draft; the published article keeps the permalink.</div>
             </div>
-          )}
+            );
+          })()}
         </div>
         <div style={{ position: "relative", display: "inline-block" }}>
           <TB onClick={() => setFmtMenu(fmtMenu === "more" ? null : "more")} title="More blocks"><I.dots style={{ fontSize: 14 }} /> More <I.caretDown style={{ fontSize: 9 }} /></TB>

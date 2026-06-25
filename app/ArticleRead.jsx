@@ -250,20 +250,27 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
 // rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
 // <audio> for direct media files, or (for anything we don't recognize) the
 // link card, since the committed artifact is always the URL itself.
-function EmbedFigure({ url, caption }) {
+function EmbedFigure({ url, caption, height }) {
   const u = String(url || "");
   let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
-  const yt = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/);
-  const vm = u.match(/vimeo\.com\/(\d+)/);
+  // one resolver (window.NpjEmbed) maps the stored permalink to a player, the
+  // same one the composer used — YouTube/Vimeo (16:9), Google Drive/Docs &
+  // archive.org files (a fixed-height frame), or a direct <video>/<audio>.
+  const E = window.NpjEmbed;
+  const r = E && E.resolve(u);
   let media = null;
-  if (yt) media = <iframe src={"https://www.youtube-nocookie.com/embed/" + yt[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowFullScreen loading="lazy" />;
-  else if (vm) media = <iframe src={"https://player.vimeo.com/video/" + vm[1]} title={caption || "embedded video"} style={{ width: "100%", aspectRatio: "16 / 9", border: 0, display: "block" }} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen loading="lazy" />;
-  else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) media = <video controls preload="metadata" src={u} style={{ width: "100%", maxHeight: 460, background: "#000", display: "block" }} />;
-  else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) media = <audio controls preload="metadata" src={u} style={{ width: "100%" }} />;
+  if (r && r.frame) {
+    const style = r.panel
+      ? { width: "100%", height: (height || (E && E.DEFAULT_HEIGHT) || 600), border: 0, display: "block" }
+      : { width: "100%", aspectRatio: r.aspect || "16 / 9", border: 0, display: "block" };
+    media = <iframe src={r.src} title={caption || "embedded media"} style={style} allow={r.allow || undefined} allowFullScreen={!!r.fullscreen} loading="lazy" />;
+  }
+  else if (r && r.kind === "video") media = <video controls preload="metadata" src={u} style={{ width: "100%", maxHeight: 460, background: "#000", display: "block" }} />;
+  else if (r && r.kind === "audio") media = <audio controls preload="metadata" src={u} style={{ width: "100%" }} />;
   if (media) return (
     <figure style={{ margin: "26px 0" }}>
       <div style={{ border: "1.5px solid var(--ink)", background: "#000", lineHeight: 0 }}>{media}</div>
-      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>▶ {caption}</figcaption>}
+      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>{r && r.panel ? "▣" : "▶"} {caption}</figcaption>}
     </figure>
   );
   return (
@@ -718,7 +725,7 @@ function ArticleRead(props) {
           if (!imgs.length) return null;
           return <Carousel key={i} images={imgs} caption={b.caption} style={wideFig(26, 26)} />;
         }
-        if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} />;
+        if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} height={b.height} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
