@@ -73,6 +73,27 @@ function statusOf(row) {
   return out;
 }
 
+// The grounding status of a SINGLE claim span — the per-span read the table's
+// one-row-per-span view needs. Mirrors statusOf's per-span branch exactly (same
+// CiteyBrain read, same owned / void / sourced / needs mapping), scoped to one span.
+function statusOfSpan(span) {
+  const Brain = window.CiteyBrain;
+  const context = (window.NpjCitations ? window.NpjCitations.contextKeys(span) : []);
+  let v = { state: "falsum" };
+  try { v = Brain.citeyStateForSpan({ el: span }); } catch (e) {}
+  let out;
+  if (v.state === "negation") out = { key: "conflict", spans: [span] };
+  else if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context" || v.state === "absence") {
+    out = { key: "owned", stance: span.getAttribute("data-stance") || "analysis", spans: [span], vkind: v.state === "absence" ? (span.getAttribute("data-void-kind") || null) : null };
+  } else if (v.state === "verum" || v.state === "entails") {
+    const keys = {}; String(v.srcKey || span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; });
+    const n = Object.keys(keys).length;
+    out = { key: n > 1 ? "multi" : "grounded", nSrc: n, spans: [span] };
+  } else out = { key: "needs", spans: [span] };
+  out.context = context;
+  return out;
+}
+
 // Best mechanical match between a claim and a candidate quote (CiteyAssist; 0 when unavailable).
 function matchScore(claim, quote) {
   if (!window.CiteyAssist) return 0;
@@ -326,15 +347,22 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   }, []); // eslint-disable-line
 
   // ---- mutations (all route through the Newsroom api → same DOM + autosave) ----
-  const attachExisting = (row, citeId) => {
-    api.attachExisting(row, citeId);
+  const attachExisting = (row, citeId, cid) => {
+    api.attachExisting(row, citeId, cid);
     setModal(null); setPending(null); setSelSid(row.sid);
     afterResolve(row.sid); bump();
   };
   const detach = (span, citeId) => { api.detach(span, citeId); bump(); };
-  const setStance = (row, st, stance, note, kind) => {
-    if (!stance) { (st.spans || []).filter(s => s.getAttribute("data-stance")).forEach(s => api.unown(s)); }
-    else { api.own(row, stance, note, kind); afterResolve(row.sid); }
+  // Own/clear a claim's stance. With a `span` (per-span rows) it targets THAT
+  // span; without one it falls back to the sentence's first span, as before.
+  const setStance = (row, st, stance, note, kind, span) => {
+    if (!stance) {
+      if (span) { if (span.getAttribute("data-stance")) api.unown(span); }
+      else (st.spans || []).filter(s => s.getAttribute("data-stance")).forEach(s => api.unown(s));
+    } else {
+      if (span) api.ownSpan(span, stance, note, kind); else api.own(row, stance, note, kind);
+      afterResolve(row.sid);
+    }
     bump();
   };
 
@@ -344,7 +372,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [voidKind, setVoidKind] = useState("");        // which of the six kinds of void (see app/void-kinds.js)
   const [reuseOpen, setReuseOpen] = useState(false);   // the "reuse a pinned quote" drawer (collapsed by default)
   const srcText = (key) => String((api.sourceRec(key) || {}).text || "");
-  const openCite = (sid, srcKey) => {
+  const openCite = (sid, srcKey, cid) => {
     const e = bySid[sid]; if (!e) return;
     let best = srcKey || null;
     if (!best) {
@@ -357,7 +385,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         if (sc > bestScore) { bestScore = sc; best = key; }
       });
     }
-    setModal({ sid }); setSelSid(sid);
+    setModal({ sid, cid: cid || null }); setSelSid(sid);
     if (best) setSelSrc(best);
     setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery(""); setCiteMode("source"); setReuseOpen(false); setVoidNote(""); setVoidKind("");
   };
@@ -366,6 +394,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   // Citey's scent: candidate passages in the armed source — navigation aids only,
   // never a one-click pin. Document order; the author grabs the words.
   const armedRow = modal && bySid[modal.sid] ? bySid[modal.sid].row : null;
+  // the SPECIFIC span the cite modal targets (a per-span +Cite), resolved from
+  // the modal's cid; null → the modal grounds the sentence's first span, as before.
+  const armedSpan = (modal && modal.cid && api.editorEl && api.editorEl()) ? api.editorEl().querySelector('.claim-src[data-cid="' + modal.cid + '"]') : null;
   const armHits = (() => {
     if (!armedRow || !window.CiteyAssist) return [];
     const t = srcText(selSrc); if (!t.trim()) return [];
@@ -514,7 +545,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     const fresh = (api.segment() || []).find(r => r.sid === m.sid) || (bySid[m.sid] && bySid[m.sid].row);
     if (!fresh) return;
     const quote = p.spans.map(s => s.quote).join(" … ");
-    if (!api.groundRow(fresh, selSrc, quote, p.spans[0].loc, p.spans)) return;
+    if (!api.groundRow(fresh, selSrc, quote, p.spans[0].loc, p.spans, m.cid)) return;
     setModal(null); setPending(null); setSelSid(m.sid);
     afterResolve(m.sid); bump();
   };
@@ -570,8 +601,10 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   };
 
   // ---- context links: prior coverage a sentence builds on (context, not proof) ----
-  const rowContext = (row) => (api.contextFor(row) || []).map(k => ({ key: k, rec: srcRec(k) }));
-  const ContextChip = ({ row, ck, compact }) => (
+  // With a `span` (per-span rows) the strip reads and edits THAT span's own
+  // context; without one it works at the sentence level (the 0-span fallback row).
+  const rowContextOf = (row, span) => ((span ? api.contextForSpan(span) : api.contextFor(row)) || []).map(k => ({ key: k, rec: srcRec(k) }));
+  const ContextChip = ({ row, span, ck, compact }) => (
     <span title={"Prior coverage, cited for context — “" + clip(srcShort(ck.key), 90) + "”. Click to open the source."}
       style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 6px 3px 8px", borderRadius: 6, background: "#e6f4f3", color: "#1f7d78", fontFamily: "var(--cond)", fontSize: 12.5, maxWidth: compact ? 190 : 220 }}>
       <span style={{ fontFamily: "var(--mono)", fontSize: 10 }}>⊪</span>
@@ -579,14 +612,14 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         style={{ border: 0, background: "none", color: "inherit", font: "inherit", cursor: "pointer", padding: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {clip(srcShort(ck.key), 24)}
       </button>
-      <button onClick={() => { api.removeContext(row, ck.key); bump(); }} title="Unlink this context"
+      <button onClick={() => { (span ? api.removeContextSpan(span, ck.key) : api.removeContext(row, ck.key)); bump(); }} title="Unlink this context"
         style={{ border: 0, background: "none", color: "inherit", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
     </span>
   );
   // chips for the prior coverage + a picker to add more. Offered on ANY sentence —
   // a claim can be proved (or owned) AND still be set against prior coverage.
-  const ContextStrip = ({ row, compact, label, addable }) => {
-    const ctx = rowContext(row);
+  const ContextStrip = ({ row, span, compact, label, addable }) => {
+    const ctx = rowContextOf(row, span);
     if (addable === false && ctx.length === 0) return null;     // read-only + nothing to show
     const linked = ctx.map(c => c.key);
     const avail = (srcList || []).filter(s => linked.indexOf(s.key) < 0);
@@ -594,10 +627,10 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
         {label !== false && <div className="np-mono" style={{ fontSize: 9, color: CONTEXT_TEAL, letterSpacing: ".05em" }}>⊪ IN CONTEXT · PRIOR COVERAGE — CITED FOR CONTEXT, NOT PROOF</div>}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {ctx.map(ck => <ContextChip key={ck.key} row={row} ck={ck} compact={compact} />)}
+          {ctx.map(ck => <ContextChip key={ck.key} row={row} span={span} ck={ck} compact={compact} />)}
           {addable !== false && ctx.length === 0 && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: NR.muted }}>no prior coverage linked</span>}
           {addable !== false && (avail.length > 0
-            ? <select value="" onChange={e => { if (e.target.value) { api.addContext(row, e.target.value); bump(); } }}
+            ? <select value="" onChange={e => { if (e.target.value) { (span ? api.addContextSpan(span, e.target.value) : api.addContext(row, e.target.value)); bump(); } }}
                 title="Link prior coverage this sentence builds on — as context, not proof"
                 style={{ background: NR.field, color: NR.text, border: "1px dashed " + CONTEXT_TEAL, borderRadius: 6, padding: "3px 7px", fontFamily: "var(--cond)", fontSize: 12.5, cursor: "pointer" }}>
                 <option value="">+ Prior coverage…</option>
@@ -626,7 +659,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         {cands.map(({ c }) => {
           const u = api.usageCount(c.id);
           return (
-            <button key={c.id} onClick={() => attachExisting(row, c.id)} title="Attach this citation to the sentence"
+            <button key={c.id} onClick={() => attachExisting(row, c.id, modal && modal.cid)} title="Attach this citation to the sentence"
               style={{ textAlign: "left", border: "1px solid " + NR.line, background: NR.field, color: NR.text, borderRadius: 7, padding: "6px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
               <span className="np-mono" style={{ display: "block", fontSize: 9, color: "#1f8a55", marginBottom: 1 }}>
                 {"⊕ ATTACH · " + clip(srcShort(c.srcKey), 30).toUpperCase() + (u ? " · USED ×" + u : " · UNUSED")}
@@ -670,7 +703,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                 const strong = score >= 0.3;
                 return (
                   <div key={c.id} style={{ display: "flex", alignItems: "stretch", gap: 6, border: "1px solid " + NR.line, background: NR.field, borderRadius: 7, overflow: "hidden" }}>
-                    <button onClick={() => row && attachExisting(row, c.id)} disabled={!row} title={row ? "Attach this record to the sentence" : "Open a sentence to attach"}
+                    <button onClick={() => row && attachExisting(row, c.id, modal && modal.cid)} disabled={!row} title={row ? "Attach this record to the sentence" : "Open a sentence to attach"}
                       style={{ flex: 1, minWidth: 0, textAlign: "left", border: 0, background: "none", color: NR.text, cursor: row ? "pointer" : "default", padding: "6px 8px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.35 }}>
                       <span className="np-mono" style={{ display: "block", fontSize: 9, color: strong ? "#1f8a55" : NR.muted, marginBottom: 1 }}>
                         {(row ? "⊕ ATTACH · " : "") + clip(srcShort(c.srcKey), 26).toUpperCase() + (u ? " · USED ×" + u : " · UNUSED") + (strong ? " · STRONG MATCH" : "")}
@@ -963,67 +996,97 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   ) : null;
 
   // ============ main stage · GROUNDING (the table) ============
-  const shown = needsOnly ? enriched.filter(e => e.st.key === "needs" || e.st.key === "conflict") : enriched;
+  // ONE ROW PER CITED SPAN. A sentence with several distinct cited phrases used
+  // to collapse into a single row (its spans' chips hidden inside it). Expand each
+  // sentence into one display row per claim span — its own status, words,
+  // citations and stance — so nothing is hidden. A sentence not yet marked as a
+  // claim (no span) stays one row: the whole sentence, "needs source".
+  const expandRows = (list) => {
+    const out = [];
+    list.forEach(({ row, st }) => {
+      const spans = row.claimSpans || [];
+      if (!spans.length) { out.push({ key: row.sid, sid: row.sid, row, span: null, cid: null, text: row.text, st, cites: [], spanIdx: 0, spanCount: 0 }); return; }
+      spans.forEach((span, i) => {
+        const cid = span.getAttribute("data-cid");
+        out.push({
+          key: row.sid + "#" + (cid || i), sid: row.sid, row, span, cid: cid || null,
+          text: (span.textContent || "").trim() || row.text, st: statusOfSpan(span),
+          cites: (api.citationsFor(span) || []).map(c => ({ c, span })), spanIdx: i, spanCount: spans.length,
+        });
+      });
+    });
+    return out;
+  };
+  const displayRows = expandRows(enriched);
+  const shownRows = needsOnly ? displayRows.filter(d => d.st.key === "needs" || d.st.key === "conflict") : displayRows;
   const groundingMain = (() => {
     const cols = [
-      { key: "status", label: "Status", width: 132, cell: ({ st }) => <Pill st={st} /> },
-      { key: "sentence", label: "Sentence", grow: true, cell: ({ row }) => (
+      { key: "status", label: "Status", width: 132, cell: (d) => <Pill st={d.st} /> },
+      { key: "sentence", label: "Sentence", grow: true, cell: (d) => (
         <React.Fragment>
-          <button onClick={() => { setSelSid(row.sid); api.jumpTo(row); }} title="Open this sentence in the editor"
-            style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{row.text}</button>
-          <div style={{ marginTop: 5 }}><HashChip row={row} NR={NR} /></div>
+          <button onClick={() => { setSelSid(d.sid); api.jumpTo(d.row); }} title="Open this in the editor"
+            style={{ textAlign: "left", background: "none", border: 0, color: NR.text, font: "inherit", fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.45, cursor: "pointer", padding: 0 }}>{d.text}</button>
+          <div style={{ marginTop: 5, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <HashChip row={d.row} NR={NR} />
+            {d.spanCount > 1 && <span className="np-mono" title="One of several cited spans in this sentence" style={{ fontSize: 8.5, letterSpacing: ".03em", color: NR.muted, border: "1px solid " + NR.line, borderRadius: 4, padding: "1px 5px" }}>span {d.spanIdx + 1}/{d.spanCount}</span>}
+          </div>
         </React.Fragment>
       ) },
-      { key: "citations", label: "Citations", width: "30%", cell: ({ row, st, conf, cites }) => (
+      { key: "citations", label: "Citations", width: "30%", cell: (d) => {
+        const st = d.st, conf = st.key === "conflict";
+        return (
         <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
           {st.key === "owned" && st.stance === "context"
-            ? <ContextStrip row={row} compact />
+            ? <ContextStrip row={d.row} span={d.span} compact />
             : st.key === "owned"
               ? <React.Fragment>
                   <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>no source needed</span>
-                  <ContextStrip row={row} compact addable={false} label={false} />
+                  <ContextStrip row={d.row} span={d.span} compact addable={false} label={false} />
                 </React.Fragment>
               : (
                 <React.Fragment>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-                    {cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
-                    <button onClick={() => openCite(row.sid)} title="Find the words in a source that back this sentence"
+                    {d.cites.map(({ c, span }) => <CiteChip key={c.id} c={c} span={span} conflict={conf} />)}
+                    <button onClick={() => openCite(d.sid, null, d.cid)} title="Find the words in a source that back this span"
                       style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 6, border: "1px dashed " + NR.line, background: "transparent", color: NR.soft, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5 }}>+ Cite</button>
                   </div>
-                  <ContextStrip row={row} compact addable={false} label={false} />
+                  <ContextStrip row={d.row} span={d.span} compact addable={false} label={false} />
                 </React.Fragment>
               )}
         </div>
-      ) },
-      { key: "stance", label: "Stance", width: 168, cell: ({ row, st, conf }) => (
+        );
+      } },
+      { key: "stance", label: "Stance", width: 168, cell: (d) => {
+        const st = d.st, conf = st.key === "conflict";
+        return (
         <React.Fragment>
           {(st.key === "grounded" || st.key === "multi") && <span style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.muted }}>sourced fact</span>}
           {conf && <span className="np-mono" style={{ fontSize: 10, color: "#b3261e", lineHeight: 1.4 }}>unlink the quote you trust less</span>}
           {(st.key === "needs" || st.key === "owned") && (
-            <select value={st.stance || ""} onChange={e => setStance(row, st, e.target.value)}
+            <select value={st.stance || ""} onChange={e => setStance(d.row, st, e.target.value, undefined, undefined, d.span)}
               style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, borderRadius: 6, padding: "5px 7px", fontFamily: "var(--cond)", fontSize: 13 }}>
               <option value="">{st.key === "owned" ? "— clear stance —" : "Own as…"}</option>
               {STANCE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           )}
         </React.Fragment>
-      ) },
+        );
+      } },
     ];
-    const rows = shown.map(({ row, st }) => {
-      const cites = rowCites(row);
-      const onWalk = walk && walk.cur === row.sid;
-      const sel = selSid === row.sid;
-      const hi = highlightCid && cites.some(x => x.c.id === highlightCid);
-      const conf = st.key === "conflict";
+    const rows = shownRows.map(d => {
+      const onWalk = walk && walk.cur === d.sid;
+      const sel = selSid === d.sid;
+      const hi = highlightCid && d.cites.some(x => x.c.id === highlightCid);
+      const conf = d.st.key === "conflict";
       return {
-        key: row.sid,
-        attrs: { "data-sid": row.sid },
-        data: { row, st, conf, cites },
+        key: d.key,
+        attrs: { "data-sid": d.sid },
+        data: d,
         style: {
-          background: onWalk ? "rgba(124,116,222,.12)" : st.key === "needs" ? "rgba(216,99,46,.05)" : conf ? "rgba(216,65,44,.05)" : undefined,
+          background: onWalk ? "rgba(124,116,222,.12)" : d.st.key === "needs" ? "rgba(216,99,46,.05)" : conf ? "rgba(216,65,44,.05)" : undefined,
           outline: onWalk ? "2px solid #7C74DE" : hi ? "2px solid var(--yellow)" : sel ? "1.5px solid rgba(124,116,222,.45)" : "none",
           outlineOffset: -2,
-          animation: flashSid === row.sid ? "rowflash 1.6s ease-out" : "none",
+          animation: flashSid === d.sid ? "rowflash 1.6s ease-out" : "none",
         },
       };
     });
@@ -1034,8 +1097,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <input type="checkbox" checked={needsOnly} onChange={e => setNeedsOnly(e.target.checked)} />
           Blockers only
         </label>
-        <span className="np-mono npj-hide-sm" title="Every sentence you write is imported here automatically. Each carries a stable id (the # chip) that follows it through edits and moves, keeping its citations and stance attached." style={{ fontSize: 11, color: NR.muted, cursor: "help", display: "inline-flex", alignItems: "center", gap: 5 }}>
-          <window.I.hash style={{ fontSize: 11 }} /> {shown.length + " of " + enriched.length + " sentences · auto-imported"}
+        <span className="np-mono npj-hide-sm" title="One row per cited span — a sentence with several cited phrases shows each as its own row. Each carries its sentence's stable id (the # chip), which follows it through edits and moves, keeping citations and stance attached." style={{ fontSize: 11, color: NR.muted, cursor: "help", display: "inline-flex", alignItems: "center", gap: 5 }}>
+          <window.I.hash style={{ fontSize: 11 }} /> {shownRows.length + " of " + displayRows.length + " claims · auto-imported"}
         </span>
         <span style={{ flex: 1 }} />
         <button onClick={() => setExporting(true)} disabled={blockers === 0}
@@ -1044,9 +1107,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <window.I.shield style={{ fontSize: 12 }} /> Export for fact-check
         </button>
       </div>
-      {shown.length === 0
+      {shownRows.length === 0
         ? <div className="np-mono" style={{ padding: "12px 14px", border: "1px solid " + NR.line, borderRadius: 8, background: NR.field, color: NR.muted, fontSize: 12 }}>
-            {needsOnly ? "Nothing blocks publish — every sentence is sourced or owned." : "Write a few sentences in Prose and they'll show here as rows to ground."}
+            {needsOnly ? "Nothing blocks publish — every span is sourced or owned." : "Write a few sentences in Prose and they'll show here as rows to ground."}
           </div>
         : <DataTable cols={cols} rows={rows} isMobile={isMobile} NR={NR} />}
       <div style={{ margin: "12px 2px 20px", fontFamily: "var(--serif)", fontSize: 12.5, color: NR.muted, lineHeight: 1.7 }}>
@@ -1559,7 +1622,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
               ["voice", "⊩ Argue — your voice", "Your stated position or argument — not presented as fact."],
               ["analysis", "⊢ Infer — your analysis", "Your reasoning — it follows from facts you’ve already grounded."],
               ["context", "⊪ In context", "Continuing coverage — the article itself substantiates it, set against prior reporting."]].map(([v, label, desc]) => (
-              <button key={v} onClick={() => { setStance(armedRow, statusOf(armedRow), v); closeCite(); }}
+              <button key={v} onClick={() => { setStance(armedRow, statusOf(armedRow), v, undefined, undefined, armedSpan); closeCite(); }}
                 style={{ display: "block", width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: NR.field, color: NR.text, cursor: "pointer", padding: "9px 12px", marginBottom: 7 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14 }}>{label}</div>
                 <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginTop: 3 }}>{desc}</div>
@@ -1599,7 +1662,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                   style={{ width: "100%", boxSizing: "border-box", minHeight: 88, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 5 }}>{k === "ambient" ? "Ambient is context, not a finding — optional, and the faintest void in the lens." : "Be specific — what you document is what makes the absence trustworthy. It reads in the published piece; the words of the claim stay exactly as written."}</div>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                  <button onClick={() => { if (!ready) return; setStance(armedRow, statusOf(armedRow), "absence", voidNote.trim(), k); closeCite(); }} disabled={!ready} className="np-cond"
+                  <button onClick={() => { if (!ready) return; setStance(armedRow, statusOf(armedRow), "absence", voidNote.trim(), k, armedSpan); closeCite(); }} disabled={!ready} className="np-cond"
                     style={{ border: "1.5px solid var(--ink)", background: ready ? "var(--yellow)" : "transparent", color: ready ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : .55 }}>{def.glyph} Cite this void</button>
                 </div>
               </React.Fragment>)}
@@ -1608,7 +1671,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
               <textarea value={voidNote} onChange={e => setVoidNote(e.target.value)} autoFocus
                 style={{ width: "100%", boxSizing: "border-box", minHeight: 96, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
               <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-                <button onClick={() => { const n = voidNote.trim(); if (!n) return; setStance(armedRow, statusOf(armedRow), "absence", n); closeCite(); }} disabled={!voidNote.trim()} className="np-cond"
+                <button onClick={() => { const n = voidNote.trim(); if (!n) return; setStance(armedRow, statusOf(armedRow), "absence", n, undefined, armedSpan); closeCite(); }} disabled={!voidNote.trim()} className="np-cond"
                   style={{ border: "1.5px solid var(--ink)", background: voidNote.trim() ? "var(--yellow)" : "transparent", color: voidNote.trim() ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: voidNote.trim() ? "pointer" : "not-allowed", opacity: voidNote.trim() ? 1 : .55 }}>∅ Cite this void</button>
               </div>
             </React.Fragment>)}
