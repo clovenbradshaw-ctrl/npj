@@ -528,10 +528,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const isLeadBlock = (b) => !!(b && (b.tagName === "H1" || (b.classList && (b.classList.contains("nr-dek") || (b.tagName === "FIGURE" && b.classList.contains("nr-banner"))))));
   const isMovableBlock = (b) => !!(b && b.nodeType === 1 && b.tagName !== "BR" && !isLeadBlock(b));
   const isHeadingBlock = (b) => !!(b && /^H[2-3]$/.test(b.tagName || ""));
-  // an image / embed figure: a contenteditable=false block the caret can't enter,
-  // so it gets a click-to-delete × over its top-right corner (the gutter grip
-  // alone is easy to miss). The banner is a lead node — never offered the ×.
-  const isMediaBlock = (b) => !!(b && b.tagName === "FIGURE" && !isLeadBlock(b) && (b.querySelector("image-slot") || b.getAttribute("data-embed-url")));
+  // a "void" block — one the caret can't simply backspace away: an image, an
+  // embed, a widget/poll, anything contenteditable=false, or a wrapper holding
+  // one. These get a click-to-delete × in their top-right corner (plain text is
+  // already removable with the keyboard / the gutter grip). We match the slot or
+  // embed WHEREVER it sits — itself or any descendant, any wrapper tag — so this
+  // covers legacy and wrapped image blocks, not just today's <figure>. The banner
+  // is a lead node and is never offered the ×.
+  const VOID_SEL = "image-slot, iframe, video, [data-embed-url], [data-widget]";
+  const isVoidBlock = (b) => {
+    if (!b || b.nodeType !== 1 || isLeadBlock(b)) return false;
+    if (b.getAttribute && b.getAttribute("contenteditable") === "false") return true;
+    if (b.matches && b.matches(VOID_SEL)) return true;
+    return !!(b.querySelector && b.querySelector(VOID_SEL));
+  };
   // walk up to the direct child of the editor root that holds this node
   const topBlockOf = (node) => {
     const root = ed.current; if (!root) return null;
@@ -664,9 +674,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // anyway so this can't strand the headline or subtitle.
   const blockDelLabel = (block) => {
     if (!block) return "Delete this block";
-    if (block.tagName === "FIGURE")
-      return block.querySelector("image-slot") ? "Delete this image"
-        : (block.getAttribute("data-embed-url") ? "Delete this embed" : "Delete this block");
+    if (block.querySelector && block.querySelector("image-slot")) return "Delete this image";
+    if ((block.getAttribute && block.getAttribute("data-embed-url")) ||
+        (block.querySelector && block.querySelector("[data-embed-url], iframe, video"))) return "Delete this embed";
+    if (block.matches && block.matches("[data-widget]")) return "Delete this block";
     if (isHeadingBlock(block)) return "Delete this heading";
     return "Delete this block";
   };
@@ -2346,11 +2357,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               )}
             </div>
           )}
-          {/* image / embed blocks are contentEditable=false — the caret can't
-              reach them to backspace, so float a click-to-delete × over the
-              figure's top-right corner. Editor chrome, OUTSIDE the editable, so
-              it never serializes into the saved/published HTML. */}
-          {!isMobile && grip && !dragging && isMediaBlock(grip.block) && (
+          {/* void blocks (image / embed / widget) can't be reached by the caret
+              to backspace, so float a click-to-delete × over their top-right
+              corner. Editor chrome, OUTSIDE the editable, so it never serializes
+              into the saved/published HTML. */}
+          {!isMobile && grip && !dragging && isVoidBlock(grip.block) && (
             <button type="button" className="nr-media-del"
               style={{ top: grip.top + 8, left: grip.right - 36 }}
               onMouseDown={(e) => e.preventDefault()}
