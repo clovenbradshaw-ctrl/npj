@@ -22,11 +22,27 @@
   }
   function norm(s) { return String(s || '').replace(/\s+/g, ' ').trim().toLowerCase(); }
 
-  // Sentence splitter — identical family to articles.js splitClaim (~L229).
-  function splitOffsets(text) {
+  // Sentence splitter — identical family to articles.js splitClaim (~L526).
+  // `mask` (optional) lists [start,end) character ranges to read as TRANSPARENT
+  // while finding boundaries: their characters are blanked to spaces for the
+  // scan only. Inline citation markers (<sup class="md-cite"> — a "1"/"2"/"•")
+  // land in block.textContent BETWEEN a sentence's end punctuation and the next
+  // sentence's leading space ("…Kupin." + "1" + " In…"); unmasked, the splitter
+  // sees "." followed by a digit (not whitespace) and merges the two sentences
+  // into one grounding row. Offsets returned index the ORIGINAL text, so callers
+  // still slice the real characters (marker included; display is cleaned later).
+  function splitOffsets(text, mask) {
+    var scan = text;
+    if (mask && mask.length) {
+      var a = text.split('');
+      mask.forEach(function (m) {
+        for (var i = Math.max(0, m[0]); i < Math.min(a.length, m[1]); i++) a[i] = ' ';
+      });
+      scan = a.join('');
+    }
     var re = /[.!?…]["')\]]?\s+(?=\S)/g;
     var out = [], last = 0, m;
-    while ((m = re.exec(text))) {
+    while ((m = re.exec(scan))) {
       var end = m.index + m[0].length;
       out.push({ start: last, end: end, text: text.slice(last, end) });
       last = end;
@@ -52,6 +68,32 @@
     })(block);
     var bounds = [0].concat(breaks, [total]), out = [];
     for (var i = 0; i + 1 < bounds.length; i++) out.push({ start: bounds[i], end: bounds[i + 1] });
+    return out;
+  }
+
+  // Character ranges (in block.textContent terms) covered by inline citation
+  // markers — <sup class="md-cite">. The reader sees a superscript "1"/"2"/"•",
+  // but in textContent the marker's text sits inline and can wedge between a
+  // sentence's end punctuation and the next sentence's leading space, hiding the
+  // boundary from splitOffsets (a grounded sentence would otherwise swallow the
+  // sentence that follows it). segment() hands these to splitOffsets as a mask.
+  // Mirrors lineSpans' position accounting: every text node is counted, and a
+  // marker's own text is counted once (not recursed into).
+  function markerRanges(block) {
+    if (!block || !block.querySelector || !block.querySelector('sup.md-cite')) return [];
+    var out = [], pos = 0;
+    (function walk(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) pos += c.nodeValue.length;
+        else if (c.nodeType === 1) {
+          if (c.tagName === 'SUP' && c.classList && c.classList.contains('md-cite')) {
+            var len = (c.textContent || '').length;
+            if (len) out.push([pos, pos + len]);
+            pos += len;
+          } else walk(c);
+        }
+      }
+    })(block);
     return out;
   }
 
@@ -94,10 +136,12 @@
           block.querySelector('p, li, h2, h3, blockquote, div, ul, ol, pre, figure, table')) return;
       var text = block.textContent || '';
       if (!text.trim()) return;
+      var marks = markerRanges(block);                                             // sup.md-cite spans → masked out of boundary detection
       var si = 0;
       lineSpans(block, text.length).forEach(function (ln) {
         if (!text.slice(ln.start, ln.end).trim()) return;                          // empty line (e.g. <br><br>)
-        splitOffsets(text.slice(ln.start, ln.end)).forEach(function (p) {
+        var lineMask = marks.length ? marks.map(function (m) { return [m[0] - ln.start, m[1] - ln.start]; }) : null;
+        splitOffsets(text.slice(ln.start, ln.end), lineMask).forEach(function (p) {
           var start = ln.start + p.start, end = ln.start + p.end;
           var range = rangeForBlock(block, start, end, doc);
           var claimSpans = [], disp = p.text;
@@ -280,6 +324,7 @@
 
   root.NpjSentences = {
     segment: segment, rangeFor: rangeFor, djb2: djb2,
+    splitOffsets: splitOffsets, markerRanges: markerRanges,
     track: track, reconcile: reconcile, newLedger: newLedger,
     serializeLedger: serializeLedger, hydrateLedger: hydrateLedger
   };
