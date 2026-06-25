@@ -18,6 +18,16 @@
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css" />
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/fill/style.css" />
 
+<!-- Image galleries. Splide (in-article carousel) + GLightbox (fullscreen,
+     zoomable photo viewer — how a wide image is read at full size). Vendored
+     under vendor/ like eoreader4 (offline-friendly, no third-party CDN at
+     runtime) and DEFERRED, since only the post-paint reader uses them. They
+     publish window.Splide / window.GLightbox, which app/shared.jsx guards on. -->
+<link rel="stylesheet" href="vendor/splide/splide.min.css" />
+<link rel="stylesheet" href="vendor/glightbox/glightbox.min.css" />
+<script defer src="vendor/splide/splide.min.js"></script>
+<script defer src="vendor/glightbox/glightbox.min.js"></script>
+
 <style>
   @keyframes spin { to { transform: rotate(360deg); } }
   @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127,216,166,.6); } 70% { box-shadow: 0 0 0 7px rgba(127,216,166,0); } 100% { box-shadow: 0 0 0 0 rgba(127,216,166,0); } }

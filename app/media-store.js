@@ -305,21 +305,32 @@
     const o = opts || {};
     const idSlug = String(o.slug || "media").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "media";
     const ctx = { identifier: "npj-" + idSlug, title: o.title || o.slug || "NPJ media" };
-    for (const b of body) {
-      if (!b || b.type !== "img" || !isStoreUrl(b.src)) continue;
-      const matrixUrl = b.src;
+    // Freeze ONE image-bearing object ({src, store?}) in place: move a media-store
+    // src onto archive.org and keep the live copy as `store`. A non-store src
+    // (already archived, or empty) is a no-op. Shared by single inline images and
+    // every slide of a carousel, so a gallery freezes exactly like a lone photo.
+    const freezeOne = async (im) => {
+      if (!im || !isStoreUrl(im.src)) return;
+      const matrixUrl = im.src;
       let arch = null, reason = null;
       try {
-        arch = await toArchive(b.src, ctx);
+        arch = await toArchive(im.src, ctx);
         if (!arch) reason = "archive.org upload returned no URL (n8n endpoint unreachable or IA keys missing)";
       } catch (e) { reason = e.message || "unknown error"; }
       if (arch) {
         // keep the live media-store URL as `store` so viewers can try it first
         // and fall back to the durable archive.org `src`.
-        b.store = matrixUrl; b.src = arch; out.frozen++;
+        im.store = matrixUrl; im.src = arch; out.frozen++;
       } else {
         out.failed++;
         if (reason && out.failReasons.indexOf(reason) < 0) out.failReasons.push(reason);
+      }
+    };
+    for (const b of body) {
+      if (!b) continue;
+      if (b.type === "img") await freezeOne(b);
+      else if (b.type === "gallery" && Array.isArray(b.images)) {
+        for (const im of b.images) await freezeOne(im);
       }
     }
     return out;

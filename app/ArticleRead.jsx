@@ -681,11 +681,16 @@ function ArticleRead(props) {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
             <figure key={i} style={wideFig(26, 26)}>
-              <MediaImg srcs={[b.store, b.src]} alt={b.description || b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              <ZoomImg image={b} alt={b.description || b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               {b.local ? <NotUploadedNote /> : null}
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
             </figure>
           );
+        }
+        if (b.type === "gallery") {
+          const imgs = (b.images || []).filter(im => im && (im.src || im.store));
+          if (!imgs.length) return null;
+          return <Carousel key={i} images={imgs} caption={b.caption} style={wideFig(26, 26)} />;
         }
         if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} />;
         if (b.type === "ul" || b.type === "ol") {
@@ -746,7 +751,7 @@ function ArticleRead(props) {
     : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
     <figure style={wideFig(4, 24)}>
-      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.description || heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      <ZoomImg image={heroImg} alt={heroImg.description || heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       {heroImg.local ? <NotUploadedNote /> : null}
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
     </figure>

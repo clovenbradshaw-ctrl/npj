@@ -817,3 +817,98 @@ a { color: inherit; }
 .nr-page h1.nr-ghost:empty::before, .nr-page h2.nr-ghost:empty::before, .nr-page h3.nr-ghost:empty::before,
 .nr-page h1.nr-ghost:has(> br:only-child)::before, .nr-page h2.nr-ghost:has(> br:only-child)::before, .nr-page h3.nr-ghost:has(> br:only-child)::before {
   content: attr(data-ph); color: var(--nr-muted); font-style: italic; font-weight: inherit; pointer-events: none; }
+
+/* ════════════════════════════════════════════════════════════════════════
+   Image carousel + fullscreen viewer (Splide + GLightbox, vendored).
+   The reader renders a {type:'gallery'} block as <Carousel> (app/shared.jsx);
+   any single photo opens the same zoomable viewer via <ZoomImg>. We ship
+   splide-core (no theme), so the arrows/dots are themed here to ink/paper.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* single photo: a click opens the fullscreen viewer — reset the button chrome
+   so the image still sits flush, and hint the zoom affordance */
+.npj-zoom { display: block; width: 100%; margin: 0; padding: 0; border: 0; background: none; cursor: zoom-in; font: inherit; color: inherit; }
+.npj-zoom:focus-visible { outline: 2px solid var(--yellow, #ffec01); outline-offset: 3px; }
+
+/* ── reader carousel ─────────────────────────────────────────────────────── */
+.npj-carousel-fig { margin: 26px 0; }
+.npj-carousel { position: relative; }
+.npj-carousel .splide__slide { display: flex; flex-direction: column; }
+/* a uniform stage: the WHOLE photo shows (object-fit: contain in the slide's
+   own <img>), wide panorama or tall portrait, on a quiet ground — never the
+   fixed-height letterbox crop the user was fighting. Click = full size. */
+.npj-carousel-slide {
+  display: block; width: 100%; height: 58vh; max-height: 560px; min-height: 260px;
+  margin: 0; padding: 0; border: 1.5px solid var(--ink, #16140d);
+  background: var(--paper-2, #efe9d8); cursor: zoom-in; overflow: hidden;
+}
+.npj-carousel-slide:focus-visible { outline: 2px solid var(--yellow, #ffec01); outline-offset: 3px; }
+.npj-carousel-slidecap { font-family: var(--mono); font-size: 11px; color: var(--ink-soft, #3a362b); margin-top: 6px; text-align: center; }
+.npj-carousel-cap { font-family: var(--mono); font-size: 11.5px; font-style: italic; color: var(--ink-soft, #3a362b); margin-top: 12px; text-align: center; }
+/* a quiet count chip so it reads as a gallery at a glance */
+.npj-carousel-count {
+  position: absolute; top: 8px; right: 8px; z-index: 2; pointer-events: none;
+  background: rgba(22,20,13,.72); color: #fff; font-family: var(--mono); font-size: 10px;
+  letter-spacing: .08em; text-transform: uppercase; padding: 3px 7px; border-radius: 3px;
+}
+/* arrows + dots — splide-core ships NO arrow rules and no theme colors, so we
+   position AND skin them here (ink on paper, square to match the masthead). */
+.npj-carousel .splide__arrow {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  display: flex; align-items: center; justify-content: center; padding: 0; border: 0;
+  width: 2.4em; height: 2.4em; cursor: pointer; border-radius: 0;
+  background: var(--ink, #16140d); opacity: .9; transition: opacity .12s, background .12s;
+}
+.npj-carousel .splide__arrow--prev { left: 8px; }
+.npj-carousel .splide__arrow--next { right: 8px; }
+.npj-carousel .splide__arrow svg { fill: var(--paper, #f6f1e4); width: 1.1em; height: 1.1em; }
+.npj-carousel .splide__arrow--prev svg { transform: scaleX(-1); }
+.npj-carousel .splide__arrow:hover:not(:disabled) { background: var(--yellow-deep, #b9a800); opacity: 1; }
+.npj-carousel .splide__arrow:disabled { opacity: .28; cursor: default; }
+.npj-carousel .splide__pagination { position: static; margin-top: 12px; }
+.npj-carousel .splide__pagination__page { width: 8px; height: 8px; padding: 0; border: 0; border-radius: 50%; background: var(--rule, rgba(22,20,13,.28)); margin: 0 4px; transition: transform .12s, background .12s; }
+.npj-carousel .splide__pagination__page.is-active { background: var(--ink, #16140d); transform: scale(1.3); }
+.npj-carousel .splide__track:focus-visible { outline: 2px solid var(--yellow, #ffec01); outline-offset: 2px; }
+/* no-Splide fallback: if the library is blocked, reveal the slides (core hides
+   .splide until JS inits) as a plain horizontal scroll-strip */
+.npj-carousel--raw { visibility: visible !important; }
+.npj-carousel--raw .splide__track { overflow-x: auto; }
+.npj-carousel--raw .splide__list { gap: 12px; }
+.npj-carousel--raw .splide__slide { flex: 0 0 86%; }
+
+/* ── editor carousel (Newsroom canvas) ───────────────────────────────────── */
+/* the slides lay out as a horizontal, scrollable strip of drop targets so the
+   author sees every photo at once; the figure itself rides the same 115% bleed
+   a single inline image does (styles above). */
+.cmp-carousel .cmp-carousel-track {
+  display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 8px;
+  scroll-snap-type: x proximity; -webkit-overflow-scrolling: touch;
+}
+.cmp-carousel .cmp-slide { position: relative; flex: 0 0 clamp(180px, 42%, 280px); scroll-snap-align: start; }
+.cmp-carousel .cmp-slide image-slot { width: 100% !important; }
+/* the per-slide remove ✕ and the add chip — quiet until you hover the figure */
+.cmp-carousel .cmp-slide-rm {
+  position: absolute; top: 6px; right: 6px; z-index: 3; width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  border-radius: 50%; background: rgba(22,20,13,.72); color: #fff; font-size: 12px;
+  line-height: 1; opacity: 0; transition: opacity .12s, background .12s; user-select: none;
+}
+.cmp-carousel:hover .cmp-slide-rm, .cmp-carousel .cmp-slide:hover .cmp-slide-rm { opacity: 1; }
+.cmp-carousel .cmp-slide-rm:hover { background: var(--reject, #b3261e); }
+.cmp-carousel .cmp-carousel-add {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; margin-top: 6px;
+  padding: 5px 10px; border: 1px dashed var(--nr-line-strong, var(--ink)); border-radius: 5px;
+  color: var(--nr-muted, var(--ink-soft)); font-size: 11px; user-select: none; transition: color .12s, border-color .12s;
+}
+.cmp-carousel .cmp-carousel-add:hover { color: var(--ink); border-color: var(--ink); }
+.cmp-carousel .cmp-slide .cmp-cap, .cmp-carousel .cmp-slide .cmp-credit, .cmp-carousel .cmp-slide .cmp-desc { font-size: 10.5px; }
+
+/* ── fullscreen viewer (GLightbox) brand touches ─────────────────────────── */
+.glightbox-clean .gslide-description { background: var(--paper, #f6f1e4); }
+.glightbox-clean .gslide-desc { font-family: var(--mono); font-size: 12.5px; color: var(--ink, #16140d); }
+.gbtn.gclose, .gbtn.gnext, .gbtn.gprev { background-color: rgba(22,20,13,.55); }
+
+@media (max-width: 760px) {
+  .npj-carousel-slide { height: 46vh; min-height: 200px; }
+  .cmp-carousel .cmp-slide { flex-basis: 78%; }
+}
