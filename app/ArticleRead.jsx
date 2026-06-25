@@ -666,7 +666,7 @@ function ArticleRead(props) {
       if (t.t === "em") return <em key={i}>{t.text}</em>;
       if (t.t === "s") return <s key={i}>{t.text}</s>;
       if (t.t === "code") return <code key={i} className="np-mono" style={{ fontSize: "0.85em", background: "var(--paper-2)", padding: "0 4px" }}>{t.text}</code>;
-      if (t.t === "a") return <a key={i} href={t.href} target="_blank" rel="noopener" style={{ color: "inherit", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{t.text}</a>;
+      if (t.t === "a") return <a key={i} href={t.href} target="_blank" rel="noopener" style={{ color: "var(--data)", textDecoration: "underline", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{t.text}</a>;
       if (t.t === "sup") {
         // a footnote marker: hover (desktop) or tap (phone) previews the note
         // inline; a click jumps down to its home in the endnotes (and the note
