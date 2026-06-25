@@ -307,10 +307,20 @@ function ArticleRead(props) {
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
   // a source document, expanded to fill the screen (in-app, never a new tab).
-  // Holds the source key being viewed; null when closed. Opening it also dismisses
-  // the floating hover card so there's nothing lingering behind the lightbox.
+  // Holds { keys, start } — an ordered slice of source keys and where to open —
+  // so the lightbox can tab through them; null when closed. Opening it also
+  // dismisses the floating hover card so nothing lingers behind the lightbox.
   const [lightbox, setLightbox] = useState(null);
-  const openLightbox = useCallback((key) => { setLightbox(key); setHover(null); setActiveSrc(null); }, []);
+  // a citation card's "View document" opens just that one source (no nav)
+  const openLightbox = useCallback((key) => { setLightbox({ keys: [key], start: 0 }); setHover(null); setActiveSrc(null); }, []);
+  // the Sources footer opens the full set at the clicked source, so you can tab
+  // through every receipt full-size with ‹ › / ← →
+  const openSourceGallery = useCallback((i) => {
+    const keys = sourceList.map(x => x.key);
+    if (!keys.length) return;
+    setLightbox({ keys, start: Math.max(0, Math.min(keys.length - 1, i || 0)) });
+    setHover(null); setActiveSrc(null);
+  }, [sourceList]);
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
   const [fnPop, setFnPop] = useState(null);
   const fnLeaveTimer = useRef(null);
@@ -805,12 +815,11 @@ function ArticleRead(props) {
       )}
       {Header}
       {Body}
-      <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
-      <CompositionFooter composition={A.composition} />
+      <SourcesFooter sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />
     </div>
   );
 
-  // ── Preview ── the reader's own Header + Body + MethodsFooter, on the paper
+  // ── Preview ── the reader's own Header + Body + Sources footer, on the paper
   // page, with nothing but a Close bar around them. Because it renders the SAME
   // components from the SAME folded article the publish pipeline produces, what
   // the author sees here is byte-for-byte what ships: paragraph spacing, soft
@@ -845,7 +854,7 @@ function ArticleRead(props) {
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
           onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
-        {lightbox && <SourceLightbox srcKey={lightbox} onClose={() => setLightbox(null)} />}
+        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} onClose={() => setLightbox(null)} />}
       </div>
     );
   }
@@ -913,9 +922,10 @@ function ArticleRead(props) {
           onSaved={(updated) => { setEditing(false); if (onEdited) onEdited(updated); }} />
       )}
 
-      {/* a source's document, expanded to fill the screen in-app — click a
-         document in any citation card to open it; ✕ / Esc / backdrop to exit */}
-      {lightbox && <SourceLightbox srcKey={lightbox} onClose={() => setLightbox(null)} />}
+      {/* a source's document, expanded to fill the screen in-app — opened from a
+         citation card or the Sources footer (where you can tab through them all);
+         ✕ / Esc / backdrop to exit */}
+      {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -1073,108 +1083,62 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
   );
 }
 
-function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
+// The Sources footer — every cited source, in reading order, each openable at
+// full size. The old "Methods & receipts" preamble (build-passed line, snapshot
+// methodology blurb) and the "How this was written" composition strip are gone:
+// what's left is the receipts themselves. A row is a button that opens the source
+// in the lightbox GALLERY (onOpen(i)), so a reader can read the document full-size
+// and tab through every other source with ‹ › / ← →. Under each row sit the exact
+// passages it grounds — click one to jump back up to that span in the story.
+function SourcesFooter({ sourceList, spansForSource, onJump, onOpen }) {
   const isPhone = window.useIsMobile(760);
+  if (!sourceList || !sourceList.length) return null;
+  const many = sourceList.length > 1;
+  const hint = (isPhone ? "tap any to view full-size" : "click any to view full-size")
+    + (many && !isPhone ? " · then ← → to move between them" : "");
   return (
     <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>METHODS &amp; RECEIPTS</h3>
-        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{claimCount} bound claims · {sourceList.length} archived sources · build passed ✓</span>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 14 }}>
+        <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>SOURCES</h3>
+        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{sourceList.length} source{many ? "s" : ""} · {hint}</span>
       </div>
-      <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", maxWidth: "62ch" }}>
-        Every figure above resolves to an archive.org snapshot taken the day we pulled it. The live URL is secondary and may rot; the snapshot is canonical.
-        A broken <span className="np-mono">src:</span> reference fails the build, so this page cannot deploy with a citation that points nowhere.
-      </p>
-      <div style={{ display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: "12px 24px", marginTop: 10 }}>
-        {sourceList.map(({ key, num }) => {
+      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gridTemplateColumns: isPhone ? "1fr" : "1fr 1fr", gap: "12px 24px" }}>
+        {sourceList.map(({ key, num }, i) => {
           const s = srcOf(key); const spans = spansForSource ? spansForSource(key) : [];
-          // an interview has no snapshot to open — render it as a plain (non-link)
-          // reference line carrying its attribution + date instead of a dead link
+          // an interview carries an attribution + date instead of a snapshot; a
+          // redacted source withholds its original — say which, in plain colour
           const ivLink = window.NpjInterview && window.NpjInterview.isInterview(s);
-          const url = s.archive_url || s.original_url;
-          const inner = (
-            <React.Fragment>
-              <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
-              <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: (ivLink || s.redacted) ? "var(--review)" : "var(--verified)" }}>{ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved) : s.redacted ? "redacted — original withheld" : ((s.archive_url ? "archived " + (s.retrieved || "") : "live link") + " ↗")}</span>
-              </span>
-            </React.Fragment>
-          );
+          const meta = ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved)
+            : s.redacted ? "redacted — original withheld"
+            : s.archive_url ? "archived " + (s.retrieved || "")
+            : s.original_url ? "live link"
+            : "no snapshot yet";
+          const metaColor = (ivLink || s.redacted) ? "var(--review)" : s.archive_url ? "var(--verified)" : "var(--ink-soft)";
           return (
-            <div key={key} style={{ borderBottom: "1px solid var(--rule)", paddingBottom: 6 }}>
-              {ivLink || !url
-                ? <div style={{ display: "flex", gap: 8, padding: "6px 6px" }}>{inner}</div>
-                : <a href={url} target="_blank" rel="noopener" className="headline-link" style={{ display: "flex", gap: 8, padding: "6px 6px", textDecoration: "none" }}>{inner}</a>}
+            <li key={key} style={{ borderBottom: "1px solid var(--rule)", paddingBottom: 6 }}>
+              <button type="button" onClick={() => onOpen(i)} className="src-cite"
+                title="View this source full-size" aria-label={"View source " + num + ", " + (s.title || s.id || key) + ", full-size"}>
+                <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content", flex: "0 0 auto" }}>{num}</span>
+                <span style={{ minWidth: 0, flex: 1 }}>
+                  <span style={{ display: "block", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
+                    {s.outlet ? <strong style={{ fontWeight: 600 }}>{s.outlet}. </strong> : null}{s.title}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                    <SourceTag type={s.type} />
+                    {spans.length > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{spans.length} passage{spans.length !== 1 ? "s" : ""}</span>}
+                    <span className="np-mono" style={{ fontSize: 9.5, color: metaColor }}>{meta}</span>
+                  </span>
+                </span>
+                <span aria-hidden="true" className="src-cite-go"><I.expand style={{ fontSize: 14 }} /></span>
+              </button>
               {/* the exact passages this source grounds — click to jump back up */}
               <CitedSpanList claims={spans} onJump={onJump} />
-            </div>
+            </li>
           );
         })}
-      </div>
+      </ol>
     </footer>
   );
 }
 
-// How this was written — a calm, honest strip under the receipts. It reads the
-// `composition` record the editor captured (app/composition.js): typed vs.
-// pasted characters, the biggest single paste, how much was revised away, over
-// how long. NEVER the words — only counts and timestamps — so it can hint that
-// a passage may have arrived whole (from notes, another doc, an AI tool) while
-// being upfront that this is context, not proof. Renders in BOTH the preview
-// and the published reader (it lives inside <Main>); silently absent on pieces
-// published before this shipped, or too short to characterize fairly.
-function CompositionFooter({ composition }) {
-  const isPhone = window.useIsMobile(760);
-  const s = (window.NpjComposition && window.NpjComposition.summary) ? window.NpjComposition.summary(composition) : null;
-  if (!s) return null;
-  const pct = (x) => Math.round(x * 100);
-  const words = (chars) => Math.max(1, Math.round(chars / 5.5));
-  const toneColor = ({ calm: "var(--verified)", note: "var(--review)", warn: "var(--reject)" })[s.tone] || "var(--ink-soft)";
-  const typedW = Math.max(2, Math.round(s.typedPct * 100));
-  const pastedW = Math.max(0, 100 - typedW);
-  const span = !s.started ? null
-    : s.dayCount > 1 ? ("drafted across " + s.dayCount + " days")
-    : s.activeMin >= 1 ? ("drafted in one sitting · ~" + s.activeMin + " min hands-on")
-    : "drafted in one sitting";
-  // re-landing your OWN already-cited text isn't an outside import — call it out
-  const groundedShare = s.pasted ? s.groundedPasted / s.pasted : 0;
-  const notes = [];
-  if (s.dominantPaste) notes.push("one pasted block of ~" + words(s.maxPaste) + " words");
-  if (s.largePasteCount > (s.dominantPaste ? 1 : 0)) notes.push(s.largePasteCount + " large pastes");
-  if (s.heavilyRevised) notes.push("substantially revised");
-  if (groundedShare >= 0.34 && s.groundedPasted >= 120) notes.push(pct(groundedShare) + "% of pasted text was your own cited writing");
-
-  return (
-    <section style={{ margin: "30px 0 0", borderTop: "1.5px solid var(--rule)", paddingTop: 16 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
-        <h4 className="np-eyebrow" style={{ margin: 0, color: "var(--ink-soft)" }}>How this was written</h4>
-        <span className="np-mono" style={{ fontSize: 11, color: toneColor, border: "1px solid " + toneColor, padding: "1px 7px", borderRadius: 2, fontWeight: 600 }}>{s.label}</span>
-        {span && <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{span}</span>}
-      </div>
-      {/* typed vs. pasted — a single proportional bar, captioned in plain numbers */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: isPhone ? "wrap" : "nowrap" }}>
-        <div title={pct(s.typedPct) + "% typed · " + pct(s.pastedPct) + "% pasted"}
-          style={{ display: "flex", height: 9, flex: isPhone ? "1 1 100%" : "0 0 220px", width: isPhone ? "100%" : 220, border: "1px solid var(--ink)", overflow: "hidden" }}>
-          <span style={{ width: typedW + "%", background: "var(--ink)" }} />
-          <span style={{ width: pastedW + "%", background: "var(--yellow)" }} />
-        </div>
-        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>
-          <strong style={{ color: "var(--ink)" }}>{pct(s.typedPct)}%</strong> typed · <strong style={{ color: "var(--ink)" }}>{pct(s.pastedPct)}%</strong> pasted
-          {s.pasteCount ? <span> · {s.pasteCount} paste{s.pasteCount === 1 ? "" : "s"}</span> : null}
-        </span>
-      </div>
-      {notes.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          {notes.map((n, i) => (
-            <span key={i} className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", background: "var(--card)", border: "1px solid var(--rule)", padding: "2px 8px" }}>{n}</span>
-          ))}
-        </div>
-      )}
-      <p className="np-mono" style={{ fontSize: 10, lineHeight: 1.55, color: "var(--ink-soft)", maxWidth: "64ch", margin: "12px 0 0" }}>
-        A record of how the draft was assembled — not what it says. Pasting can be a quote, your own notes, or text from another tool; we can't tell which, and the words themselves were never stored. Read it as context, not a verdict.
-      </p>
-    </section>
-  );
-}
-
-Object.assign(window, { ArticleRead, CompositionFooter });
+Object.assign(window, { ArticleRead });
