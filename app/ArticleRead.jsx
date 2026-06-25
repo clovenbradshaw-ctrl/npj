@@ -587,23 +587,26 @@ function ArticleRead(props) {
     if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
       const kind = STANCE_KIND[t.stance] || "own-analysis";
       const gm = GROUND_KINDS[kind];
-      // an asserted absence names its grounding on hover, and shows its mark even
-      // with the lens off — it's a distinct epistemic claim. A void also carries
-      // WHICH kind it is (removed/withheld/silent/inaccessible/unrecorded/ambient):
-      // the kind sets the mark glyph and shades it by whether the absence is shown,
-      // located, or only inferred (data-void; see app/void-kinds.js + styles.css).
+      // Owned claims read as clean prose; the transparency lens is the only thing
+      // that marks them. An asserted absence is a distinct epistemic claim and
+      // carries WHICH kind it is (removed/withheld/silent/inaccessible/unrecorded/
+      // ambient): the kind sets the mark glyph and shades it by whether the absence
+      // is shown, located, or only inferred (data-void; see void-kinds.js + styles.css).
+      // But, like every grounding mark, that surfaces only with the lens on — a void
+      // is invisible on a clean read.
       const isAbsence = t.stance === "absence";
       const VK = window.NpjVoidKinds;
       const vk = isAbsence && VK ? VK.norm(t.vkind) : null;
       const vdef = vk ? VK.get(vk) : null;
       const glyph = vdef ? vdef.glyph : gm.glyph;
-      const title = isAbsence
-        ? ((vdef ? vdef.label + " void — you can " + ({ shown: "point to it", located: "locate it", inferred: "only assert it" }[VK.reader(vk)]) : gm.label) + (t.note ? " — " + t.note : ""))
-        : (transparency ? gm.label : undefined);
+      const title = !transparency ? undefined
+        : isAbsence
+          ? ((vdef ? vdef.label + " void — you can " + ({ shown: "point to it", located: "locate it", inferred: "only assert it" }[VK.reader(vk)]) : gm.label) + (t.note ? " — " + t.note : ""))
+          : gm.label;
       return (
         <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind} data-void={vk ? VK.reader(vk) : undefined} title={title}>
           {ent ? markEntities(t.c, ent, "o" + i) : t.c}
-          {(transparency || isAbsence) && <sup className="gmark" style={{ color: gm.mark }}>{glyph}</sup>}
+          {transparency && <sup className="gmark" style={{ color: gm.mark }}>{glyph}</sup>}
         </span>
       );
     }
