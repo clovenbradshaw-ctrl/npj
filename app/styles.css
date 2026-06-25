@@ -287,16 +287,81 @@ a { color: inherit; }
   .srclb-nav { width: 30px; height: 30px; font-size: 19px; }
 }
 
-/* ---- the Sources footer: every cited source, in reading order ----
-   Each row is a button that opens the source full-size in the lightbox gallery;
-   the expand glyph fades up on hover/focus to say so. */
-.src-cite {
-  display: flex; gap: 9px; align-items: flex-start; width: 100%; text-align: left;
-  background: none; border: 0; padding: 7px 6px; cursor: pointer; font: inherit; color: var(--ink);
+/* the passages a source backs, shown inside the full-size viewer — click one to
+   jump back into the story (stays on the page, no new tab) */
+.srclb-cited { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--ink); }
+
+/* ---- the Sources explorer (the receipts, made browsable) ----
+   A faceted footer: filter chips by kind, a search over titles + quoted passages,
+   a sort, and cards that open each source full-size IN THE APP. */
+.srcx-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin-bottom: 16px; }
+.srcx-search {
+  display: inline-flex; align-items: center; gap: 7px; flex: 1 1 230px; min-width: 170px;
+  border: 1.5px solid var(--ink); background: var(--card); padding: 6px 9px;
 }
-.src-cite:hover { background: var(--paper-2); }
-.src-cite-go { flex: 0 0 auto; align-self: center; color: var(--ink-soft); opacity: 0; transition: opacity .12s ease; }
-.src-cite:hover .src-cite-go, .src-cite:focus-visible .src-cite-go { opacity: 1; }
+.srcx-search input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font: inherit; font-size: 13.5px; color: var(--ink); }
+.srcx-search input::placeholder { color: var(--ink-soft); }
+.srcx-clear { border: 0; background: none; cursor: pointer; color: var(--ink-soft); font-size: 13px; line-height: 1; padding: 0 2px; flex: 0 0 auto; }
+.srcx-clear:hover { color: var(--ink); }
+
+.srcx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.srcx-chip {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  font-family: var(--cond); font-weight: 600; font-size: 13px; letter-spacing: .02em;
+  padding: 5px 10px; border: 1.5px solid var(--ink); background: var(--card); color: var(--ink);
+}
+.srcx-chip:hover { background: var(--paper-2); }
+.srcx-chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.srcx-chip[aria-pressed="true"] .srcx-n { color: var(--paper); }
+.srcx-n { font-family: var(--mono); font-size: 10.5px; color: var(--ink-soft); }
+.srcx-sort {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer;
+  font-family: var(--cond); font-weight: 600; font-size: 12.5px;
+  padding: 5px 9px; border: 1.5px solid var(--rule-strong); background: var(--card); color: var(--ink-soft);
+}
+.srcx-sort:hover { border-color: var(--ink); color: var(--ink); }
+.srcx-reset { border: 0; background: none; cursor: pointer; color: var(--data); font: inherit; font-size: 12px; text-decoration: underline; text-underline-offset: 2px; }
+
+/* the source list packs into two columns (one on a phone) with no row gaps —
+   each source is a self-contained card that never splits across a column */
+.srcx-list { list-style: none; margin: 0; padding: 0; columns: 2; column-gap: 22px; }
+.srcx-card {
+  break-inside: avoid; -webkit-column-break-inside: avoid; page-break-inside: avoid;
+  display: block; margin: 0 0 16px; border: 1.5px solid var(--ink); background: var(--card);
+  box-shadow: 3px 3px 0 rgba(22,20,13,.10);
+}
+@media (max-width: 720px) { .srcx-list { columns: 1; } }
+.srcx-open {
+  display: flex; gap: 9px; align-items: flex-start; text-align: left; width: 100%;
+  background: none; border: 0; padding: 11px 11px 10px; cursor: pointer; font: inherit; color: var(--ink);
+}
+.srcx-open:hover { background: var(--paper-2); }
+.srcx-num { flex: 0 0 auto; line-height: 1; margin-left: 0; }
+.srcx-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
+.srcx-title {
+  font-family: var(--cond); font-weight: 600; font-size: 15px; line-height: 1.14; color: var(--ink);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.srcx-outlet { font-family: var(--serif); font-size: 12.5px; color: var(--ink-soft); line-height: 1.2; }
+.srcx-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 2px; font-family: var(--mono); font-size: 9.5px; color: var(--ink-soft); }
+.srcx-medium { display: inline-flex; align-items: center; gap: 4px; color: var(--ink); }
+.srcx-view { flex: 0 0 auto; align-self: center; color: var(--ink-soft); opacity: .55; transition: opacity .12s ease, transform .12s ease; }
+.srcx-open:hover .srcx-view, .srcx-open:focus-visible .srcx-view { opacity: 1; transform: scale(1.08); }
+/* the source → spans connection, the heart of the card: a labelled strip over
+   the list of passages this source grounds */
+.srcx-foot { border-top: 1.5px solid var(--ink); background: color-mix(in srgb, var(--yellow) 9%, var(--card)); }
+.srcx-foot-h {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .04em; line-height: 1.4;
+  color: var(--ink-soft); padding: 8px 11px 4px;
+}
+.srcx-foot .cite-span { padding-left: 11px; padding-right: 11px; background: transparent; }
+.srcx-foot .cite-span:hover { background: rgba(255,236,1,0.4); }
+.srcx-more {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  background: none; border: 0; border-top: 1px solid var(--rule); padding: 7px 11px;
+  font-family: var(--mono); font-size: 10px; letter-spacing: .03em; color: var(--data);
+}
+.srcx-more:hover { background: var(--paper-2); }
 
 /* ---- status chips ---- */
 .chip {
