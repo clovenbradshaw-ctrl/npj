@@ -41,6 +41,137 @@ const START_DOC =
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
 
+// ============================ HTML source mode ============================
+// The prose editor is a contentEditable, and execCommand + pasted markup leave
+// a long tail of damage no toolbar button can reach: a contenteditable=false
+// figure with no caret to backspace, a heading style carried onto a paragraph,
+// fragmented <b>…</b><b>…</b> runs, stranded markers, bare wrapper <span>s. The
+// source view is the general escape hatch — read the document as HTML, fix it by
+// hand or with one Tidy pass, and apply it back through the SAME reconcile the
+// draft-restore path runs, so an edited document lands as well-formed as a
+// reopened one (image-slots re-upgraded, citations/footnotes renumbered).
+var NR_INLINE = { A: 1, B: 1, STRONG: 1, I: 1, EM: 1, S: 1, STRIKE: 1, U: 1, SUP: 1, SUB: 1, CODE: 1, SPAN: 1, MARK: 1, FONT: 1, SMALL: 1, BIG: 1, ABBR: 1, CITE: 1, TIME: 1, Q: 1, WBR: 1, BR: 1 };
+var NR_VOID = { HR: 1, BR: 1, IMG: 1, INPUT: 1, WBR: 1, COL: 1, AREA: 1, SOURCE: 1, EMBED: 1, TRACK: 1 };
+var NR_VERBATIM = { PRE: 1, TEXTAREA: 1, SCRIPT: 1, STYLE: 1 };
+function nrEscText(t) { return String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function nrOpenTag(el) {
+  var s = "<" + el.tagName.toLowerCase(), at = el.attributes;
+  for (var i = 0; i < at.length; i++) s += " " + at[i].name + '="' + String(at[i].value).replace(/&/g, "&amp;").replace(/"/g, "&quot;") + '"';
+  return s + ">";
+}
+function nrHasBlockChild(el) {
+  var k = el.children;
+  for (var i = 0; i < k.length; i++) if (!NR_INLINE[k[i].tagName]) return true;
+  return false;
+}
+// DOM → readable, round-trip-safe HTML. One block per line so it's editable;
+// inline runs stay intact on their block's line so parsing it back adds no stray
+// spaces; <pre> is preserved verbatim; whitespace-only text between blocks is
+// dropped, so reopening the view never accumulates blank lines.
+function nrSerializeHtml(root) {
+  var out = [];
+  function pad(d) { return new Array(d + 1).join("  "); }
+  function walk(el, depth) {
+    var tag = el.tagName.toLowerCase();
+    if (NR_VOID[el.tagName]) { out.push(pad(depth) + nrOpenTag(el)); return; }
+    if (NR_VERBATIM[el.tagName]) { out.push(pad(depth) + nrOpenTag(el) + el.innerHTML + "</" + tag + ">"); return; }
+    if (!nrHasBlockChild(el)) { out.push(pad(depth) + nrOpenTag(el) + el.innerHTML + "</" + tag + ">"); return; }
+    out.push(pad(depth) + nrOpenTag(el));
+    var ch = el.childNodes;
+    for (var i = 0; i < ch.length; i++) {
+      var c = ch[i];
+      if (c.nodeType === 1) walk(c, depth + 1);
+      else if (c.nodeType === 3) { var t = c.nodeValue.replace(/\s+/g, " ").trim(); if (t) out.push(pad(depth + 1) + nrEscText(t)); }
+    }
+    out.push(pad(depth) + "</" + tag + ">");
+  }
+  var top = root.childNodes;
+  for (var i = 0; i < top.length; i++) {
+    var c = top[i];
+    if (c.nodeType === 1) walk(c, 0);
+    else if (c.nodeType === 3) { var t = c.nodeValue.replace(/\s+/g, " ").trim(); if (t) out.push(nrEscText(t)); }
+  }
+  return out.join("\n");
+}
+// An element the cleaner must never reach into: a custom element (image-slot…),
+// an image/embed/widget shell, anything contenteditable=false, or a node that
+// carries pipeline data (citation spans/markers, footnotes, the dek, the banner).
+function nrProtectedEl(el) {
+  if (!el || el.nodeType !== 1) return false;
+  var tag = el.tagName;
+  if (tag.indexOf("-") >= 0) return true;
+  if (tag === "FIGURE") return true;
+  if (el.getAttribute("contenteditable") === "false") return true;
+  return /\b(md-cite|claim-src|nr-fnote|nr-fnotes|nr-dek|nr-banner)\b/.test(el.getAttribute("class") || "");
+}
+function nrInProtected(el) { for (var n = el; n && n.nodeType === 1; n = n.parentElement) if (nrProtectedEl(n)) return true; return false; }
+function nrUnwrap(el) { var p = el.parentNode; if (!p) return; while (el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el); }
+function nrNoAttrs(el) { return el.attributes.length === 0; }
+// One conservative cleanup pass over a DETACHED copy. Only touches the cruft the
+// composer is known to accumulate; never reaches into a protected node. Returns
+// the tidied, pretty-printed HTML and a count of fixes (non-destructive — the
+// author still reviews and applies it).
+function nrTidyHtml(html) {
+  var doc = document.createElement("div");
+  doc.innerHTML = html;
+  var fixes = 0, list, i;
+  // <font> → a span carrying its color (keep the intent), or unwrap if bare
+  list = doc.querySelectorAll("font");
+  for (i = 0; i < list.length; i++) {
+    var f = list[i]; if (nrInProtected(f)) continue;
+    var color = f.getAttribute("color");
+    if (color) { var sp = document.createElement("span"); sp.style.color = color; while (f.firstChild) sp.appendChild(f.firstChild); f.parentNode.replaceChild(sp, f); }
+    else nrUnwrap(f);
+    fixes++;
+  }
+  // bare wrapper <span> with no attributes → unwrap
+  list = doc.querySelectorAll("span");
+  for (i = 0; i < list.length; i++) { var s = list[i]; if (!nrInProtected(s) && nrNoAttrs(s)) { nrUnwrap(s); fixes++; } }
+  // collapse nested identical inline tags: <b><b>x</b></b> → <b>x</b>
+  list = doc.querySelectorAll("b>b, strong>strong, i>i, em>em, u>u, s>s, strike>strike, code>code");
+  for (i = 0; i < list.length; i++) { var n0 = list[i]; if (!nrInProtected(n0)) { nrUnwrap(n0); fixes++; } }
+  // merge adjacent identical attribute-less inline tags: <b>x</b><b>y</b> → <b>xy</b>
+  var MERGE = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, S: 1, STRIKE: 1, CODE: 1, MARK: 1 };
+  (function mergeRun(parent) {
+    var c = parent.firstChild;
+    while (c) {
+      var next = c.nextSibling;
+      if (c.nodeType === 1 && next && next.nodeType === 1 && c.tagName === next.tagName && MERGE[c.tagName] && nrNoAttrs(c) && nrNoAttrs(next) && !nrProtectedEl(c)) {
+        while (next.firstChild) c.appendChild(next.firstChild);
+        next.parentNode.removeChild(next); fixes++;
+        continue;                                          // re-test c against its new next sibling
+      }
+      if (c.nodeType === 1 && !nrProtectedEl(c)) mergeRun(c);
+      c = next;
+    }
+  })(doc);
+  // empty inline elements (no text, no media) → drop
+  list = doc.querySelectorAll("b, strong, i, em, u, s, strike, span, a, mark, sub, sup, code, small, big");
+  for (i = 0; i < list.length; i++) {
+    var e = list[i];
+    if (nrInProtected(e)) continue;
+    if (e.querySelector("img, br, image-slot, [contenteditable='false']")) continue;
+    if ((e.textContent || "").trim() === "" && e.parentNode) { e.parentNode.removeChild(e); fixes++; }
+  }
+  // truly-empty paragraphs/divs → drop; a <p><br></p> blank line and the .nr-dek
+  // are intentional spacers and are kept
+  list = doc.querySelectorAll("p, div");
+  for (i = 0; i < list.length; i++) {
+    var b = list[i];
+    if (nrInProtected(b)) continue;
+    if (b.querySelector("br, img, image-slot, figure, [contenteditable='false']")) continue;
+    if ((b.textContent || "").trim() === "" && b.children.length === 0 && b.parentNode) { b.parentNode.removeChild(b); fixes++; }
+  }
+  // empty class="" / style="" attributes execCommand leaves behind
+  list = doc.querySelectorAll("[class], [style]");
+  for (i = 0; i < list.length; i++) {
+    var a = list[i];
+    if (a.getAttribute("class") === "") { a.removeAttribute("class"); fixes++; }
+    if (a.getAttribute("style") === "") { a.removeAttribute("style"); fixes++; }
+  }
+  return { html: nrSerializeHtml(doc), fixes: fixes };
+}
+
 // edge-dashes stripped AFTER the length cap — a cap that lands mid-word used
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
@@ -1141,6 +1272,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
+  const [htmlMode, setHtmlMode] = useState(false);  // editing the document's raw HTML in the source view
+  const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
+  const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
   const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
   const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
   useEffect(() => {
@@ -1243,6 +1377,61 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       });
     }
   };
+
+  // ---- HTML source mode: open the canvas as editable HTML, fix it, apply ----
+  // Bring a freshly-set document back to a publishable shape. This mirrors the
+  // draft-restore reconcile (see the restore effect) so HTML typed by hand lands
+  // exactly like a reopened draft: the dek is re-seeded, citation spans/markers
+  // re-pinned, <image-slot>s re-upgraded so their drop zones work, headings,
+  // citations and footnotes renumbered, structure reconciled, fields rehydrated.
+  const reconcileAfterReplace = () => {
+    const root = ed.current; if (!root) return;
+    if (!root.querySelector(".nr-dek")) {
+      const h1 = root.querySelector("h1");
+      if (h1) { const p = document.createElement("p"); p.className = "nr-dek"; p.setAttribute("data-ph", DEK_PH); p.innerHTML = "<br/>"; h1.after(p); }
+    }
+    root.querySelectorAll(".claim-src").forEach((el, i) => {
+      let cid = el.getAttribute("data-cid");
+      if (!cid) { cid = "cs-legacy-" + Date.now().toString(36) + "-" + i; el.setAttribute("data-cid", cid); }
+      const sup = el.nextElementSibling;
+      if (sup && sup.classList && sup.classList.contains("md-cite") && !sup.hasAttribute("data-cid")) {
+        sup.setAttribute("data-cid", cid);
+        if (!sup.hasAttribute("data-quote")) sup.setAttribute("data-quote", el.getAttribute("data-quote") || "");
+      }
+      if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
+    });
+    if (window.NpjCitations) window.NpjCitations.migrateRoot(root);
+    upgradeCustomEls();
+    const h1b = root.querySelector("h1"); if (h1b) setTitle((h1b.textContent || "").trim());
+    const dekEl = root.querySelector(".nr-dek"); if (dekEl) setDek((dekEl.textContent || "").trim());
+    scanHeadings(); renumberCites(); renumberFootnotes();
+    try { reconcileRef.current && reconcileRef.current(); } catch (e) {}
+    setRev(v => v + 1);
+    scheduleSave();
+  };
+  const openHtmlSource = () => {
+    if (!ed.current) return;
+    setHtmlDraft(nrSerializeHtml(ed.current));
+    setHtmlMsg(""); setFmtMenu(null); setMenu(null);
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setHtmlMode(true);
+  };
+  const closeHtmlSource = () => { setHtmlMode(false); setHtmlMsg(""); };
+  const tidyHtmlSource = () => {
+    const res = nrTidyHtml(htmlDraft);
+    setHtmlDraft(res.html);
+    setHtmlMsg(res.fixes ? ("Tidied " + res.fixes + " issue" + (res.fixes === 1 ? "" : "s") + " — review, then Apply") : "Nothing to tidy — already clean");
+  };
+  const applyHtmlSource = () => {
+    const root = ed.current; if (!root) return;
+    root.innerHTML = htmlDraft;
+    reconcileAfterReplace();
+    setHtmlMode(false); setHtmlMsg("");
+  };
+  // leaving prose for a grounding/graph surface drops the source panel so it
+  // can't shadow another view; the next open re-snapshots the live document
+  useEffect(() => { if (view !== "prose" && htmlMode) setHtmlMode(false); }, [view, htmlMode]);
+
   // the span to bind: the live in-editor selection if there is one, else the
   // last one we saved — a collapsed caret is never a span
   const spanRange = () => {
@@ -2263,6 +2452,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
           {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
         </button>
+        {view === "prose" && <Sep />}
+        {view === "prose" && (
+          <button onMouseDown={e => e.preventDefault()} onClick={() => (htmlMode ? closeHtmlSource() : openHtmlSource())} aria-pressed={htmlMode}
+            title={htmlMode ? "Close the HTML source view" : "Edit the underlying HTML — unstick a block, retag a heading, clear broken markup"}
+            className="np-cond" style={{ background: htmlMode ? "var(--yellow)" : "transparent", border: 0, color: htmlMode ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <I.code style={{ fontSize: 14 }} /> <span className="npj-hide-sm">HTML</span>
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source — then pin the words in the source</span>
       </div>
@@ -2320,7 +2517,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
           <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
             <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
@@ -2335,11 +2532,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
-            style={{ color: NR.text, outline: "none" }}
+            style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
-          {!isMobile && grip && (
+          {!isMobile && grip && !htmlMode && (
             <div className="nr-grip-group"
               onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } setGripHover(true); }}
               onMouseLeave={() => setGripHover(false)}
@@ -2361,7 +2558,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               to backspace, so float a click-to-delete × over their top-right
               corner. Editor chrome, OUTSIDE the editable, so it never serializes
               into the saved/published HTML. */}
-          {!isMobile && grip && !dragging && isVoidBlock(grip.block) && (
+          {!isMobile && grip && !dragging && !htmlMode && isVoidBlock(grip.block) && (
             <button type="button" className="nr-media-del"
               style={{ top: grip.top + 8, left: grip.right - 36 }}
               onMouseDown={(e) => e.preventDefault()}
@@ -2370,8 +2567,28 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <I.trash style={{ fontSize: 14 }} />
             </button>
           )}
-          {!isMobile && dropAt && (
+          {!isMobile && dropAt && !htmlMode && (
             <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
+          )}
+          {/* HTML source view — the general escape hatch for contentEditable cruft
+              the toolbar can't reach. Fills the canvas (the editable is hidden but
+              stays mounted so its DOM/autosave survive); Apply re-parses it and
+              runs the same reconcile a restored draft does. */}
+          {htmlMode && (
+            <div style={{ position: "absolute", inset: 0, zIndex: 30, background: NR.bg, display: "flex", flexDirection: "column" }}>
+              <div style={{ padding: isMobile ? "10px 12px" : "12px 18px", borderBottom: "1px solid " + NR.line, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flexShrink: 0 }}>
+                <div style={{ marginRight: "auto", minWidth: 0 }}>
+                  <div className="np-eyebrow" style={{ color: NR.text }}>HTML source</div>
+                  <div className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted, marginTop: 2 }}>Unstick a block, retag a heading, clear broken markup — then Apply.</div>
+                </div>
+                {htmlMsg && <span className="np-mono" style={{ fontSize: 10.5, color: NR.ok }}>{htmlMsg}</span>}
+                <button onMouseDown={(e) => e.preventDefault()} onClick={tidyHtmlSource} title="Auto-fix the usual cruft: bare wrapper spans, fragmented bold/italic runs, empty tags and blank paragraphs. Leaves citations, images and embeds untouched." className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}><I.sparkle style={{ fontSize: 13 }} /> Tidy</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={closeHtmlSource} title="Discard these edits and return to the editor" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.soft, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Cancel</button>
+                <button onMouseDown={(e) => e.preventDefault()} onClick={applyHtmlSource} title="Replace the document with this HTML, then re-link citations, re-upgrade images and renumber" className="np-cond" style={{ background: "var(--yellow)", border: "1.5px solid var(--ink)", color: "var(--ink)", padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}><I.check style={{ fontSize: 13 }} /> Apply</button>
+              </div>
+              <textarea value={htmlDraft} onChange={(e) => setHtmlDraft(e.target.value)} spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off"
+                className="np-mono" style={{ flex: 1, minHeight: 0, width: "100%", resize: "none", border: 0, outline: "none", background: NR.field, color: NR.text, padding: "16px 18px", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre", overflow: "auto" }} />
+            </div>
           )}
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
