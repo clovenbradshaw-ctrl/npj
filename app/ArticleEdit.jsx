@@ -46,12 +46,15 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
-  // caption + credit are editable lines under the (non-editable) figure. The
-  // credit carries a markdown hyperlink like a contributor bio — name /
-  // [outlet](https://…) — rendered safely via npjRichText in the reader.
+  // caption + credit + description are editable lines under the (non-editable)
+  // figure. The credit carries a markdown hyperlink like a contributor bio —
+  // name / [outlet](https://…) — rendered safely via npjRichText in the reader.
+  // The description is the photo's alt text (screen readers + search); it rides
+  // as the image's real `alt`, not a visible caption line.
   const figCaps =
     '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px"></figcaption>' +
-    '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>';
+    '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>' +
+    '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px"></figcaption>';
   const imageFigure = (id, banner) =>
     '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" conform fitcontrol shape="rect" placeholder="' +
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +

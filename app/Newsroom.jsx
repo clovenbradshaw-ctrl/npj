@@ -25,12 +25,16 @@ function nrIsFileSrc(rec) {
 }
 
 const DEK_PH = "Subtitle — one line under the headline";
-// Editable caption + credit lines, shared by the banner and inline image figures.
-// The credit takes a markdown hyperlink like a contributor bio (name /
-// [outlet](https://…)), rendered safely via npjRichText in the reader.
+// Editable caption + credit + description lines, shared by the banner and inline
+// image figures. The credit takes a markdown hyperlink like a contributor bio
+// (name / [outlet](https://…)), rendered safely via npjRichText in the reader.
+// The description is the photo's alt text — read aloud by screen readers and
+// indexed by search engines; it rides as the image's real `alt`, not a visible
+// caption line.
 const FIG_CAPS =
   '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
-  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
+  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>' +
+  '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
@@ -326,7 +330,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
       const embed = f.getAttribute("data-embed-url");
-      const cap = f.querySelector("figcaption:not(.cmp-credit)");
+      const cap = f.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
       if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
@@ -3324,10 +3328,12 @@ function htmlToMarkdown(html) {
       lines.push("");
     }
     else if (tag === "figure") {
-      const cap = node.querySelector("figcaption:not(.cmp-credit)");
+      const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
       const capText = cap ? cap.textContent.trim() : "";
       const credEl = node.querySelector(".cmp-credit");
       const creditText = credEl ? credEl.textContent.trim() : "";
+      const descEl = node.querySelector(".cmp-desc");
+      const descText = descEl ? descEl.textContent.trim() : "";
       // an image slot that resolved an archive.org link carries it in `src` —
       // the published .md hotlinks the IA copy (archive.org is the media CDN);
       // local-only drops have no durable URL and stay out of the .md
@@ -3340,6 +3346,7 @@ function htmlToMarkdown(html) {
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
       if (capText) lines.push("*" + capText + "*", "");
       if (creditText) lines.push("*Credit: " + creditText.replace(/\n/g, " ") + "*", "");
+      if (descText) lines.push("*Alt: " + descText.replace(/\n/g, " ") + "*", "");
     }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });

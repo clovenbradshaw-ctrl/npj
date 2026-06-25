@@ -657,7 +657,7 @@ function ArticleRead(props) {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
             <figure key={i} style={{ margin: "26px 0" }}>
-              <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              <MediaImg srcs={[b.store, b.src]} alt={b.description || b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
             </figure>
           );
@@ -721,7 +721,7 @@ function ArticleRead(props) {
     : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
     <figure style={{ margin: "4px 0 24px" }}>
-      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.description || heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
     </figure>
   ) : null;
