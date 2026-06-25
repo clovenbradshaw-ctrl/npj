@@ -119,11 +119,41 @@ function CitedSpanList({ claims, onJump, currentId }) {
   );
 }
 
+/* Float a preview card BESIDE the reading column — out in the margin, never over
+   the prose — so it never covers what you're reading yet stays a short hop away.
+   Given the marker's rect and the article column's rect it pops to the gutter
+   nearest the marker (least pointer travel), skips a gutter an open rail has
+   already claimed (the ledger, the suggestions or figures rail), shrinks to fit
+   and clamps to the viewport. Returns null when neither margin has room (a narrow
+   window) — the caller then drops back to anchoring under the marker. */
+function besideColumn(mk, col, opts) {
+  if (!mk || !col) return null;
+  const { vw, vh, gap = 16, blockL, blockR } = opts;
+  const leftRoom = col.left;          // clear margin to the left of the prose
+  const rightRoom = vw - col.right;   // …and to the right
+  // as wide as a full card, shrunk to the roomier gutter, never below a readable
+  // measure (a card narrower than this isn't worth pulling out to the side)
+  const best = Math.max(blockL ? 0 : leftRoom, blockR ? 0 : rightRoom);
+  const w = Math.min(340, Math.max(248, best - gap - 12));
+  const canL = !blockL && leftRoom >= w + gap + 12;
+  const canR = !blockR && rightRoom >= w + gap + 12;
+  if (!canL && !canR) return null;
+  // pop to whichever margin the marker sits closest to; fall to the other if
+  // that side is taken, so the card is the shortest reach from the word
+  const nearRight = (mk.left + mk.right) / 2 >= (col.left + col.right) / 2;
+  const side = (nearRight ? canR : canL) ? (nearRight ? "right" : "left") : (canR ? "right" : "left");
+  const left = side === "right" ? col.right + gap : col.left - gap - w;
+  // start the card at the marker's line so it reads as a margin note for it, but
+  // keep the whole card on-screen (it scrolls within maxHeight if the note is long)
+  const top = Math.max(12, Math.min(mk.top - 2, vh - 172));
+  return { left, top, width: w, maxHeight: vh - top - 12 };
+}
+
 /* ---- source citation card ---- */
-// On a pointer device this floats next to the hovered claim. On a phone there's
-// no hover and no room to pin a card to a tapped word, so it opens instead as a
-// dismissible bottom sheet (tap the backdrop or ✕ to close) — thumb-reachable
-// and full-width, which is how a touch reader actually opens the receipts.
+// On a pointer device this floats in the margin beside the hovered claim. On a
+// phone there's no hover and no room to pin a card to a tapped word, so it opens
+// instead as a dismissible bottom sheet (tap the backdrop or ✕ to close) —
+// thumb-reachable and full-width, which is how a touch reader opens the receipts.
 function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
@@ -131,21 +161,29 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
   const isPhone = window.useIsMobile(760);
   React.useEffect(() => setTab(0), [data && data.claim && data.claim.id]);
   if (!data) return null;
-  const { claim, x, y, srcKeys } = data;
+  const { claim, x, y, srcKeys, mk, col, blockL, blockR } = data;
   const vw = window.innerWidth, vh = window.innerHeight;
   // the other passages this same source backs — so you can hop between them
   const spans = spansForSource ? spansForSource(srcKeys[tab]) : [];
 
   const sheet = isPhone;
-  // never wider than the viewport (340 on a phone overflows the right edge)
-  const w = sheet ? "100%" : Math.min(340, vw - 24);
-  const left = sheet ? 0 : Math.min(Math.max(12, x), vw - w - 12);
-  const top = y + 8;
-  const flip = !sheet && top > vh - 260;
-  const cardStyle = sheet
-    ? { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "72vh", overflowY: "auto",
-        borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" }
-    : { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  // On a desktop the card lives in the margin beside the column (besideColumn);
+  // only when the window's too narrow for a gutter does it anchor under the marker.
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  let cardStyle;
+  if (sheet) {
+    cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "72vh", overflowY: "auto",
+      borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (beside) {
+    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
+  } else {
+    // no room either side — anchor under the marker (flip up near the foot)
+    const w = Math.min(340, vw - 24);
+    const left = Math.min(Math.max(12, x), vw - w - 12);
+    const top = y + 8;
+    const flip = top > vh - 260;
+    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  }
 
   const inner = (
     <div className="srccard np-scroll" role="dialog" aria-label="Citation for this claim"
@@ -199,24 +237,32 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
 }
 
 // The Substack footnote experience: hover a marker on the desktop (or tap it on a
-// phone) and the note pops up right there, so you read it without losing your
-// place. The note text still has its permanent home in the "Notes" endnotes —
-// this card is the inline preview, with a link down to it. Mirrors HoverCard's
-// positioning (anchored under the marker; a bottom sheet on a phone).
+// phone) and the note floats up in the margin beside it, so you read it without
+// losing your place. The note text still has its permanent home in the "Notes"
+// endnotes — this card is the inline preview, with a link down to it. Mirrors
+// HoverCard's positioning (margin card on a desktop; a bottom sheet on a phone).
 function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
-  const { num, text, x, y } = data;
+  const { num, text, x, y, mk, col, blockL, blockR } = data;
   const vw = window.innerWidth, vh = window.innerHeight;
   const sheet = isPhone;
-  const w = sheet ? "100%" : Math.min(340, vw - 24);
-  const left = sheet ? 0 : Math.min(Math.max(12, x - 16), vw - (typeof w === "number" ? w : 340) - 12);
-  const top = y + 8;
-  const flip = !sheet && top > vh - 220;
-  const cardStyle = sheet
-    ? { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "60vh", overflowY: "auto",
-        borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" }
-    : { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  // Mirrors HoverCard: float in the margin beside the marker, anchoring under it
+  // only when there's no gutter to spare.
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  let cardStyle;
+  if (sheet) {
+    cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "60vh", overflowY: "auto",
+      borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (beside) {
+    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
+  } else {
+    const w = Math.min(340, vw - 24);
+    const left = Math.min(Math.max(12, x - 16), vw - w - 12);
+    const top = y + 8;
+    const flip = top > vh - 220;
+    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  }
   const inner = (
     <div className="fnpop np-scroll" role="dialog" aria-label={"Footnote " + num} style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
@@ -342,6 +388,17 @@ function ArticleRead(props) {
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
   const [fnPop, setFnPop] = useState(null);
   const fnLeaveTimer = useRef(null);
+  // Source & note previews — the margin cards that float up when you hover a claim
+  // or a footnote. On by default (that's the point of a grounded read), but a
+  // reader who wants nothing popping up can switch them off, and the choice sticks.
+  const [previews, setPreviews] = useState(() => {
+    try { return localStorage.getItem("npj.previews") !== "0"; } catch (e) { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem("npj.previews", previews ? "1" : "0"); } catch (e) {}
+    // turning them off dismisses anything currently floating
+    if (!previews) { setHover(null); setFnPop(null); setActiveSrc(null); }
+  }, [previews]);
   const footnoteByKey = React.useMemo(() => {
     const m = {};
     (A.body || []).forEach(b => { if (b.type === "footnotes") (b.notes || []).forEach(n => { if (n && n.key) m[n.key] = n; }); });
@@ -372,6 +429,10 @@ function ArticleRead(props) {
   // assignees (the publisher is one by default — see genesisFromContent)
   const canEditArticle = isAdmin || (Array.isArray(A.assignees) && A.assignees.includes(me));
   const leaveTimer = useRef(null);
+  // which margin an open rail has claimed, so a preview card dodges to the other
+  // side (in Preview there are no rails, so both margins are free)
+  const railBlockR = !preview && (audit || showSugg);
+  const railBlockL = !preview && entityOpen;
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
   // the Sources footer is a section too — list it at the foot of Contents so a
@@ -391,14 +452,20 @@ function ArticleRead(props) {
   suggestions.forEach(s => { if (s.status === "proposed" || s.status === "review") openByClaim[s.claimId] = (openByClaim[s.claimId] || 0) + 1; });
 
   const enterClaim = useCallback((e, claim) => {
+    if (!previews) return;
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
-    setHover({ claim, x: r.left, y: r.bottom, srcKeys: claim.src });
+    const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    setHover({ claim, x: r.left, y: r.bottom, srcKeys: claim.src,
+      mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
+      blockL: railBlockL, blockR: railBlockR });
     setActiveSrc(claim.src[0]);
-  }, []);
+  }, [previews, railBlockL, railBlockR]);
+  // a touch more grace than a tooltip: the card now sits out in the margin, so a
+  // reader needs a beat to slide the pointer across the gutter and onto it
   const scheduleLeave = useCallback(() => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 160);
+    leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 240);
   }, []);
   const cancelLeave = useCallback(() => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
@@ -406,14 +473,18 @@ function ArticleRead(props) {
   // up next to it; leaving hides it after a beat so a slide into the card keeps
   // it open. A click still jumps down to the note's home in the endnotes.
   const enterFn = useCallback((e, key) => {
+    if (!previews) return;
     const n = footnoteByKey[key]; if (!n) return;
     if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
-    setFnPop({ key, num: n.num, text: n.text, x: r.left, y: r.bottom });
-  }, [footnoteByKey]);
+    const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    setFnPop({ key, num: n.num, text: n.text, x: r.left, y: r.bottom,
+      mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
+      blockL: railBlockL, blockR: railBlockR });
+  }, [footnoteByKey, previews, railBlockL, railBlockR]);
   const scheduleFnLeave = useCallback(() => {
     if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
-    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 160);
+    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 240);
   }, []);
   const cancelFnLeave = useCallback(() => { if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current); }, []);
   const jumpToFn = useCallback((key) => {
@@ -633,7 +704,7 @@ function ArticleRead(props) {
               <a href={"#fn-" + k} aria-label={"Footnote " + t.num} aria-describedby={"fn-" + k}
                 onMouseEnter={isPhone ? undefined : (e) => enterFn(e, k)}
                 onMouseLeave={isPhone ? undefined : scheduleFnLeave}
-                onClick={(e) => { e.preventDefault(); if (isPhone) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
+                onClick={(e) => { e.preventDefault(); if (isPhone && previews) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
                 style={{ color: "var(--data)", textDecoration: "none", fontWeight: 600, fontFamily: "var(--mono)" }}>{t.num}</a>
             </sup>
           );
@@ -886,6 +957,11 @@ function ArticleRead(props) {
             <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
+          <button className="btn btn-sm" onClick={() => setPreviews(v => !v)} aria-pressed={previews}
+            title="Previews — hover a claim or footnote and its citation/note floats up in the margin. On by default; turn off for a clean read."
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: previews ? "var(--ink)" : "var(--card)", color: previews ? "var(--yellow)" : "var(--ink)" }}>
+            {previews ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} Previews
+          </button>
           <button className="btn btn-sm" onClick={() => setTransparency(v => !v)} aria-pressed={transparency}
             title="Transparency — colour each claim by how it's grounded: cited (⊤/⊨), the author's own (⊢/⊨/⊩), or needs a source (⊥)"
             style={{ display: "inline-flex", alignItems: "center", gap: 7, background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
@@ -924,7 +1000,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ audit, setAudit, transparency, setTransparency, showSugg, setShowSugg,
+      <ControlBar {...{ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
@@ -1043,7 +1119,7 @@ function GroundingLegend({ tally, onClose }) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transparency, setTransparency, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -1085,6 +1161,13 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, showSugg, 
           style={{ display: "inline-flex", alignItems: "center", gap: 7,
             background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
           <I.swatches style={{ fontSize: 14 }} /> Transparency
+        </button>
+
+        <button className="btn btn-sm" onClick={() => setPreviews(!previews)} aria-pressed={previews}
+          title="Previews — hover a claim or a footnote and its citation or note floats up in the margin, beside the text. On by default; turn off for a clean read with nothing popping up."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7,
+            background: previews ? "var(--ink)" : "var(--card)", color: previews ? "var(--yellow)" : "var(--ink)" }}>
+          {previews ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} Previews
         </button>
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
