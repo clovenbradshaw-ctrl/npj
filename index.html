@@ -55,9 +55,12 @@
   }
 </style>
 
-<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<!-- React production builds: ~140 KB total vs. the ~1 MB dev builds, and no
+     dev-only checks on every render. Babel is NOT loaded here anymore — app/boot.js
+     pulls it in lazily and only on a cache miss (a first visit or a changed file),
+     so a warm cache never downloads the ~3 MB transformer at all. -->
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
 
 <script src="app/data.js"></script>
 <!-- live sources: pulls archive.org items tagged "npj-source" into DATASETS/SOURCES -->
@@ -145,50 +148,15 @@
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
-<!-- babel app: layout context first, then shared UI, then features -->
-<script type="text/babel" src="tweaks-panel.jsx"></script>
-<script type="text/babel" src="app/layout.jsx"></script>
-<script type="text/babel" src="app/shared.jsx"></script>
-<!-- source viewer + file explorer: render an uploaded source's real content
-     (image / pdf / text), and a two-pane explorer to browse every file -->
-<!-- PDF renderer: real pages to canvas + a selectable text layer (pdf.js) -->
-<script type="text/babel" src="app/PdfView.jsx"></script>
-<script type="text/babel" src="app/SourceViewer.jsx"></script>
-<script type="text/babel" src="app/SourceExplorer.jsx"></script>
-<script type="text/babel" src="app/versions.jsx"></script>
-<script type="text/babel" src="app/Entities.jsx"></script>
-<script type="text/babel" src="app/SuggestionRail.jsx"></script>
-<script type="text/babel" src="app/FrontPage.jsx"></script>
-<!-- "Export for Substack" panel (window.SubstackExport), opened from the reader -->
-<script type="text/babel" src="app/SubstackExport.jsx"></script>
-<!-- "Export for fact-check" panel (window.FactCheckExport), opened from the grounding workspace -->
-<script type="text/babel" src="app/FactCheckExport.jsx"></script>
-<script type="text/babel" src="app/ArticleRead.jsx"></script>
-<script type="text/babel" src="app/ArticleEdit.jsx"></script>
-<script type="text/babel" src="app/SourcePicker.jsx"></script>
-<!-- attribute a claim to a conversation (interview / human source): window.NpjInterview
-     + window.InterviewComposer, used by the Newsroom's source panel -->
-<script type="text/babel" src="app/InterviewSource.jsx"></script>
-<script type="text/babel" src="app/GroundingWorkspace.jsx"></script>
-<!-- the post-structure rail + blank-page type picker (window.StructureRail),
-     fed an api by the Newsroom; the only UI for the structure layer -->
-<script type="text/babel" src="app/PostStructure.jsx"></script>
-<!-- the Graph view: the live document as an eoreader4 proposition graph
-     (window.GraphView), a top-level view beside prose/grounding/citations -->
-<script type="text/babel" src="app/GraphView.jsx"></script>
-<script type="text/babel" src="app/Newsroom.jsx"></script>
-<script type="text/babel" src="app/Standards.jsx"></script>
-<script type="text/babel" src="app/Contributors.jsx"></script>
-<script type="text/babel" src="app/Submit.jsx"></script>
-<script type="text/babel" src="app/Data.jsx"></script>
-<script type="text/babel" src="app/Documents.jsx"></script>
-<!-- invite-by-link: mint a new account on the homeserver + the welcome wizard
-     (window.NewAccountInvite, window.WelcomeInvite) the single link opens -->
-<script type="text/babel" src="app/Invite.jsx"></script>
-<script type="text/babel" src="app/Citey.jsx"></script>
-<!-- Citey's PII review + hard-redaction surface (the archive.org gate) -->
-<script type="text/babel" src="app/CiteyRedact.jsx"></script>
-<script type="text/babel" src="app/AdminEditor.jsx"></script>
+<!-- The app's ~30 .jsx files are compiled + run by app/boot.js (loaded at the
+     end of <body>), NOT by Babel's <script type="text/babel"> auto-runner.
+     boot.js compiles ONLY the front-page core (layout + shared UI + FrontPage +
+     the app shell) before first paint, then fills in the article reader and the
+     whole editor AFTER paint — and caches every file's compiled output in the
+     browser (keyed by source hash), so a returning visitor skips both the Babel
+     download and all transpilation. The router shows a light spinner if you
+     reach a route whose code is still streaming in. The inline #npj-app shell
+     below is the last unit boot.js runs; that's what mounts React. -->
 </head>
 <body>
 <div id="root">
@@ -211,7 +179,11 @@
   </svg>
 </template>
 
-<script type="text/babel">
+<!-- The app shell. type="text/npj" so the browser doesn't run it and Babel's
+     auto-runner (if ever present) ignores it — app/boot.js reads this element's
+     text, compiles it last, and runs it to mount React. The EDITMODE tweak block
+     stays here so the host's in-place tweak rewriter keeps finding it. -->
+<script type="text/npj" id="npj-app">
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "accent": "#ffec01",
   "palette": [
@@ -224,6 +196,31 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
   "auditDefault": false,
   "trustDefault": "all"
 }/*EDITMODE-END*/;
+
+// The reader and the editor are compiled AFTER first paint (see app/boot.js),
+// so a route can be reached before its code exists. This hook re-renders when a
+// bundle finishes (window.__npjReady.{read,all}); the router gates each route on
+// the matching flag and shows BootLoading until then. The front page is in the
+// eager core, so it never waits.
+function useNpjReady() {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const on = () => bump(n => n + 1);
+    window.addEventListener("npj:modules-ready", on);
+    return () => window.removeEventListener("npj:modules-ready", on);
+  }, []);
+  const R = window.__npjReady || {};
+  return { read: !!R.read, all: !!R.all };
+}
+
+function BootLoading({ label }) {
+  return (
+    <div style={{ minHeight: "62vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, padding: 24 }}>
+      <div style={{ width: 24, height: 24, borderRadius: "50%", border: "3px solid var(--rule, rgba(22,20,13,.16))", borderTopColor: "var(--ink, #16140d)", animation: "spin .8s linear infinite" }} aria-hidden="true" />
+      <div className="np-mono" style={{ fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--ink-soft, #3a362b)" }}>{label || "Loading…"}</div>
+    </div>
+  );
+}
 
 function App() {
   const [t, setTweak] = useTweaks(TWEAK_DEFAULTS);
@@ -509,9 +506,14 @@ function App() {
   window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
+  // gate routes whose code is still streaming in after first paint (the front
+  // page is always ready); WelcomeInvite + every page ride the "read" bundle.
+  const ready = useNpjReady();
+
   // a valid invite link owns the whole screen until the newcomer finishes; then
   // we drop the #welcome token and sign them into the workspace like anyone else
   if (welcomePayload && !welcomeDone) {
+    if (!ready.read) return <BootLoading />;
     return <WelcomeInvite payload={welcomePayload} onDone={(sess) => {
       try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
       setWelcomeDone(true);
@@ -522,7 +524,7 @@ function App() {
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
       {route === "home" && <FrontPage key={"front-" + frontRev} onOpen={openArticle} onNewsroom={goNewsroom} onHome={goHome} />}
-      {route === "article" && window.NPJ.ARTICLE && (
+      {route === "article" && (ready.read ? (window.NPJ.ARTICLE && (
         <ArticleRead key={(window.NPJ.ARTICLE.slug || "a") + ":" + articleRev}
           audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
@@ -538,15 +540,17 @@ function App() {
             const reflect = () => { window.NpjArticles.patchFrontStatus(a.slug, a.status); setFrontRev(r => r + 1); };
             window.NpjArticles.loadFront().then(reflect).catch(reflect);
           }} />
-      )}
-      {route === "newsroom" && ((isEditorRole || isGuest)
-        ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
-        : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
-      {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
-      {route === "contributors" && <ContributorsPage onHome={goHome} onNewsroom={goNewsroom} />}
-      {route === "submit" && <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} />}
-      {route === "explore" && <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} />}
-      {route === "docs" && <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />}
+      )) : <BootLoading />)}
+      {route === "newsroom" && (ready.all
+        ? ((isEditorRole || isGuest)
+          ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
+          : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)
+        : <BootLoading label="Loading the newsroom…" />)}
+      {route === "standards" && (ready.read ? <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} /> : <BootLoading />)}
+      {route === "contributors" && (ready.read ? <ContributorsPage onHome={goHome} onNewsroom={goNewsroom} /> : <BootLoading />)}
+      {route === "submit" && (ready.read ? <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} /> : <BootLoading />)}
+      {route === "explore" && (ready.read ? <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} /> : <BootLoading />)}
+      {route === "docs" && (ready.read ? <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} /> : <BootLoading />)}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />
@@ -608,5 +612,11 @@ function App() {
   ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 })();
 </script>
+
+<!-- The module loader: compiles the front-page core, mounts the shell above,
+     then streams in the reader + editor after paint — caching compiled output
+     to the browser so repeat visits skip Babel entirely. Runs last so the
+     #npj-app element and the plain app/*.js globals it needs already exist. -->
+<script src="app/boot.js"></script>
 </body>
 </html>

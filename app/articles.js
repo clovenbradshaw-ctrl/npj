@@ -44,6 +44,7 @@
   const API_CONTENTS = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR;
   const API_TREE = "https://api.github.com/repos/" + OWNER_REPO + "/git/trees/main?recursive=1";
   const IDX_CACHE_KEY = "npj_articles_idx_v3"; // v3: per-document folders — entries are keyed by slug, not filename
+  const FRONT_CACHE_KEY = "npj_front_v1"; // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
 
@@ -329,6 +330,19 @@
   function loadIdxCache() { try { return JSON.parse(localStorage.getItem(IDX_CACHE_KEY) || "{}") || {}; } catch (e) { return {}; } }
   function saveIdxCache(c) { try { localStorage.setItem(IDX_CACHE_KEY, JSON.stringify(c)); } catch (e) {} }
 
+  /* The front-page line-up, mirrored to localStorage so a returning visitor sees
+     the last-known stories the instant the page paints — without waiting on the
+     git-tree API. loadFront() still runs and reconciles against the live record;
+     this is purely a stale-while-revalidate head start. */
+  function saveFront(front) { try { localStorage.setItem(FRONT_CACHE_KEY, JSON.stringify(front)); } catch (e) {} }
+  function primeFront() {
+    try {
+      if (!window.NPJ || (window.NPJ.FRONT && window.NPJ.FRONT.lead)) return; // don't clobber a live load
+      const cached = JSON.parse(localStorage.getItem(FRONT_CACHE_KEY) || "null");
+      if (cached && (cached.lead || (cached.secondary && cached.secondary.length))) window.NPJ.FRONT = cached;
+    } catch (e) {}
+  }
+
   async function fetchRaw(path) {
     // cb param busts the raw CDN's ~5 min cache (including cached 404s) so a
     // fresh commit reads back immediately
@@ -443,6 +457,7 @@
     const metas = await listArticles();
     const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], published: m.published, updated: m.updated, versions: m.versions, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
+    saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
   }
 
@@ -989,11 +1004,16 @@
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
-    listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle,
+    listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle, primeFront, saveFront,
     htmlToBlocks, blocksToHtml, tokensToHtml,
     genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };
+  // Paint the front page from the last-known line-up the moment this script
+  // runs, so a returning visitor never waits on the git-tree API for first
+  // paint. Browser-only; loadFront() reconciles against the live record after.
+  if (typeof window !== "undefined") primeFront();
+
   // node tests require() the pure fold/revert helpers; the browser path is
   // unchanged (root === window). No DOM/network runs at load time.
   if (typeof module !== "undefined" && module.exports) module.exports = root.NpjArticles;

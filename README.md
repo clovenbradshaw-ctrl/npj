@@ -12,6 +12,8 @@ founding admin curates the site and grows the network from there.
 | Path | What it is |
 |---|---|
 | `index.html` | the app shell — loads everything below (served at the repo root) |
+| `app/boot.js` | the no-build module loader: compiles the front-page core before first paint, defers the reader + editor to after paint, and caches each file's compiled output in the browser (so repeat visits skip Babel entirely) |
+| `sw.js` | service worker — caches the app shell + pinned React/Babel for instant repeat loads (and offline) |
 | `articles/` | **the published record** — one folder per document (`<slug>/`) of timestamped version files, one EO event each; legacy single-file logs (`<slug>.jsonl`) still readable |
 | `app/` | the React (in-browser Babel) front end |
 | `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
@@ -517,9 +519,14 @@ pin the page to a single IA account so nobody else can tag their way in.
 ## Running
 
 Open `index.html` in a browser (or serve the folder statically — it's the entry
-the repo serves at its root). It uses in-browser Babel — no build step. Matrix
-calls go straight to the homeserver (`hyphae.social`), which is CORS-open per the
-Matrix spec. The UI (including the Newsroom editor) is responsive down to phones.
+the repo serves at its root). It uses in-browser Babel — no build step — but the
+front page no longer waits on it: `app/boot.js` compiles just the front-page core
+before first paint, streams the reader + editor in afterwards, and caches every
+file's compiled output in the browser (so a returning visitor skips Babel and all
+transpilation), with a service worker (`sw.js`) caching the shell for instant
+repeat loads. Matrix calls go straight to the homeserver (`hyphae.social`), which
+is CORS-open per the Matrix spec. The UI (including the Newsroom editor) is
+responsive down to phones.
 
 **Closed network, for now.** Only the founding admin — and the contributors the
 admin adds — can open the Newsroom and draft/edit; everyone else gets the email-a-tip
