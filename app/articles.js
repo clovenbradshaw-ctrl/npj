@@ -711,7 +711,26 @@
     const blocks = [];
     const fnRegionDefs = {};   // key → note text, read from the structured "Footnotes" list
     let headline = "", dek = "";
-    Array.from(root.childNodes).forEach(node => {
+    // Block-level tags that must never be collapsed into a paragraph. A bare
+    // contentEditable <div> wrapping any of these — the browser wraps pasted runs
+    // and Enter-split lines in <div>, and an inserted image/embed figure can land
+    // inside one — would otherwise be read as a single paragraph, silently
+    // DROPPING the nested <figure> from BOTH the preview and the publish build.
+    // The live editor still renders the slot, so the photo "shows in the editor
+    // but not the preview." Recurse into such a div so its blocks are parsed in
+    // place. (A managed component div — the poll .cmp-widget — is handled above
+    // and returns before this; an inline-only line has no block child and falls
+    // through to the paragraph path below.)
+    const BLOCK_TAGS = /^(?:figure|image-slot|iframe|video|audio|h1|h2|h3|h4|h5|h6|blockquote|ul|ol|hr|pre|table|p|div)$/;
+    const hasBlockChild = (el) => {
+      for (const c of (el.childNodes || [])) {
+        if (c.nodeType !== 1) continue;
+        if (BLOCK_TAGS.test(c.tagName.toLowerCase())) return true;
+        if (hasBlockChild(c)) return true;
+      }
+      return false;
+    };
+    const emitNode = (node) => {
       if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) blocks.push({ type: "p", tokens: [t] }); return; }
       if (node.nodeType !== 1) return;
       const tag = node.tagName.toLowerCase();
@@ -770,6 +789,13 @@
         const q = node.querySelector(".cmp-widget-b strong");
         const opts = Array.from(node.querySelectorAll(".cmp-widget-b span")).map(s => s.textContent.trim()).filter(Boolean);
         blocks.push({ type: "pull", text: "Poll: " + (q ? q.textContent.trim() : "") + (opts.length ? " — " + opts.join(" / ") : ""), attribution: "readers vote on the published page" });
+        return;
+      }
+      // a bare <div> wrapper around block content (an image/embed figure, a
+      // heading, a quote) — recurse so each block is parsed in place instead of
+      // flattened into one paragraph (which dropped the figure). See BLOCK_TAGS.
+      if (tag === "div" && !(node.classList && node.classList.contains("cmp-widget")) && hasBlockChild(node)) {
+        Array.from(node.childNodes).forEach(emitNode);
         return;
       }
       if (tag === "figure") {
@@ -914,7 +940,8 @@
       }
       const toks = inlineTokens(node);
       if (hasInk(toks)) blocks.push({ type: "p", tokens: toks });
-    });
+    };
+    Array.from(root.childNodes).forEach(emitNode);
 
     /* ---- footnotes: pair inline markers with their notes ----
        The composer drops a <sup data-fn> marker inline and keeps each note in a
@@ -1097,6 +1124,19 @@
   function publishableSource(rec) {
     if (!rec) return rec;
     const W = (typeof window !== "undefined") ? window : {};
+    // OCR rides in the public record only if the author vouches for it. An image
+    // source's recognized text is machine-read and often noisy ("OCR spam");
+    // unless the author turned its reader display on (ocrShow, surfaced through
+    // NpjSourceView.citedPassageVisible), keep that text OUT of the committed
+    // record — it never ships as a verbatim quote, and the picture itself stays
+    // as the receipt. A CLONE, so the live working record is untouched and the
+    // author can still vouch (and republish with the text) later.
+    const SV = W.NpjSourceView;
+    if (SV && SV.citedPassageVisible && !SV.citedPassageVisible(rec) && ((rec.text && rec.text.trim()) || rec.pull_quote)) {
+      rec = Object.assign({}, rec);
+      rec.text = "";
+      if (rec.pull_quote) rec.pull_quote = "";
+    }
     if (W.NpjInterview && W.NpjInterview.redactForPublish) rec = W.NpjInterview.redactForPublish(rec);
     else if (rec.type === "interview") { rec = Object.assign({}, rec); rec.text = ""; }
     const review = rec.piiReview;
@@ -1135,6 +1175,28 @@
     });
     const sources = {};
     Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = publishableSource(window.NPJ.SOURCES[k]); });
+    // OCR is included only if the author vouches for it: for an image source the
+    // author hasn't vouched for, drop its pinned quotes from the body too (the
+    // source projection above already withheld the source's own OCR text), so no
+    // machine-read text rides into the record as a verbatim citation. The claim
+    // still cites the source — the picture is the receipt — just without a quote.
+    const SV = window.NpjSourceView;
+    if (SV && SV.citedPassageVisible) {
+      const hideOcr = {};
+      Object.keys(usedKeys).forEach(k => { const r = window.NPJ.SOURCES[k]; if (r && !SV.citedPassageVisible(r)) hideOcr[k] = 1; });
+      if (Object.keys(hideOcr).length) {
+        const scrubQ = (t) => {
+          if (!t || !t.q) return;
+          Object.keys(t.q).forEach(k => { if (hideOcr[k]) delete t.q[k]; });
+          if (!Object.keys(t.q).length) delete t.q;
+        };
+        blocks.forEach(b => {
+          (b.tokens || []).forEach(scrubQ);
+          (b.items || []).forEach(it => (it || []).forEach(scrubQ));
+          (b.marks || []).forEach(scrubQ);
+        });
+      }
+    }
     const actor = o.actor || null;
     const mxids = (arr) => (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
     // Byline: authors default to the publisher; "Unsigned" is an explicit override

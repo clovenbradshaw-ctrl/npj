@@ -23,7 +23,8 @@ const assert = require("node:assert/strict");
 // it after require is enough.
 const NpjArticles = require("../app/articles.js");
 const NpjPII = require("../app/pii.js");
-global.window = { NpjPII };
+const NpjSourceView = require("../app/source-view.js");
+global.window = { NpjPII, NpjSourceView };
 
 const BLOCK = NpjPII.BLOCK; // █
 
@@ -141,4 +142,32 @@ test("an interview's raw transcript is stripped from the public record", () => {
   const pub = NpjArticles.publishableSource(live);
   assert.equal(pub.text, "", "transcript stripped");
   assert.equal(live.text, "off-record notes naming the whistleblower", "live record untouched");
+});
+
+// ---- OCR is included only if the author vouches for it -----------------------
+// An image source's recognized (OCR) text is machine-read and often noisy. It
+// must NOT ship as a verbatim quote unless the author turned it on (ocrShow),
+// which NpjSourceView.citedPassageVisible reports. The picture is the receipt.
+test("a non-vouched image source ships WITHOUT its OCR text", () => {
+  const live = { id: "img-1", kind: "image", title: "scan.jpg", file_url: "https://store/x.jpg",
+    text: "py oe NR EE DEPARTMENT garbled recognition noise", pull_quote: "garbled" };
+  const before = JSON.stringify(live);
+  const pub = NpjArticles.publishableSource(live);
+  assert.equal(pub.text, "", "the machine-read OCR text is withheld from the public record");
+  assert.equal(pub.pull_quote, "", "and so is an OCR-derived pull quote");
+  assert.equal(JSON.stringify(live), before, "the live working record is untouched (author can still vouch later)");
+});
+
+test("a vouched image source (ocrShow) keeps its OCR text", () => {
+  const live = { id: "img-2", kind: "image", title: "scan.jpg", file_url: "https://store/x.jpg",
+    text: "the author checked this reads true", ocrShow: true };
+  const pub = NpjArticles.publishableSource(live);
+  assert.equal(pub.text, "the author checked this reads true", "a vouched image keeps its recognized text");
+});
+
+test("a web/text source's selectable text always ships (it isn't OCR)", () => {
+  const live = { id: "web-1", type: "data", original_url: "https://example.com/a", text: "real article words" };
+  const pub = NpjArticles.publishableSource(live);
+  assert.equal(pub.text, "real article words");
+  assert.equal(pub, live, "non-image sources pass through untouched");
 });
