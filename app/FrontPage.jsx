@@ -23,6 +23,39 @@ function Placeholder({ label, h = 220, dark = false }) {
   );
 }
 
+/* ---- "From the creators of" credit ---- */
+// The two publications behind NPJ. Sits in the masthead's top-right beside the
+// community taglines and, like them, hides on phones (it rides inside the same
+// .npj-hide-sm cluster). Each logo links out to its Substack. Names sit to the
+// left of a tidy right-aligned column of logos so the lockup reads cleanly
+// whether it's inline with the taglines or wrapped onto its own line below them.
+const NPJ_CREATORS = [
+  { name: "Jesus Urbanist", href: "https://jesusurbanist.substack.com/",
+    img: "https://substackcdn.com/image/fetch/$s_!9pwX!,w_80,h_80,c_fill,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff6a460b9-d19c-4493-8ffc-6f3a72d8f209_650x650.png" },
+  { name: "{Rich Text}", href: "https://readrichtext.substack.com/",
+    img: "https://substackcdn.com/image/fetch/$s_!nVNQ!,w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8722a66c-f873-4b99-ab10-2486beab6bd0_788x788.png" }
+];
+
+function CreatorCredits() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 9 }}>
+      <div className="np-mono" style={{ fontSize: 10.5, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--ink-soft)", whiteSpace: "nowrap" }}>
+        From the creators of
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+        {NPJ_CREATORS.map((c) => (
+          <a key={c.href} className="npj-creator" href={c.href} target="_blank" rel="noopener noreferrer"
+            style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
+            <span className="npj-creator-name" style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15.5, lineHeight: 1, color: "var(--ink)", whiteSpace: "nowrap" }}>{c.name}</span>
+            <img src={c.img} alt={c.name} width="40" height="40" loading="lazy"
+              style={{ width: 40, height: 40, objectFit: "cover", border: "1.5px solid var(--ink)", background: "var(--paper-2)", display: "block", flexShrink: 0 }} />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---- Masthead ---- */
 // `narrow` (front page only) centers the chrome inside the 2/3 shell column so
 // the header lines up with the lineup below it. Every other route leaves it
@@ -47,7 +80,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
             <img className="npj-logo" src="assets/npj-logo-wide.png" alt="Nashville Peoples' Journal" style={{ height: 168, display: "block" }} />
           </button>
           <div style={{ flex: 1 }} />
-          <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", gap: 28 }}>
+          <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", justifyContent: "flex-end", flexWrap: "wrap", gap: 28 }}>
             <div style={{ width: 2.5, background: "var(--ink)" }} />
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 2 }}>
               <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 34, lineHeight: 1.04, textAlign: "right" }}>
@@ -65,6 +98,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
                 <button onClick={onNewsroom} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink)", fontWeight: 600, fontFamily: "var(--mono)", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>⊠ Newsroom log in</button>
               </div>
             </div>
+            <CreatorCredits />
           </div>
         </div>
       </div>

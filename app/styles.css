@@ -57,6 +57,11 @@ body {
 button { font-family: var(--cond); cursor: pointer; }
 a { color: inherit; }
 
+/* masthead "from the creators of" credit — quiet until hovered */
+.npj-creator img { transition: filter .15s ease; }
+.npj-creator:hover .npj-creator-name { text-decoration: underline; text-underline-offset: 2px; }
+.npj-creator:hover img { filter: brightness(0.94); }
+
 /* scrollbars */
 .np-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .np-scroll::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 0; }
