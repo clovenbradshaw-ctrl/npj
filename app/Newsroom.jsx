@@ -2097,7 +2097,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       )}
 
       {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
-      <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px" }}>
+      <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px", gridTemplateRows: isMobile ? undefined : "minmax(0, 1fr)" }}>
         {/* contents / jumplinks */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
           <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
