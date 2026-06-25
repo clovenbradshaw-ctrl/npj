@@ -694,6 +694,7 @@ function ArticleRead(props) {
           <blockquote key={i} style={{ margin: "26px 0", paddingLeft: 20, borderLeft: "4px solid var(--yellow-deep)",
             fontFamily: "var(--cond)", fontWeight: 500, fontSize: 27, lineHeight: 1.18 }}>
             {b.text}
+            {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
             {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
           </blockquote>
         );

@@ -28,7 +28,7 @@
  *
  * body[] uses the exact block shapes ArticleRead renders:
  *   {type:'p', tokens:[ "text" | {c,src[],id} | {t:'strong'|'em'|'s'|'code'|'a'|'sup'|'br', text, href?} ]}
- *   {type:'h2'|'h3', text} · {type:'pull', text, attribution?} · {type:'hr'}
+ *   {type:'h2'|'h3', text} · {type:'pull', text, attribution?, marks?:[{t:'sup',key,num}]} · {type:'hr'}
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
  *   {type:'gallery', images:[{src, store?, caption?, credit?, description?, fit?, crop?}], caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
@@ -151,7 +151,12 @@
     // cloned a trailing marker), not a second reference: DROP it rather than fold it
     // onto the text above, which would footnote that sentence with someone else's note.
     const attached = new Set();
-    src.forEach(b => { if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); }); });
+    src.forEach(b => {
+      if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      // a blockquote can't hold inline tokens, so its footnote rides on `marks` — a
+      // real reference all the same, so its key blocks a later stranded duplicate.
+      if (b && b.type === "pull") (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+    });
     // keep a stranded marker only while its key is still fresh; claiming the key as
     // we go means two strays of one key fold just once, never twice.
     const fresh = (t) => { if (!isFnMarker(t)) return false; if (t.key && attached.has(t.key)) return false; if (t.key) attached.add(t.key); return true; };
@@ -163,6 +168,9 @@
         if (!markers.length) return;   // every marker here duplicates a real reference → drop the stranded paragraph
         const prev = out[out.length - 1];
         if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
+        // a marker stranded under a blockquote belongs to the QUOTE — fold it onto the
+        // pull's `marks` (rendered as a trailing superscript), never onto the next ¶.
+        else if (prev && prev.type === "pull") out[out.length - 1] = Object.assign({}, prev, { marks: (prev.marks || []).concat(markers) });
         else carry = carry.concat(markers);
         return;   // drop the stranded paragraph
       }
@@ -703,7 +711,31 @@
       if (tag === "h2") { if (text) blocks.push({ type: "h2", text }); return; }
       if (tag === "h3") { if (text) blocks.push({ type: "h3", text }); return; }
       if (node.classList && node.classList.contains("nr-dek")) { if (!dek) dek = text; return; }
-      if (tag === "blockquote") { if (text) blocks.push({ type: "pull", text, attribution: "" }); return; }
+      if (tag === "blockquote") {
+        // A footnote can ride the END of a pull-quote. The quote's text is a plain
+        // string (no inline tokens), so lift the marker onto the block as `marks` and
+        // keep `text` clean: it renders as a trailing superscript instead of stranding
+        // on its own line (the marker references the quote, not the paragraph below).
+        const marks = [];
+        const quoteText = (n) => {
+          let s = "";
+          (n.childNodes || []).forEach(c => {
+            if (!c) return;
+            if (c.nodeType === 3) { s += c.nodeValue || ""; return; }
+            if (c.nodeType !== 1) return;
+            if (c.tagName && c.tagName.toLowerCase() === "sup" && c.classList && c.classList.contains("md-cite") && c.hasAttribute && c.hasAttribute("data-fn")) {
+              const fk = (c.getAttribute("data-cite") || c.textContent || "").trim();
+              if (fk) marks.push({ t: "sup", key: fk, text: String(c.textContent || "").trim() });
+              return;   // the marker leaves the quote text — it becomes a `marks` entry
+            }
+            s += quoteText(c);
+          });
+          return s;
+        };
+        const qt = quoteText(node).trim();
+        if (qt) { const pull = { type: "pull", text: qt, attribution: "" }; if (marks.length) pull.marks = marks; blocks.push(pull); }
+        return;
+      }
       if (tag === "ul" || tag === "ol") {
         const items = Array.from(node.querySelectorAll(":scope > li")).map(li => inlineTokens(li)).filter(hasInk);
         if (items.length) blocks.push({ type: tag, items });
@@ -869,7 +901,7 @@
       if (!fnNum[k]) fnNum[k] = ++fnSeq;
       t.key = k; t.num = fnNum[k];
     };
-    kept.forEach(b => { (b.tokens || []).forEach(numberMarker); (b.items || []).forEach(it => it.forEach(numberMarker)); });
+    kept.forEach(b => { (b.tokens || []).forEach(numberMarker); (b.marks || []).forEach(numberMarker); (b.items || []).forEach(it => it.forEach(numberMarker)); });
     // A note is emitted for every REFERENCED key (a bare "[^key]:" with no marker
     // is dropped, like standard markdown); a referenced key with no definition
     // still gets a slot so its number and jump target exist.
@@ -906,7 +938,7 @@
     return (body || []).map((b, bi) => {
       if (b.type === "p") return "<p>" + (tokensToHtml(b.tokens) || "<br/>") + "</p>";
       if (b.type === "h2" || b.type === "h3") return "<" + b.type + ">" + esc(b.text) + "</" + b.type + ">";
-      if (b.type === "pull") return "<blockquote>" + esc(b.text) + "</blockquote>";
+      if (b.type === "pull") return "<blockquote>" + esc(b.text) + tokensToHtml(b.marks || []) + "</blockquote>";
       if (b.type === "ul" || b.type === "ol") return "<" + b.type + ">" + (b.items || []).map(it => "<li>" + tokensToHtml(it) + "</li>").join("") + "</" + b.type + ">";
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";

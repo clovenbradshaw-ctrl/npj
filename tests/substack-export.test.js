@@ -312,6 +312,47 @@ test("two stray clones of one unique key fold just once (never duplicated)", () 
   assert.ok(owner.tokens.some(t => t && t.t === "sup" && t.key === "fnX"), "the surviving reference folded onto the text above");
 });
 
+test("a marker stranded under a blockquote folds onto the QUOTE, not the next paragraph", () => {
+  // a pull-quote's text is a plain string, so a footnote on the quote can't sit
+  // inline — it strands on its own line below the blockquote. Fold it onto the
+  // pull's `marks` (a trailing superscript ON the quote), never onto the start of
+  // the paragraph below (which would footnote the wrong sentence).
+  const body = [
+    { type: "pull", text: "Utilise the cracks, fissures, and inconsistencies.", attribution: "" },
+    { type: "p", tokens: [{ t: "sup", key: "fn21", num: 21, text: "21" }] },   // stranded under the quote
+    { type: "p", tokens: ["A city department inverts the term at its root."] },
+    { type: "footnotes", notes: [{ key: "fn21", num: 21, text: "NDOT correspondence." }] }
+  ];
+  const merged = NS.mergeStrandedFootnotes(body);
+  const pull = merged.find(b => b.type === "pull");
+  assert.ok((pull.marks || []).some(t => t && t.t === "sup" && t.key === "fn21"), "the marker rode onto the quote's marks");
+  const para = merged.find(b => b.type === "p" && b.tokens.some(t => typeof t === "string" && /A city department/.test(t)));
+  assert.ok(!para.tokens.some(t => t && t.t === "sup"), "the paragraph below is NOT footnoted with the quote's note");
+  assert.ok(!merged.some(b => b.type === "p" && (b.tokens || []).length && (b.tokens || []).every(t => t && t.t === "sup")), "no lone-marker paragraph survives");
+
+  const a = { headline: "T", body };
+  const h = NS.toHtml(a, opts);
+  assert.match(h, /inconsistencies\.<sup>21<\/sup><\/p><\/blockquote>/, "HTML: marker sits inside the blockquote at the end of the quote");
+  assert.ok(!/<p><sup>21<\/sup><\/p>/.test(h), "HTML: no lone-marker paragraph");
+  const m = NS.toMarkdown(a, opts);
+  assert.match(m, /inconsistencies\.\[\^fn21\]/, "markdown: the reference rides the quote line");
+  assert.ok(!/^\[\^fn21\]$/m.test(m), "markdown: the reference is never alone on its own line");
+});
+
+test("a blockquote footnote already carried on `marks` exports without stranding (and a duplicate clone is dropped)", () => {
+  const body = [
+    { type: "pull", text: "Utilise the cracks.", attribution: "", marks: [{ t: "sup", key: "fn7", num: 7, text: "7" }] },
+    { type: "p", tokens: [{ t: "sup", key: "fn7", num: 7, text: "7" }] },   // stray clone of the quote's note
+    { type: "footnotes", notes: [{ key: "fn7", num: 7, text: "A note." }] }
+  ];
+  const merged = NS.mergeStrandedFootnotes(body);
+  const allFn7 = merged.flatMap(b => [...(b.marks || []), ...(b.tokens || [])].filter(t => t && t.t === "sup" && t.key === "fn7"));
+  assert.equal(allFn7.length, 1, "exactly one fn7 reference survives — the one on the quote");
+  const h = NS.toHtml({ headline: "T", body }, opts);
+  assert.match(h, /cracks\.<sup>7<\/sup><\/p><\/blockquote>/, "the quote keeps its trailing marker");
+  assert.ok(!/<p><sup>7<\/sup><\/p>/.test(h), "the stray clone leaves no lone-marker paragraph");
+});
+
 /* ---- the evidence: sources as footnotes that open the snapshot on the cited
    words (a Text Fragment, #:~:text=…), showing precisely what backs the claim ---- */
 const EVID_SOURCES = {
