@@ -51,6 +51,22 @@ test("a source pinned to image gains OCR eligibility it wouldn't auto-detect", (
   assert.equal(SV.ocrEnabled(rec), true);
 });
 
+test("citedPassageVisible keeps an image's OCR out of the reader until the author vouches", () => {
+  // web/pdf/text sources carry real, selectable text — their passage always shows
+  assert.equal(SV.citedPassageVisible({ mime: "application/pdf" }), true);
+  assert.equal(SV.citedPassageVisible({ original_url: "https://x/a", text: "real article words" }), true);
+  // an image's pinned words are machine-read (OCR) — hidden in the reader by default…
+  const img = { id: "doc-i", mime: "image/png", file_url: "https://s/p.png" };
+  assert.equal(SV.citedPassageVisible(img), false);
+  img.ocrShow = true;                              // …until the author flips it on
+  assert.equal(SV.citedPassageVisible(img), true);
+  // a scan PINNED to image (no useful mime) is gated the same way
+  const scan = { mime: "application/octet-stream", filename: "scan", file_url: "https://s/scan", kind: "image" };
+  assert.equal(SV.citedPassageVisible(scan), false);
+  scan.ocrShow = true;
+  assert.equal(SV.citedPassageVisible(scan), true);
+});
+
 test("cleanOcrText collapses the whitespace noise OCR leaves behind", () => {
   const raw = "Hello   world  \nThis  is\ta line   \n\n\n\nNext block\f Page two";
   const out = SV.cleanOcrText(raw);

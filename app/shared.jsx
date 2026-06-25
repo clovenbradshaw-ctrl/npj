@@ -388,6 +388,11 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
   // action to open the document full screen — the inline thumbnail is the
   // trigger when it IS shown, so we don't double it up.
   const showViewBtn = canExpand && !showFile;
+  // An image's pinned passage is machine-read (OCR) text — noisy, and not the
+  // verbatim quote it's presented as. Keep it out of the card unless the author
+  // vouched for it (ocrShow); the document itself, shown above or behind "View
+  // document", is the receipt. Web/PDF/text passages show exactly as before.
+  const showCited = !!cited && (!SV || !SV.citedPassageVisible || SV.citedPassageVisible(s));
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -411,7 +416,7 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
         <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
         {showFile && <SourceFilePreview rec={s} onExpand={expand} />}
-        {cited ? (
+        {showCited ? (
           <div style={{ marginBottom: 10 }}>
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 3 }}>The cited passage — in the source</div>
             <div style={{ borderLeft: "3px solid var(--yellow-deep)", paddingLeft: 9, fontStyle: "italic",

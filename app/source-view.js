@@ -121,6 +121,14 @@
   function ocrEligible(rec) { return kindOf(rec) === 'image' && hasFile(rec); }
   function ocrEnabled(rec) { return ocrEligible(rec) && !(rec && rec.ocrOff); }
 
+  // Whether the READER may show this source's pinned passage as a verbatim quote.
+  // An image's pinned words are machine-read (OCR) — noisy, and not something to
+  // present as "the cited passage" unless the author vouches for them by turning
+  // ocrShow on (the SourceAdapter checkbox). The picture itself is the receipt.
+  // Web/PDF/text sources carry real, selectable text, so their passage always
+  // shows. Pure — unit-tested in tests/source-view.test.js.
+  function citedPassageVisible(rec) { return kindOf(rec) !== 'image' || !!(rec && rec.ocrShow); }
+
   /* ---------------- a renderable URL ---------------- */
   // Resolve to something an <img>/<iframe> can load right now. Best-effort —
   // returns the raw url on failure rather than throwing.
@@ -595,7 +603,7 @@
     registerBlob: registerBlob, blobUrl: blobUrl, getBlob: getBlob, hasBlob: hasBlob,
     kindOf: kindOf, detectKind: detectKind, kindPinned: kindPinned, ADAPT_KINDS: ADAPT_KINDS,
     kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
-    ocrEligible: ocrEligible, ocrEnabled: ocrEnabled,
+    ocrEligible: ocrEligible, ocrEnabled: ocrEnabled, citedPassageVisible: citedPassageVisible,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
     ensurePdfLib: ensurePdfLib, extractPdfLayout: extractPdfLayout, pdfLayoutState: pdfLayoutState,
