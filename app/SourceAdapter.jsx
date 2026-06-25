@@ -36,8 +36,10 @@ function SourceAdapter({ rec, api, NR, nCites }) {
   const pinned = SV.kindPinned ? SV.kindPinned(rec) : false;
   const isImage = kind === "image";
   const ocrOff = !!(rec && rec.ocrOff);
+  const ocrShow = !!(rec && rec.ocrShow);
   const canKind = !!api.setSourceKind;
   const canOcr = !!api.setSourceOcr;
+  const canOcrShow = !!api.setSourceOcrShow;
   const KLABEL = { image: "Image", pdf: "PDF", text: "Text", office: "Office doc", unknown: "File" };
 
   const muted = NR.muted, line = NR.line, text = NR.text;
@@ -92,6 +94,22 @@ function SourceAdapter({ rec, api, NR, nCites }) {
           </div>
 
           {nCites > 0 && !ocrOff && <div className="np-mono" style={{ fontSize: 9.5, color: danger, lineHeight: 1.5, marginTop: 6 }}>{nCites} citation{nCites === 1 ? "" : "s"} rest on this source — changing, deleting or turning off the text can unlink a pinned quote (the claim keeps its words; the highlight may stop showing).</div>}
+
+          {/* —— Surface the OCR in the reader? Off by default: the recognized text
+              is machine-read and can read as noise, so the reader's citation card
+              shows the picture (the receipt), not these words — unless the author
+              vouches for them here. —— */}
+          {!ocrOff && cur.trim() && canOcrShow && (
+            <label style={{ display: "flex", alignItems: "flex-start", gap: 7, marginTop: 8, cursor: "pointer" }}
+              title="Off by default — OCR is machine-read and can be noisy. Turn on only once you've checked this text reads true.">
+              <input type="checkbox" checked={ocrShow} onChange={e => api.setSourceOcrShow(key, e.target.checked)}
+                style={{ marginTop: 2, cursor: "pointer", accentColor: "var(--yellow)" }} />
+              <span className="np-mono" style={{ fontSize: 10, color: muted, lineHeight: 1.5 }}>
+                Show this recognized text in the reader’s citation card —{" "}
+                <span style={{ color: ocrShow ? ok : muted }}>{ocrShow ? "on" : "off; the picture itself is the receipt"}</span>.
+              </span>
+            </label>
+          )}
 
           {open && (
             <div style={{ marginTop: 8 }}>

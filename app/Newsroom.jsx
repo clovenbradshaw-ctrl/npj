@@ -2063,6 +2063,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       setRev(v => v + 1); scheduleSave();
       return Promise.resolve(true);
     },
+    // Surface (or hide) an image's recognized (OCR) text as the cited passage in
+    // the reader's citation card. OFF by default — machine-read words are noisy
+    // and stay hidden until the author vouches for them here. Orthogonal to
+    // setSourceOcr (which reads/clears the text itself); this only governs whether
+    // the reader sees it. Persists through the same autosave.
+    setSourceOcrShow: (key, on) => {
+      const rec = window.NPJ.SOURCES[key]; if (!rec) return;
+      if (on) rec.ocrShow = true; else delete rec.ocrShow;
+      setRev(v => v + 1); scheduleSave();
+    },
     // rename a source — its display title across the editor, reader and exports.
     // The citation records and bound spans (keyed by the stable source key) are
     // untouched, so nothing about the grounding changes.
