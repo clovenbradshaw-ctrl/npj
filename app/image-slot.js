@@ -346,6 +346,7 @@
       this._triedAuth = null;
       this._triedAlt = null;
       this._fbDone = false;
+      this._loadFailed = null;   // the src that exhausted every fallback (so _render shows the affordance, not a dead box)
       this._view = { s: 1, x: 0, y: 0 };
       this._subFn = () => this._render();
       // Shadow-DOM listeners live with the shadow DOM — bound once here so
@@ -391,7 +392,7 @@
       // naturalWidth/Height aren't known until load — re-apply so the cover
       // baseline (and the `conform` box ratio) are computed from real
       // dimensions, not the 100%×100% fallback.
-      this._img.addEventListener('load', () => { this._applyView(); this._applyConform(); });
+      this._img.addEventListener('load', () => { this._loadFailed = null; this._applyView(); this._applyConform(); });
       // Load resilience: try the primary src; on error fall back to the
       // `data-alt` URL (e.g. the archive.org copy behind a media-store src),
       // then to a token-fetched blob: URL for an auth-gated homeserver.
@@ -410,6 +411,17 @@
           return;
         }
         this._fbDone = true;
+        // Every source failed. Never leave a silent, blank, un-fixable box: drop
+        // back to the placeholder affordance so the author can drop a new image
+        // (or paste an archive.org link), and say why. The `src` ATTRIBUTE stays
+        // in the light DOM, so the slot still persists and self-heals if the URL
+        // becomes reachable on a later load (a fresh element retries from zero).
+        // Editable slots only — a read-only/published view keeps its prior look.
+        if (cur && this._loadFailed !== cur && this.hasAttribute('data-editable')) {
+          this._loadFailed = cur;
+          this._render();
+          this._setError("That image couldn't be loaded — drop a new one or paste an archive.org link.");
+        }
       });
       // Gated on editable + fit=cover so share links and contain/fill slots
       // stay static.
@@ -989,9 +1001,14 @@
         this._fitbtn.textContent = f.charAt(0).toUpperCase() + f.slice(1);
       }
       this._cap.textContent = this.getAttribute('placeholder') || 'Drop an image';
+      // A url that already exhausted every load fallback is NOT shown as filled —
+      // it would just be a blank box. Treat it as empty so the placeholder
+      // affordance returns; the src attribute is untouched, so a fresh element
+      // (reload) retries it from scratch.
+      const showable = url && this._loadFailed !== url;
       // Toggle via style.display — the [hidden] attribute alone loses to
       // the display:flex / display:block rules in the stylesheet above.
-      if (url) {
+      if (showable) {
         if (this._img.getAttribute('src') !== url) {
           this._triedAlt = this._triedAuth = null; this._fbDone = false;
           this._img.src = url;
