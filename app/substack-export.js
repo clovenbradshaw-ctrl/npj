@@ -205,7 +205,10 @@
   function pushImageMd(out, img) {
     const url = publicUrl(img.src); if (!url) return;
     const cap = cleanCaption(img.caption);
-    out.push("![" + cap + "](" + url + ")", "");
+    // alt text = the photo's description (screen readers + search), caption as
+    // the fallback; the visible italic line below stays the caption.
+    const alt = cleanCaption(img.description) || cap;
+    out.push("![" + alt + "](" + url + ")", "");
     if (cap) out.push("*" + cap + "*", "");
   }
   function blockToMd(out, b, ctx) {
@@ -318,9 +321,13 @@
   function imgHtml(img) {
     const url = publicUrl(img.src); if (!url) return "";
     const cap = cleanCaption(img.caption);
+    // the photo's description is its alt text (screen readers + search); fall
+    // back to the caption when no description was written. The visible figcaption
+    // stays caption + credit.
+    const alt = cleanCaption(img.description) || cap;
     const credit = creditHtml(img.credit);
     const fig = (cap ? esc(cap) : "") + (credit ? (cap ? " — " : "") + "Credit: " + credit : "");
-    return "<figure><img src=\"" + esc(url) + "\" alt=\"" + esc(cap) + "\">" +
+    return "<figure><img src=\"" + esc(url) + "\" alt=\"" + esc(alt) + "\">" +
       (fig ? "<figcaption>" + fig + "</figcaption>" : "") + "</figure>";
   }
   function blockToHtml(b, ctx) {

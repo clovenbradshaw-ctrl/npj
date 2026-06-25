@@ -276,7 +276,7 @@
       status: state.status === "unpublished" ? "unpublished" : "published",
       image: bannerBlock ? {
         src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
-        credit: bannerBlock.credit || "",
+        credit: bannerBlock.credit || "", description: bannerBlock.description || "",
         banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
       } : null,
       // normalize on read too, so a draft already saved with a stranded marker
@@ -684,15 +684,18 @@
         return;
       }
       if (tag === "figure") {
-        // Two caption lines now: the caption (first figcaption) and the photo
-        // credit (.cmp-credit). Selecting :not(.cmp-credit) keeps the caption
-        // right whichever order they sit in, and old single-figcaption drafts
-        // still match. The credit is markdown ([label](url)) like a profile bio,
-        // rendered safely via npjRichText in the reader.
-        const cap = node.querySelector("figcaption:not(.cmp-credit)");
+        // Three caption lines now: the caption (first figcaption), the photo
+        // credit (.cmp-credit) and the description (.cmp-desc, the alt text).
+        // Excluding both classes keeps the caption right whichever order they sit
+        // in, and old single-figcaption drafts still match. The credit is markdown
+        // ([label](url)) like a profile bio, rendered safely via npjRichText in
+        // the reader. The description rides as the image's real `alt`.
+        const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
         const capText = cap ? cap.textContent.trim() : "";
         const credEl = node.querySelector(".cmp-credit");
         const creditText = credEl ? credEl.textContent.trim() : "";
+        const descEl = node.querySelector(".cmp-desc");
+        const descText = descEl ? descEl.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
         const plainImg = node.querySelector("img");
         const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
@@ -708,7 +711,7 @@
         const caption = /^banner(\s*·|\s|$)/i.test(capText) ? "" : capText;
         if (node.hasAttribute("data-eo-img")) {
           const s = plainImg && plainImg.getAttribute("src");
-          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (isBanner) block.banner = true; blocks.push(block); }
+          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (descText) block.description = descText; if (isBanner) block.banner = true; blocks.push(block); }
         } else if (slot) {
           // a slot can carry two URLs (src + data-alt): the archive.org one is
           // the canonical `src`; the media-store one rides as `store` so the
@@ -724,6 +727,7 @@
           if (src) {
             const block = { type: "img", src, caption };
             if (creditText) block.credit = creditText;
+            if (descText) block.description = descText;
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
             // fill mode + crop chosen on the slot ride along so the reader and
@@ -839,12 +843,15 @@
         // than a fixed-height letterbox. The declared height below only acts as
         // the drop target while the slot is empty.
         const conformAttr = ' conform';
-        // caption + credit are editable islands inside the non-editable figure
-        // (the slot itself stays protected). The credit takes markdown links the
-        // same way a contributor bio does — name / [outlet](https://…).
+        // caption + credit + description are editable islands inside the
+        // non-editable figure (the slot itself stays protected). The credit takes
+        // markdown links the same way a contributor bio does — name /
+        // [outlet](https://…). The description is the photo's alt text (screen
+        // readers + search), surfaced as a line here so it round-trips on re-edit.
         const capHtml = '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(b.caption || "") + '</figcaption>';
         const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
-        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + "</figure>";
+        const descHtml = '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px">' + esc(b.description || "") + '</figcaption>';
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + descHtml + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
