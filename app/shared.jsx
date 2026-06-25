@@ -484,4 +484,133 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl });
+/* ---------- published-image components (shared by the front page + reader) ----
+   MediaImg picks the best URL for a published image (archive.org via the proxy
+   first, the media store last) and renders it through CropFrame for a saved
+   crop/fit. These live here, in the always-loaded core, because the front page
+   paints cover photos through window.MediaImg before the article reader's
+   (deferred) bundle has loaded. */
+// Two-source image: try the live Matrix media-store copy first, fall back to
+// the durable archive.org one (then any further candidates). Both URLs ride in
+// the img block — see freezeArticleMedia (app/media-store.js).
+//
+// A media-store URL can't be loaded by a bare <img>: authenticated-media
+// homeservers (Matrix 1.11+) reject an unauthenticated GET, so we resolve it
+// through NpjMedia.resolveDisplay first — that fetches the bytes with the
+// session token and hands back a blob: URL when signed in, or the original URL
+// otherwise. Either way, if the candidate fails to paint, onError advances to
+// the next one (the archive.org copy), so the image always loads from the
+// media store when it can and from archive.org when it can't.
+// A framed, cropped render that reproduces <image-slot>'s cover/contain/fill
+// framing on the read side. The frame takes the author's saved aspect ratio
+// (crop.ar) so the cover pan/zoom (s,x,y) lands exactly where it did in the
+// editor, at any display width. Falls back to a plain object-fit while the
+// natural dimensions aren't known yet. "Contain" is special-cased to hug the
+// image at its natural ratio (see below) rather than letterboxing it.
+function CropFrame({ src, alt, style, fit, crop, onError }) {
+  const [nat, setNat] = useState(null);
+  React.useEffect(() => { setNat(null); }, [src]);
+  const f = fit || "cover";
+
+  // "Contain" means show the WHOLE image. Unless the host pins a fixed height
+  // (a front-page thumbnail does; the article hero/inline images don't), let the
+  // box hug the image at its natural aspect ratio — centered, never wider than
+  // the column — instead of letterboxing it into the editor frame's ratio, which
+  // strands a portrait/odd-ratio photo in a wide box with empty side margins. The
+  // border rides the image itself, so the frame adjusts to the image's size.
+  const fixedH = style && style.height != null && style.height !== "auto" && style.height !== "";
+  if (f === "contain" && !fixedH) {
+    const { width, height, aspectRatio, objectFit, ...rest } = style || {};
+    return (
+      <img src={src} alt={alt || ""} loading="lazy"
+        style={{ ...rest, display: "block", maxWidth: "100%", height: "auto", margin: "0 auto" }}
+        onError={onError} />
+    );
+  }
+
+  const ar = (crop && crop.ar) || (16 / 9);
+  const wrap = { position: "relative", overflow: "hidden", width: "100%", aspectRatio: String(ar), display: "block", ...style };
+  let imgStyle;
+  if (f === "cover" && nat && nat.w && nat.h) {
+    // same geometry as image-slot._applyView, with the frame normalised to
+    // fw=ar, fh=1 (only the ratio matters — left/top/width/height are frame-%).
+    const iw = nat.w, ih = nat.h, s = (crop && crop.s) || 1;
+    const base = Math.max(ar / iw, 1 / ih), k = base * s;
+    imgStyle = {
+      position: "absolute", maxWidth: "none", transform: "translate(-50%,-50%)",
+      width: (iw * k / ar * 100) + "%", height: (ih * k * 100) + "%",
+      left: (50 + ((crop && crop.x) || 0)) + "%", top: (50 + ((crop && crop.y) || 0)) + "%",
+    };
+  } else {
+    imgStyle = { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: f === "fill" ? "fill" : (f === "contain" ? "contain" : "cover") };
+  }
+  return (
+    <div style={wrap}>
+      <img src={src} alt={alt || ""} loading="lazy" style={imgStyle}
+        onLoad={(e) => setNat({ w: e.target.naturalWidth, h: e.target.naturalHeight })}
+        onError={onError} />
+    </div>
+  );
+}
+
+// Ordered URLs to try for a published image. archive.org is the canonical home
+// for published media, and every public page loads it THROUGH the proxy first,
+// so images render even on a network that can't reach archive.org directly
+// (e.g. behind a VPN that blocks it). The direct archive.org URL is the only
+// fallback. The Matrix media-store URL is auth-gated and pins the author's
+// homeserver, so it is NEVER requested on a public page — it rides along only
+// as a last resort for an image that somehow has no archive.org copy at all
+// (publish normally guarantees one), so the slot isn't left blank. De-duped,
+// order preserved.
+function imageCandidates(srcs) {
+  const cdn = window.NpjArchiveCDN;
+  const raw = (srcs || []).filter(Boolean);
+  const archive = [], rest = [];
+  raw.forEach(u => { (cdn && cdn.isMediaUrl && cdn.isMediaUrl(u)) ? archive.push(u) : rest.push(u); });
+  const out = [];
+  archive.forEach(u => {
+    const p = cdn && cdn.proxied && cdn.proxied(u);
+    if (p && p !== u) out.push(p); // proxy first — reaches archive.org for the reader
+    out.push(u);                   // direct archive.org — the fallback
+  });
+  if (!out.length) rest.forEach(u => out.push(u)); // no archive.org copy → media-store, last resort
+  return out.filter((u, i) => u && out.indexOf(u) === i);
+}
+
+function MediaImg({ srcs, alt, style, fit, crop }) {
+  const list = imageCandidates(srcs);
+  const [i, setI] = useState(0);
+  const [resolved, setResolved] = useState(null);
+  const idx = Math.min(i, Math.max(0, list.length - 1));
+  const cur = list[idx];
+  React.useEffect(() => {
+    let alive = true, made = null;
+    setResolved(null);
+    if (!cur) return;
+    const isStore = window.NpjMedia && window.NpjMedia.isStoreUrl(cur);
+    if (isStore && window.NpjMedia.resolveDisplay) {
+      window.NpjMedia.resolveDisplay(cur).then(u => {
+        if (!alive) { if (u && u !== cur && u.indexOf("blob:") === 0) URL.revokeObjectURL(u); return; }
+        if (u && u !== cur && u.indexOf("blob:") === 0) made = u;
+        setResolved(u || cur);
+      }).catch(() => { if (alive) setResolved(cur); });
+    } else {
+      setResolved(cur);
+    }
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [cur]);
+  if (!list.length) return null;
+  // while an authenticated store fetch is in flight, hold a neutral placeholder
+  // rather than flashing a doomed unauthenticated <img> request
+  if (resolved == null) return <div style={{ ...style, background: "var(--paper-2)" }} aria-hidden="true" />;
+  const onError = () => setI(n => (n < list.length - 1 ? n + 1 : n));
+  // a saved crop (or a non-cover fit) renders through CropFrame — aspect-locked
+  // for cover/fill, hugged to the image's natural ratio for contain
+  if ((crop && crop.ar) || fit === "contain" || fit === "fill") {
+    return <CropFrame src={resolved} alt={alt} style={style} fit={fit} crop={crop} onError={onError} />;
+  }
+  return <img src={resolved} alt={alt || ""} loading="lazy" style={style} onError={onError} />;
+}
+
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
+  MediaImg, CropFrame, imageCandidates });
