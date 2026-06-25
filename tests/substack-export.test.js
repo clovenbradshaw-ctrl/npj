@@ -120,6 +120,87 @@ test("omitTitle drops the title/subtitle block (Substack's own fields) but keeps
   assert.match(m, /## What changed/, "body still present");
 });
 
+/* ---- plain text: the words, no markup (the clean reading copy) ---- */
+const txt = (o) => NS.toPlainText(ARTICLE, Object.assign({}, opts, o));
+
+test("plain text carries the title, subtitle, byline, headings and body — with no markdown furniture", () => {
+  const t = txt();
+  assert.match(t, /^LOCAL$/m);                 // kicker, uppercased
+  assert.match(t, /^City passes budget$/m);    // headline, no leading #
+  assert.match(t, /^After a long debate\.$/m); // dek, no surrounding *
+  assert.match(t, /By Jane Doe/);
+  assert.match(t, /2026-06-20/);
+  assert.match(t, /^What changed$/m);          // heading text on its own line
+  assert.match(t, /The council met\. The budget passed 7-2\./);
+  assert.ok(!/^#/m.test(t), "no heading hashes");
+  assert.ok(!/\]\(http/.test(t), "no markdown links");
+  assert.ok(!/!\[/.test(t), "no image embeds");
+});
+
+test("plain text keeps each sourced claim's number as a bracketed marker, in first-appearance order", () => {
+  const t = txt();
+  assert.match(t, /The budget passed 7-2\.\[1\]/);
+  assert.match(t, /Parks got more money\.\[2\]/);
+});
+
+test("plain text citations toggle off drops the [n] markers but keeps the words", () => {
+  const t = txt({ citations: false });
+  assert.ok(!/\[1\]/.test(t), "no inline markers anywhere");
+  assert.match(t, /The budget passed 7-2\./);  // the claim text itself stays
+});
+
+test("an owned claim ({c, stance}) is plain prose in plain text — no [n] marker, no Sources entry", () => {
+  const owned = {
+    ...ARTICLE, image: null,
+    body: [{ type: "p", tokens: ["The mayor ", { c: "was evasive", stance: "analysis", id: "o1" }, " all night."] }]
+  };
+  const t = NS.toPlainText(owned, opts);
+  assert.match(t, /The mayor was evasive all night\./, "owned text rides as plain prose");
+  assert.ok(!/was evasive\[/.test(t), "no bracketed marker on an owned claim");
+  assert.ok(!/SOURCES/.test(t), "nothing added to a Sources section");
+});
+
+test("the plain-text Sources list is numbered, labelled outlet — title, with the snapshot URL and archived date", () => {
+  const t = txt();
+  assert.match(t, /^SOURCES$/m);
+  assert.match(t, /^1\. Reuters — City budget passes$/m);
+  assert.match(t, /^ {3}https:\/\/web\.archive\.org\/web\/2026\/https:\/\/reuters\.com\/x$/m);
+  assert.match(t, /^ {3}archived 2026-06-01$/m);
+  assert.match(t, /^2\. Gov data — Q2 filings$/m);
+  assert.match(t, /^ {3}https:\/\/example\.gov\/q2$/m);
+});
+
+test("toggling the Sources list off removes the section from plain text", () => {
+  assert.ok(!/SOURCES/.test(txt({ sourcesList: false })));
+});
+
+test("omitTitle drops the title block from plain text but keeps the body", () => {
+  const t = txt({ omitTitle: true });
+  assert.ok(!/^City passes budget$/m.test(t), "no headline");
+  assert.match(t, /^What changed$/m, "body still present");
+});
+
+test("lists, pull quotes, embeds and code serialize as plain lines (no markup)", () => {
+  const t = txt();
+  assert.match(t, /^• Roads funded$/m);
+  assert.match(t, /^• Parks got more money\.\[2\]$/m);
+  assert.match(t, /^A historic vote\.$/m);     // quote text, no leading >
+  assert.match(t, /^— Mayor$/m);
+  assert.match(t, /^https:\/\/youtube\.com\/watch\?v=abc$/m);
+  assert.match(t, /^let x = 1;$/m);            // code, no fences
+  assert.ok(!/```/.test(t), "no code fences");
+});
+
+test("plain text renders footnote markers as [n] inline and lists the notes by number", () => {
+  const a = { headline: "T", body: [
+    { type: "p", tokens: ["A fact", { t: "sup", key: "fn1", num: 1, text: "1" }, " holds."] },
+    { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "See the report." }] }
+  ] };
+  const t = NS.toPlainText(a, opts);
+  assert.match(t, /A fact\[1\] holds\./);
+  assert.match(t, /^\[1\] See the report\.$/m);
+});
+
 test("HTML output is paste-ready: real tags, image figure, sup links and a Sources ol", () => {
   const h = html();
   assert.match(h, /<h1>City passes budget<\/h1>/);

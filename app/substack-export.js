@@ -307,6 +307,97 @@
   }
 
   // ====================================================================
+  //  PLAIN TEXT  (a clean reading copy — the words, no markup)
+  // ====================================================================
+  // The same article as markdown, but stripped of every mark: links collapse to
+  // their words, bold/italic/code lose their syntax, images drop to their
+  // captions. A sourced claim keeps its number as a bracketed marker ([1]) so the
+  // plain copy still points at the Sources list the way the markdown's superscript
+  // link does — dropped when citations are toggled off.
+  function citeMarksTxt(tok, ctx) {
+    if (!ctx.citations || !tok.src || !tok.src.length) return "";
+    return tok.src.map(k => { const num = ctx.numByKey.get(k); return num ? "[" + num + "]" : ""; }).join("");
+  }
+  function tokensToText(tokens, ctx) {
+    return (tokens || []).map(t => {
+      if (typeof t === "string") return t;
+      if (t.t === "br") return "\n";
+      if (t.t === "sup") return "[" + (t.num != null ? t.num : t.text) + "]"; // footnote marker → [n]
+      if (t.t) return t.text || "";                  // strong/em/s/code/link → just the words
+      if (t.c != null) {                             // a source-bound claim
+        const marks = citeMarksTxt(t, ctx);
+        if (!marks) return t.c;
+        const tail = (t.c.match(/\s*$/) || [""])[0]; // keep the claim's trailing space outside the marker
+        return t.c.slice(0, t.c.length - tail.length) + marks + tail;
+      }
+      return t.text || "";
+    }).join("");
+  }
+  function blockToText(out, b, ctx) {
+    switch (b.type) {
+      case "h2":
+      case "h3": if ((b.text || "").trim()) out.push(b.text.trim(), ""); break;
+      case "pull":
+        out.push(String(b.text || "").trim() + tokensToText(b.marks || [], ctx).trim());
+        if (b.attribution) out.push("— " + b.attribution);
+        out.push("");
+        break;
+      case "ul": (b.items || []).forEach(it => out.push("• " + tokensToText(it, ctx).trim())); out.push(""); break;
+      case "ol": (b.items || []).forEach((it, i) => out.push((i + 1) + ". " + tokensToText(it, ctx).trim())); out.push(""); break;
+      case "hr": out.push("———", ""); break;
+      case "footnotes": (b.notes || []).forEach(n => { const x = String(n.text || "").trim(); if (x) out.push("[" + (n.num != null ? n.num : n.key) + "] " + x); }); out.push(""); break;
+      case "code": out.push(String(b.text || "").replace(/\n+$/, ""), ""); break;
+      case "verse": out.push(String(b.text || "").replace(/\n+$/, ""), ""); break;
+      case "img": { const cap = cleanCaption(b.caption); if (!b.banner && cap) out.push(cap, ""); break; } // banner caption rides the hero
+      case "gallery":
+        (b.images || []).forEach(im => { const c = cleanCaption(im && im.caption); if (c) out.push(c); });
+        { const gc = cleanCaption(b.caption); if (gc) out.push(gc); }
+        out.push("");
+        break;
+      case "embed": if (b.url) { out.push(b.url); const c = cleanCaption(b.caption); if (c) out.push(c); out.push(""); } break;
+      default: { const t = tokensToText(b.tokens, ctx).trim(); if (t) out.push(t, ""); } // "p" and anything carrying tokens
+    }
+  }
+
+  function toPlainText(article, opts) {
+    opts = opts || {};
+    const A = article || {};
+    const body = mergeStrandedFootnotes(A.body);
+    const sources = sourcesFor(opts);
+    const { numByKey, ordered } = indexSources(body, sources);
+    const ctx = { citations: opts.citations !== false, numByKey, sources };
+    const out = [];
+
+    if (!opts.omitTitle) {
+      if (A.kicker) out.push(String(A.kicker).toUpperCase(), "");
+      if (A.headline) out.push(A.headline, "");
+      if (A.dek) out.push(A.dek, "");
+      const by = bylineText(A), date = dateText(A);
+      const meta = [by ? "By " + by : "", date].filter(Boolean).join(" · ");
+      if (meta) out.push(meta, "");
+    }
+
+    const hero = heroImage(A);
+    if (hero) { const c = cleanCaption(hero.caption); if (c) out.push(c, ""); }
+
+    body.forEach(b => blockToText(out, b, ctx));
+
+    if (opts.sourcesList !== false && ordered.length) {
+      out.push("———", "", "SOURCES", "");
+      ordered.forEach(({ num, src, quotes }) => {
+        const label = [src.outlet, src.title].filter(Boolean).join(" — ") || src.id || ("Source " + num);
+        out.push(num + ". " + label);
+        const url = srcUrl(src); if (url) out.push("   " + url);
+        if (src.retrieved) out.push("   archived " + src.retrieved);
+        quotes.forEach(q => out.push("   - “" + q + "”"));
+      });
+      out.push("");
+    }
+
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+  }
+
+  // ====================================================================
   //  HTML  (the clipboard / paste-into-Substack path)
   // ====================================================================
   function citeMarksHtml(tok, ctx) {
@@ -569,10 +660,14 @@
     return saveBlob(toMarkdown(article, opts), filename(article, "md"), "text/markdown;charset=utf-8");
   }
 
+  function downloadText(article, opts) {
+    return saveBlob(toPlainText(article, opts), filename(article, "txt"), "text/plain;charset=utf-8");
+  }
+
   // The "copies perfectly" file: a self-contained page you open and copy from.
   function downloadHtml(article, opts) {
     return saveBlob(toHtmlDocument(article, opts), filename(article, "html"), "text/html;charset=utf-8");
   }
 
-  return { toMarkdown, toHtml, toHtmlDocument, filename, indexSources, mergeStrandedFootnotes, heroImage, evidenceUrl, textFragment, copyForSubstack, download, downloadHtml };
+  return { toMarkdown, toPlainText, toHtml, toHtmlDocument, filename, indexSources, mergeStrandedFootnotes, heroImage, evidenceUrl, textFragment, copyForSubstack, download, downloadText, downloadHtml };
 });
