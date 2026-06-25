@@ -356,6 +356,11 @@ function ArticleRead(props) {
   const leaveTimer = useRef(null);
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
+  // the Sources footer is a section too — list it at the foot of Contents so a
+  // reader can jump straight to the receipts (#article-sources anchors the footer).
+  const tocItems = sourceList.length
+    ? [...headings, { id: "article-sources", text: "Sources", level: 2 }]
+    : headings;
   // scrollIntoView walks to the element's actual scroll container — the window
   // in the live read, but the fixed overlay in Preview — so it moves the page
   // the reader is looking at, not whatever's behind it. The headings carry
@@ -804,11 +809,11 @@ function ArticleRead(props) {
               background: "none", border: 0, cursor: "pointer", padding: "12px 14px" }}>
             <span aria-hidden="true" style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>{tocOpen ? "▾" : "▸"}</span>
             <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Contents</span>
-            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{headings.length}</span>
+            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{tocItems.length}</span>
           </button>
           {tocOpen && (
             <div id="article-toc-list" style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 14px 12px" }}>
-              {headings.map(h => <button key={h.id} onClick={() => { jump(h.id); setTocOpen(false); }} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
+              {tocItems.map(h => <button key={h.id} onClick={() => { jump(h.id); setTocOpen(false); }} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
             </div>
           )}
         </nav>
@@ -1112,7 +1117,7 @@ function SourcesFooter({ sourceList, spansForSource, onJump, onOpen }) {
   const hint = (isPhone ? "tap any to view full-size" : "click any to view full-size")
     + (many && !isPhone ? " · then ← → to move between them" : "");
   return (
-    <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
+    <footer id="article-sources" style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18, scrollMarginTop: 90 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 14 }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>SOURCES</h3>
         <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{sourceList.length} source{many ? "s" : ""} · {hint}</span>
