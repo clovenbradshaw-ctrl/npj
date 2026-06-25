@@ -175,14 +175,10 @@
       dropSection: (e, sec) => {
         if (!dragId || dragId === sec.id) return;
         e.preventDefault(); e.stopPropagation();
-        const parent = sec.parentSlotId == null ? null : sec.parentSlotId;
-        const sibs = parent == null ? lib.topRefs(state).filter(r => r.kind === "section").map(r => r.id)
-          : lib.childRefs(state, parent).map(s => s.id);
-        let idx = sibs.indexOf(sec.id); if (idx < 0) idx = sibs.length;
-        if ((hint && hint.edge) === "after") idx += 1;
-        const from = sibs.indexOf(dragId);
-        if (from > -1 && from < idx) idx -= 1; // account for the dragged row leaving
-        api.moveSection(dragId, parent, idx);
+        // same drop math the in-document block drag uses (app/structure.js) — the
+        // rail and the page can never disagree about where a section lands.
+        const m = lib.sectionDropIndex(state, dragId, sec.id, (hint && hint.edge) || "before");
+        if (m) api.moveSection(dragId, m.parentSlotId, m.index);
         clear();
       },
       overSlot: (e, slot) => { if (!dragId) return; e.preventDefault(); setHint({ kind: "slot", id: slot.id }); },
