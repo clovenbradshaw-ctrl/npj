@@ -681,6 +681,25 @@
     }
     const hasInk = (toks) => toks.some(t => typeof t === "string" ? t.trim() : true);
 
+    // A raw <iframe>/<video>/<audio> — pasted into the HTML source view, or in a
+    // figure that lost its data-embed-url — becomes an embed block keyed by its
+    // src. The resolver re-derives the player on render, so the src is all we
+    // store; a panel embed (Drive/Docs/archive) also keeps its pixel height.
+    const embedFromMediaEl = (el) => {
+      if (!el) return null;
+      let src = el.getAttribute("src") || "";
+      if (!src) { const s0 = el.querySelector && el.querySelector("source[src]"); if (s0) src = s0.getAttribute("src") || ""; }
+      if (!/^https?:\/\//.test(src)) return null;
+      const eb = { type: "embed", url: src };
+      const r = window.NpjEmbed && window.NpjEmbed.resolve(src);
+      if (r && r.panel) {
+        const sh = (el.getAttribute("style") || "").match(/height:\s*(\d+)/i);
+        const h = sh ? parseInt(sh[1], 10) : parseInt(el.getAttribute("height") || "0", 10);
+        if (h > 0) eb.height = h;
+      }
+      return eb;
+    };
+
     const blocks = [];
     const fnRegionDefs = {};   // key → note text, read from the structured "Footnotes" list
     let headline = "", dek = "";
@@ -777,7 +796,10 @@
         // in, and old single-figcaption drafts still match. The credit is markdown
         // ([label](url)) like a profile bio, rendered safely via npjRichText in
         // the reader. The description rides as the image's real `alt`.
-        const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
+        // .cmp-embed-hint is the composer's editor-only label on an embed figure
+        // ("host · embedded — …"); it's an affordance, not a caption, so it never
+        // rides into the published block.
+        const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc):not(.cmp-embed-hint)");
         const capText = cap ? cap.textContent.trim() : "";
         const credEl = node.querySelector(".cmp-credit");
         const creditText = credEl ? credEl.textContent.trim() : "";
@@ -836,8 +858,27 @@
           }
         }
         const u = node.getAttribute("data-embed-url");
-        if (u) blocks.push({ type: "embed", url: u, caption: capText });
+        if (u) {
+          const eb = { type: "embed", url: u, caption: capText };
+          const eh = parseInt(node.getAttribute("data-embed-height"), 10);
+          if (eh > 0) eb.height = eh;
+          blocks.push(eb);
+        } else if (!slot && !plainImg) {
+          // a figure pasted straight in (no data-embed-url) — lift the embed from
+          // the <iframe>/<video>/<audio> it wraps
+          const eb = embedFromMediaEl(node.querySelector("iframe, video, audio"));
+          if (eb) { if (capText) eb.caption = capText; blocks.push(eb); }
+        }
         return;
+      }
+      // a bare embed pasted as raw HTML — an <iframe>/<video>/<audio> at block
+      // level, or alone inside a <p>/<div> — survives into the record as an embed
+      if (tag === "iframe" || tag === "video" || tag === "audio") {
+        const eb = embedFromMediaEl(node); if (eb) blocks.push(eb); return;
+      }
+      if ((tag === "p" || tag === "div") && !text) {
+        const eb = embedFromMediaEl(node.querySelector("iframe, video, audio"));
+        if (eb) { blocks.push(eb); return; }
       }
       const toks = inlineTokens(node);
       if (hasInk(toks)) blocks.push({ type: "p", tokens: toks });
@@ -976,7 +1017,15 @@
         const galCap = '<figcaption class="cmp-carousel-cap np-mono" contenteditable="true" data-ph="Gallery caption (optional)" style="font-size:11px;margin-top:6px">' + esc(b.caption || "") + '</figcaption>';
         return '<figure contenteditable="false" class="cmp-embed cmp-carousel" data-carousel="1"><div class="cmp-carousel-track">' + slides + '</div>' + addBtn + galCap + "</figure>";
       }
-      if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+      // rebuild the live player from the stored URL (same resolver the composer
+      // and reader use), so re-opening a published piece to edit shows the embed
+      // rather than a bare link. data-embed-url stays the original permalink and
+      // data-embed-height carries the author's panel height back through.
+      if (b.type === "embed") {
+        const eInner = window.NpjEmbed ? window.NpjEmbed.innerHtml(b.url, { height: b.height }) : '<a href="' + esc(b.url) + '">' + esc(b.url) + "</a>";
+        const eh = b.height ? ' data-embed-height="' + esc(b.height) + '"' : "";
+        return '<figure data-embed-url="' + esc(b.url) + '"' + eh + ' contenteditable="false" class="cmp-embed">' + eInner + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+      }
       return "";
     }).join("\n");
   }

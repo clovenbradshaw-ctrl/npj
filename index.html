@@ -112,6 +112,10 @@
 <!-- the six kinds of void (asserted absence), one taxonomy shared by the editor,
      the publish fold and the reader's lens (window.NpjVoidKinds) -->
 <script src="app/void-kinds.js"></script>
+<!-- url → embeddable player (YouTube/Vimeo/Google Drive/Docs/archive.org/media);
+     shared by the composer, the edit surface and the reader. Load before
+     articles.js, whose blocksToHtml rebuilds embeds through it. -->
+<script src="app/embed.js"></script>
 <!-- the published record: per-document folders of timestamped version files
      (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
 <script src="app/articles.js"></script>
