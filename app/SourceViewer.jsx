@@ -266,6 +266,25 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     );
   }
 
+  // a web source (snapshot/link) we hold no file or extracted text for — the
+  // "office doc" copy below is wrong for a URL. Offer the snapshot + original to
+  // read; that's the honest preview until its words are pulled in.
+  if ((rec.original_url || rec.archive_url) && !rec.file_url) {
+    return (
+      <div style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink)", padding: "20px 16px", textAlign: "center" }}>
+        <I.link style={{ fontSize: 28, color: "var(--ink-soft)" }} />
+        <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, marginTop: 8 }}>{rec.title || rec.outlet || "Web page"}</div>
+        <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.55, maxWidth: 380, marginLeft: "auto", marginRight: "auto" }}>
+          A web page — no text is stored here yet. Open the {rec.archive_url ? "captured snapshot" : "page"} to read it, then pin the exact passage you're citing.
+        </div>
+        <div style={{ display: "inline-flex", gap: 10, marginTop: 12, flexWrap: "wrap", justifyContent: "center" }}>
+          {rec.archive_url && <a href={rec.archive_url} target="_blank" rel="noopener" className="btn btn-sm btn-primary" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><I.ext style={{ fontSize: 12 }} /> Open snapshot</a>}
+          {rec.original_url && <a href={rec.original_url} target="_blank" rel="noopener" className={"btn btn-sm" + (rec.archive_url ? "" : " btn-primary")} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}><I.ext style={{ fontSize: 12 }} /> Open original</a>}
+        </div>
+      </div>
+    );
+  }
+
   // office / unknown — no faithful in-browser preview without a converter
   return (
     <div style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink)", padding: "20px 16px", textAlign: "center" }}>
