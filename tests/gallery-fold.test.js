@@ -157,6 +157,62 @@ test("blocksToHtml emits an editable carousel figure with one slot per image", (
   assert.match(html, /cmp-carousel-add/);
 });
 
+// ---- bare-<div> wrappers (contentEditable artifacts) ----------------------
+// The browser wraps pasted runs / Enter-split lines in a bare <div>, and an
+// inserted image or embed <figure> can land inside one. htmlToBlocks walks only
+// the editor's top-level children, so a figure nested in a <div> used to be
+// flattened into a paragraph and DROPPED — from the preview AND the publish
+// build — even though the live editor still rendered the slot ("shows in the
+// editor but not the preview"). The fold must recurse into such a div.
+function divWrap(kids) { return E("div", {}, kids); }
+function inlineImageFigure(attrs, cap) {
+  return E("figure", { class: "cmp-embed" }, [
+    E("image-slot", attrs, []),
+    E("figcaption", { class: "cmp-cap np-mono" }, cap ? [cap] : []),
+  ]);
+}
+
+test("an image figure wrapped in a bare <div> still folds to an img block", () => {
+  const blocks = fold([divWrap([
+    inlineImageFigure({ id: "img-1", src: ARCH_A }, "A caption"),
+    E("p", {}, ["trailing prose"]),
+  ])]);
+  const img = blocks.find((b) => b.type === "img");
+  assert.ok(img, "the div-wrapped image survives the fold");
+  assert.equal(img.src, ARCH_A);
+  assert.equal(img.caption, "A caption");
+  // the sibling paragraph inside the div is promoted too, not swallowed
+  assert.ok(blocks.some((b) => b.type === "p" && b.tokens.join("") === "trailing prose"));
+});
+
+test("a deeply nested image figure (div > div > figure) still folds", () => {
+  const blocks = fold([divWrap([divWrap([inlineImageFigure({ id: "img-2", src: ARCH_B })])])]);
+  assert.equal(blocks.filter((b) => b.type === "img").length, 1, "nested wrappers are unwrapped to reach the figure");
+  assert.equal(blocks.find((b) => b.type === "img").src, ARCH_B);
+});
+
+test("multiple figures + prose in one <div> all survive, in order", () => {
+  const blocks = fold([divWrap([
+    inlineImageFigure({ id: "a", src: ARCH_A }),
+    E("p", {}, ["between"]),
+    inlineImageFigure({ id: "b", src: ARCH_B }),
+  ])]);
+  const seq = blocks.map((b) => b.type === "img" ? "img:" + b.src.slice(-6) : b.type).join(",");
+  assert.equal(seq, "img:a.webp,p,img:b.webp", "both images and the middle paragraph fold in document order");
+});
+
+test("an inline-only <div> is NOT recursed — it stays one paragraph", () => {
+  // a div with no block child is an ordinary line; recursing it would shatter the
+  // run into per-node paragraphs. It must fold to a single paragraph, as before.
+  const blocks = fold([E("div", {}, [
+    E("span", { class: "claim-src", "data-src": "k" }, ["A sourced run "]),
+    E("sup", { class: "md-cite", "data-cite": "k" }, ["1"]),
+    " and more.",
+  ])]);
+  const ps = blocks.filter((b) => b.type === "p");
+  assert.equal(ps.length, 1, "one paragraph, not one-per-child");
+});
+
 test("round-trip: serialize a gallery, parse the same shape back, images survive", () => {
   const original = {
     type: "gallery",
