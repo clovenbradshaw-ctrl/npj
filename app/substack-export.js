@@ -124,7 +124,12 @@
     // cloned a trailing marker), not a second reference: DROP it rather than fold it
     // onto the text above, which would footnote that sentence with someone else's note.
     const attached = new Set();
-    src.forEach(b => { if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); }); });
+    src.forEach(b => {
+      if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      // a blockquote can't hold inline tokens, so its footnote rides on `marks` — a
+      // real reference all the same, so its key blocks a later stranded duplicate.
+      if (b && b.type === "pull") (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+    });
     // keep a stranded marker only while its key is still fresh; claiming the key as
     // we go means two strays of one key fold just once, never twice.
     const fresh = (t) => { if (!isFnMarker(t)) return false; if (t.key && attached.has(t.key)) return false; if (t.key) attached.add(t.key); return true; };
@@ -136,6 +141,9 @@
         if (!markers.length) return;   // every marker here duplicates a real reference → drop the stranded paragraph
         const prev = out[out.length - 1];
         if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
+        // a marker stranded under a blockquote belongs to the QUOTE — fold it onto the
+        // pull's `marks` (rendered as a trailing superscript), never onto the next ¶.
+        else if (prev && prev.type === "pull") out[out.length - 1] = Object.assign({}, prev, { marks: (prev.marks || []).concat(markers) });
         else carry = carry.concat(markers);
         return;   // drop the stranded paragraph
       }
@@ -227,7 +235,8 @@
       case "h2": if ((b.text || "").trim()) out.push("## " + b.text.trim(), ""); break;
       case "h3": if ((b.text || "").trim()) out.push("### " + b.text.trim(), ""); break;
       case "pull": {
-        out.push("> " + String(b.text || "").trim().replace(/\n/g, "\n> "));
+        // a footnote on the quote rides as a trailing reference on the last line
+        out.push("> " + String(b.text || "").trim().replace(/\n/g, "\n> ") + tokensToMd(b.marks || [], ctx));
         if (b.attribution) out.push(">", "> — " + b.attribution);
         out.push("");
         break;
@@ -350,7 +359,7 @@
       case "h2": return (b.text || "").trim() ? "<h2>" + esc(b.text.trim()) + "</h2>" : "";
       case "h3": return (b.text || "").trim() ? "<h3>" + esc(b.text.trim()) + "</h3>" : "";
       case "pull": {
-        let q = "<blockquote><p>" + esc(String(b.text || "").trim()) + "</p>";
+        let q = "<blockquote><p>" + esc(String(b.text || "").trim()) + tokensToHtml(b.marks || [], ctx) + "</p>";
         if (b.attribution) q += "<p>— " + esc(b.attribution) + "</p>";
         return q + "</blockquote>";
       }

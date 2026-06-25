@@ -111,3 +111,49 @@ test("an unsourced claim-src wrapper stays transparent (folds to plain prose)", 
   const toks = foldParagraph([claimSrc({ "data-cid": "c" }, "Just some wrapped words.")]);
   assert.deepEqual(toks, ["Just some wrapped words."]);
 });
+
+// fold a whole tree of top-level nodes (not just one paragraph) → the blocks
+function foldBlocks(nodes) {
+  const root = { childNodes: nodes, set innerHTML(_) {} };
+  const saved = global.document;
+  global.document = { createElement: () => root };
+  try { return A.htmlToBlocks("<x>ignored — the shim feeds the real tree</x>").blocks; }
+  finally { global.document = saved; }
+}
+const fnCite = (label, key) => enode("sup", { class: "md-cite", "data-fn": "1", "data-cite": key }, [tnode(label)]);
+
+test("a footnote at the END of a blockquote rides on the pull's `marks`, not the quote text", () => {
+  // the marker references the QUOTE; the pull's text is a plain string, so it can't
+  // hold the marker inline — keep `text` clean and carry the marker on `marks` so it
+  // renders as a trailing superscript instead of gluing a digit onto the quote.
+  const blocks = foldBlocks([
+    enode("blockquote", {}, [tnode("Utilise the cracks."), fnCite("21", "fn21")]),
+    enode("p", {}, [tnode("A city department inverts the term.")]),
+  ]);
+  const pull = blocks.find((b) => b.type === "pull");
+  assert.equal(pull.text, "Utilise the cracks.", "the quote text carries no marker digit");
+  assert.ok((pull.marks || []).some((t) => t.t === "sup" && t.key === "fn21"), "the marker is on the quote's marks");
+  assert.ok(blocks.some((b) => b.type === "footnotes" && b.notes.some((n) => n.key === "fn21")), "a Notes entry is created for the quote's footnote");
+});
+
+test("a blockquote footnote round-trips through blocksToHtml (idempotent, marker stays in the quote)", () => {
+  const blocks = foldBlocks([enode("blockquote", {}, [tnode("Utilise the cracks."), fnCite("21", "fn21")])]);
+  const pull = blocks.find((b) => b.type === "pull");
+  const html = A.blocksToHtml([pull]);
+  assert.match(html, /^<blockquote>Utilise the cracks\.<sup class="md-cite"[^>]*data-cite="fn21"[^>]*>\d+<\/sup><\/blockquote>$/, "the marker re-emits inside the blockquote, editable");
+});
+
+test("a marker stranded in a <p> below a blockquote folds onto the quote, leaving no lone line", () => {
+  // an older draft saved before the marker was tucked into the quote: <blockquote/>
+  // then <p><sup/></p>. It must fold onto the pull above, not the paragraph below.
+  const blocks = foldBlocks([
+    enode("blockquote", {}, [tnode("Utilise the cracks.")]),
+    enode("p", {}, [fnCite("21", "fn21")]),
+    enode("p", {}, [tnode("A city department inverts the term.")]),
+  ]);
+  const pull = blocks.find((b) => b.type === "pull");
+  assert.ok((pull.marks || []).some((t) => t.t === "sup" && t.key === "fn21"), "the stranded marker folded onto the quote");
+  const para = blocks.find((b) => b.type === "p" && b.tokens.some((t) => typeof t === "string" && /A city department/.test(t)));
+  assert.ok(!para.tokens.some((t) => t && t.t === "sup"), "the paragraph below is not footnoted with the quote's note");
+  assert.ok(!blocks.some((b) => b.type === "p" && b.tokens.length && b.tokens.every((t) => t && t.t === "sup")), "no lone-marker paragraph survives");
+});
