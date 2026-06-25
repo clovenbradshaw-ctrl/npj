@@ -1548,6 +1548,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       setRev(v => v + 1);
       scheduleSave();   // pasted / PDF-extracted source text sticks to the draft
     },
+    // Replace or clear a source's recognized/extracted text — fix or delete OCR
+    // that came out wrong on an uploaded photo. Unlike seedSourceText this
+    // OVERWRITES. Offsets into the old text may stop slicing clean, but the reader
+    // re-finds a quote by content and each bound claim keeps its own data-quote, so
+    // a citation is never silently dropped — its highlight just stops showing if the
+    // words are gone. Persists through the same autosave.
+    setSourceText: (key, text) => {
+      const rec = window.NPJ.SOURCES[key]; if (!rec) return;
+      rec.text = String(text || "");
+      setRev(v => v + 1); scheduleSave();
+    },
     // rename a source — its display title across the editor, reader and exports.
     // The citation records and bound spans (keyed by the stable source key) are
     // untouched, so nothing about the grounding changes.
