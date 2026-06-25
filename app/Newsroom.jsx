@@ -1470,9 +1470,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     },
     // re-open the picker for an already-bound span
     repin: (span) => { if (span) openPin(span.getAttribute("data-cid"), (span.getAttribute("data-src") || "").split(/\s+/)[0], (span.textContent || "").trim()); },
-    own: (row, stance) => {
+    own: (row, stance, note) => {
       const span = rowSpanFor(row, null, true); if (!span) return;
-      window.__npjGround.own(span, stance);
+      window.__npjGround.own(span, stance, note);
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },

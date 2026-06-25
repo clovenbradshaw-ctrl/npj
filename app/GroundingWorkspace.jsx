@@ -26,8 +26,8 @@
 
 (() => {
 const VIEWS = [["prose", "Prose"], ["grounding", "Grounding"], ["citations", "Citations"], ["sources", "Sources"]];
-const STANCE_GLYPH = { voice: "⊩", testimony: "⊨", analysis: "⊢", context: "⊪" };
-const STANCE_LABEL = { voice: "Your voice", testimony: "Your account", analysis: "Your analysis", context: "In context" };
+const STANCE_GLYPH = { voice: "⊩", testimony: "⊨", analysis: "⊢", context: "⊪", absence: "∅" };
+const STANCE_LABEL = { voice: "Your voice", testimony: "Your account", analysis: "Your analysis", context: "In context", absence: "A documented void" };
 const STANCE_OPTS = [["voice", "Argue — your voice ⊩"], ["testimony", "Assert — your account ⊨"], ["analysis", "Infer — your analysis ⊢"], ["context", "Continue — in context ⊪"]];
 const DOT = { grounded: "#1F9E76", multi: "#6ea8d8", owned: "#7C74DE", needs: "#D8632E", conflict: "#D8412C" };
 const CONTEXT_TEAL = "#2E8B86";
@@ -38,6 +38,7 @@ function pillFor(st) {
   if (st.key === "multi") return { glyph: "⊨", label: st.nSrc + " sources", fg: "#3a63c4", bg: "#e8eefb" };
   if (st.key === "grounded") return { glyph: "⊤", label: "Grounded", fg: "#1f8a55", bg: "#e7f4ec" };
   if (st.key === "owned" && st.stance === "context") return { glyph: "⊪", label: "In context", fg: "#1f7d78", bg: "#e6f4f3" };
+  if (st.key === "owned" && st.stance === "absence") return { glyph: "∅", label: "A documented void", fg: "#8a6a1f", bg: "#f3ecda" };
   if (st.key === "owned") return { glyph: STANCE_GLYPH[st.stance] || "⊩", label: STANCE_LABEL[st.stance] || "Your voice", fg: "#6b5bd6", bg: "#efeafc" };
   return { glyph: "⊥", label: "Needs source", fg: "#b5701b", bg: "#fbf1e3" };
 }
@@ -52,7 +53,7 @@ function statusOf(row) {
     (window.NpjCitations ? window.NpjCitations.contextKeys(s) : []).forEach(k => { ctx[k] = 1; });
     let v = { state: "falsum" };
     try { v = Brain.citeyStateForSpan({ el: s }); } catch (e) {}
-    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context") stance = s.getAttribute("data-stance") || "analysis";
+    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context" || v.state === "absence") stance = s.getAttribute("data-stance") || "analysis";
     else if (v.state === "verum" || v.state === "entails") String(v.srcKey || s.getAttribute("data-src") || "").split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; });
     else if (v.state === "negation") conflict = true;
     else needs = true;
@@ -324,13 +325,16 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     afterResolve(row.sid); bump();
   };
   const detach = (span, citeId) => { api.detach(span, citeId); bump(); };
-  const setStance = (row, st, stance) => {
+  const setStance = (row, st, stance, note) => {
     if (!stance) { (st.spans || []).filter(s => s.getAttribute("data-stance")).forEach(s => api.unown(s)); }
-    else { api.own(row, stance); afterResolve(row.sid); }
+    else { api.own(row, stance, note); afterResolve(row.sid); }
     bump();
   };
 
   // ---- the cite modal: the claim + the document, hero ----
+  const [citeMode, setCiteMode] = useState("source"); // source | own | void — the three ways to ground a claim
+  const [voidNote, setVoidNote] = useState("");        // the documented search behind an asserted absence
+  const [reuseOpen, setReuseOpen] = useState(false);   // the "reuse a pinned quote" drawer (collapsed by default)
   const srcText = (key) => String((api.sourceRec(key) || {}).text || "");
   const openCite = (sid, srcKey) => {
     const e = bySid[sid]; if (!e) return;
@@ -347,7 +351,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     }
     setModal({ sid }); setSelSid(sid);
     if (best) setSelSrc(best);
-    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery("");
+    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery(""); setCiteMode("source"); setReuseOpen(false); setVoidNote("");
   };
   const closeCite = () => { setModal(null); setPending(null); setArmIdx(0); setBrowseQuery(""); };
 
@@ -1264,6 +1268,11 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
               <option value="">{selRow.st.key === "owned" ? "— clear stance —" : "Own as…"}</option>
               {STANCE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
+            <button onClick={() => { openCite(selRow.row.sid); setCiteMode("void"); }} className="np-cond"
+              style={chipBtn({ marginTop: 7, borderColor: "#8a6a1f", color: "#8a6a1f", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 })}
+              title="Ground this in a documented absence — you looked and the record is silent">
+              ∅ Cite a void — no record exists
+            </button>
           </React.Fragment>)}
           {selRow.st.key === "conflict" && (
             <div className="np-mono" style={{ fontSize: 10, color: "#b3261e", lineHeight: 1.5, marginTop: 7 }}>Two pinned quotes disagree — unlink the one you trust less.</div>
@@ -1409,40 +1418,82 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", borderBottom: "1px solid " + NR.line }}>
           {drawCitey("turnstile", 34, { wave: true })}
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: NR.text }}>Find what supports this claim</div>
+            <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: NR.text }}>Ground this claim</div>
             <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 13, color: NR.soft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{"“" + armedRow.text + "”"}</div>
           </div>
           <button onClick={closeCite} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
+        {/* three ways to ground a claim — pick one; the busywork lives behind the choice */}
+        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line }}>
+          {[["source", "📎 From a source", "Point to the exact words in a source that back this up"],
+            ["own", "✍️ It’s mine", "Argue, assert or infer it — honestly labelled, no source needed"],
+            ["void", "∅ A void", "Cite an absence — you looked and the record is silent"]].map(([m, label, desc]) => (
+            <button key={m} onClick={() => setCiteMode(m)} title={desc}
+              style={{ flex: 1, border: 0, borderRight: m !== "void" ? "1px solid " + NR.line : 0, borderBottom: citeMode === m ? "2px solid var(--yellow)" : "2px solid transparent", background: citeMode === m ? NR.field : "transparent", color: citeMode === m ? NR.text : NR.soft, cursor: "pointer", padding: "9px 8px", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13 }}>{label}</button>
+          ))}
+        </div>
         <div className="np-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px" }}>
-          {allC.length > 0 && (<React.Fragment>
-            <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>Reuse a citation you've already pinned — search the registry, best matches first</div>
-            <div style={{ marginBottom: 14 }}><AttachBrowser row={armedRow} /></div>
-          </React.Fragment>)}
-          <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>{allC.length > 0 ? "…or grab fresh words from a source" : "Go into a source and grab the spans that support it"}</div>
-          {srcList.length === 0
-            ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources ingested yet — add one in the rail (Prose view), then come back.</div>
+          {citeMode === "source" && (srcList.length === 0
+            ? <div className="np-mono" style={{ fontSize: 11, color: NR.muted, lineHeight: 1.6 }}>No sources added yet — add one in the Sources rail (Prose view), then come back. Or ground this as <button onClick={() => setCiteMode("own")} style={{ border: 0, background: "none", color: "#6b5bd6", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>your own</button> or a <button onClick={() => setCiteMode("void")} style={{ border: 0, background: "none", color: "#8a6a1f", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>void</button>.</div>
             : (<React.Fragment>
-              {srcTabs}
-              {searchRow("Search this document — find the part that supports the claim…")}
-              {readerBody(srcRefModal, false)}
-              {hitNav}
-              {armHits.length === 0 && srcText(selSrc).trim() && (
-                <div className="np-mono" style={{ fontSize: 10, color: NR.soft, lineHeight: 1.45, marginTop: 7 }}>
-                  No strong scent in this source — read it; if the support isn't here, try another source or own the claim.
-                </div>
-              )}
-              {pendingBar}
-              {!pendSpans.length && (
-                <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5, marginTop: 8 }}>
-                  Not the document — the part of the document. Read it and select the exact words; if the claim rests on two parts, select them one after another.
-                </div>
-              )}
-            </React.Fragment>)}
+                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Open the source and <strong style={{ color: NR.text }}>select the exact words</strong> that support the claim — that becomes the citation. Support in two places? Grab them one after another.</div>
+                {srcTabs}
+                {searchRow("Search this source for the supporting words…")}
+                {readerBody(srcRefModal, false)}
+                {hitNav}
+                {armHits.length === 0 && srcText(selSrc).trim() && (
+                  <div className="np-mono" style={{ fontSize: 10, color: NR.soft, lineHeight: 1.45, marginTop: 7 }}>
+                    No obvious match in this source — read it; if the support isn’t here, try another source, or ground it as your own / a void.
+                  </div>
+                )}
+                {pendingBar}
+                {allC.length > 0 && (
+                  <div style={{ marginTop: 12, borderTop: "1px dashed " + NR.line, paddingTop: 10 }}>
+                    <button onClick={() => setReuseOpen(o => !o)} className="np-cond" style={chipBtn({ fontWeight: 700 })}>
+                      {reuseOpen ? "▾ Hide pinned quotes" : "↺ Reuse a quote you’ve already pinned"}
+                    </button>
+                    {reuseOpen && <div style={{ marginTop: 8 }}><AttachBrowser row={armedRow} /></div>}
+                  </div>
+                )}
+              </React.Fragment>))}
+
+          {citeMode === "own" && (<React.Fragment>
+            <div className="np-mono" style={{ fontSize: 11, color: NR.soft, lineHeight: 1.55, marginBottom: 10 }}>This claim is <strong style={{ color: NR.text }}>yours</strong> — not taken from a source. Say what kind, and it publishes openly labelled as such.</div>
+            {[["testimony", "⊨ Assert — your account", "You witnessed this first-hand. You are the source."],
+              ["voice", "⊩ Argue — your voice", "Your stated position or argument — not presented as fact."],
+              ["analysis", "⊢ Infer — your analysis", "Your reasoning — it follows from facts you’ve already grounded."],
+              ["context", "⊪ In context", "Continuing coverage — the article itself substantiates it, set against prior reporting."]].map(([v, label, desc]) => (
+              <button key={v} onClick={() => { setStance(armedRow, statusOf(armedRow), v); closeCite(); }}
+                style={{ display: "block", width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: NR.field, color: NR.text, cursor: "pointer", padding: "9px 12px", marginBottom: 7 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14 }}>{label}</div>
+                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginTop: 3 }}>{desc}</div>
+              </button>
+            ))}
+          </React.Fragment>)}
+
+          {citeMode === "void" && (<React.Fragment>
+            <div style={{ display: "flex", gap: 11, alignItems: "flex-start", marginBottom: 12 }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 30, color: "#8a6a1f", lineHeight: 1, flex: "0 0 auto" }}>∅</span>
+              <div className="np-mono" style={{ fontSize: 11, color: NR.soft, lineHeight: 1.6 }}>
+                Some claims rest on an <strong style={{ color: NR.text }}>absence</strong> — “no permit was ever filed,” “the city never responded,” “it appears nowhere else.” There’s no source to pin, so instead you <strong style={{ color: NR.text }}>document the search</strong>: where you looked, and that it came up empty. That note publishes with the claim as its grounding.
+              </div>
+            </div>
+            <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Where did you look, and what wasn’t there?</div>
+            <textarea value={voidNote} onChange={e => setVoidNote(e.target.value)} autoFocus
+              placeholder="e.g. Searched Metro public records, the Banner and the Tennessean (2024–2026) — found no permit, filing or notice for the removal."
+              style={{ width: "100%", boxSizing: "border-box", minHeight: 96, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
+            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 5 }}>Be specific — naming where you searched is what makes a documented absence trustworthy. It reads in the published piece; the words of the claim stay exactly as written.</div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+              <button onClick={() => { const n = voidNote.trim(); if (!n) return; setStance(armedRow, statusOf(armedRow), "absence", n); closeCite(); }} disabled={!voidNote.trim()} className="np-cond"
+                style={{ border: "1.5px solid var(--ink)", background: voidNote.trim() ? "var(--yellow)" : "transparent", color: voidNote.trim() ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: voidNote.trim() ? "pointer" : "not-allowed", opacity: voidNote.trim() ? 1 : .55 }}>∅ Cite this void</button>
+            </div>
+          </React.Fragment>)}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderTop: "1px solid " + NR.line }}>
-          <span className="np-mono" style={{ flex: 1, fontSize: 9, color: NR.muted, lineHeight: 1.4 }}>
-            Citing the spans mints a reusable record — the exact supporting words + their offsets. Esc clears staged spans, then exits.
+          <span className="np-mono" style={{ flex: 1, fontSize: 9.5, color: NR.muted, lineHeight: 1.4 }}>
+            {citeMode === "source" ? "Select the supporting words in the source, then press Cite. Esc clears a staged span, then exits."
+              : citeMode === "own" ? "Owning a claim labels it honestly — the publish gate won’t ask it for a source."
+              : "A documented void grounds a negative claim with the search behind it — no source required."}
           </span>
           <button onClick={closeCite} style={chipBtn()}>Cancel</button>
         </div>
