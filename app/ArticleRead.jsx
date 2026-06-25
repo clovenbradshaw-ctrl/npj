@@ -662,15 +662,25 @@ function ArticleRead(props) {
   });
 
   // Images run wider than the text column — a 15% even bleed into the margins on
-  // either side, the same treatment the Newsroom canvas previews (styles.css
-  // `.nr-page figure.cmp-embed`) — so a photo carries more presence than the
-  // prose measure and the published page matches what the editor saw. Held to the
-  // column on a phone (no room to bleed) and in audit mode (the source rails claim
-  // those margins). Embeds (video / link cards) keep the text width.
+  // either side — so a photo carries more presence than the prose measure. This is
+  // a READER treatment only: the prose editor keeps images at the column width
+  // (styles.css drops the old `.nr-page` bleed). Held to the column on a phone (no
+  // room to bleed) and in audit mode (the source rails claim those margins).
+  // Embeds (video / link cards) keep the text width.
   const wideMedia = !audit && !isPhone;
   const wideFig = (top, bottom) => wideMedia
     ? { marginTop: top, marginBottom: bottom, marginLeft: "-7.5%", marginRight: "-7.5%", width: "115%" }
     : { marginTop: top, marginBottom: bottom };
+  // The topmost image is the WIDEST — a bigger bleed than the inline 15%, centered
+  // on the column (margin-left 50% + translateX) and clamped between the inline
+  // width and a viewport-bounded max, so it always reads widest yet never spills
+  // past the screen edge. With a banner that's the hero (lifted above); without one
+  // it's the first inline image (topInlineImgIdx).
+  const heroFig = (top, bottom) => wideMedia
+    ? { marginTop: top, marginBottom: bottom, width: "min(132%, max(115%, calc(100vw - 24px)))", marginLeft: "50%", transform: "translateX(-50%)" }
+    : { marginTop: top, marginBottom: bottom };
+  const hasHero = !!((A.image && A.image.src && A.image.banner) || (A.body || []).some(b => b.type === "img" && b.banner));
+  const topInlineImgIdx = hasHero ? -1 : (A.body || []).findIndex(b => b.type === "img");
 
   const Body = (
     <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
@@ -690,7 +700,7 @@ function ArticleRead(props) {
         if (b.type === "img") {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
-            <figure key={i} style={wideFig(26, 26)}>
+            <figure key={i} style={(!b.banner && i === topInlineImgIdx) ? heroFig(26, 26) : wideFig(26, 26)}>
               <ZoomImg image={b} alt={b.description || b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               {b.local ? <NotUploadedNote /> : null}
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
@@ -760,7 +770,7 @@ function ArticleRead(props) {
     ? A.image
     : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
-    <figure style={wideFig(4, 24)}>
+    <figure style={heroFig(4, 24)}>
       <ZoomImg image={heroImg} alt={heroImg.description || heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       {heroImg.local ? <NotUploadedNote /> : null}
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
