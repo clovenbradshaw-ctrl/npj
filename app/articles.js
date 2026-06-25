@@ -853,16 +853,44 @@
 
   /* ---------------- publish + edit (through the same n8n webhook) ---------------- */
   // The publication-safe projection of a source record before it enters the
-  // public, committed log. For an INTERVIEW (a conversation with a named or
-  // anonymous source) the reporter's raw notes (rec.text) are private — only the
-  // exact words PINNED as citations belong in the public record, and those ride
-  // on the body tokens, not here. So we strip the transcript. Every other source
-  // type passes through unchanged. Defensive: works even if NpjInterview is the
-  // single source of truth for the rule, with a local fallback if it's absent.
+  // public, committed log — permanent, all-or-nothing, undeletable. Two jobs:
+  //
+  //   • INTERVIEW: the reporter's raw notes (rec.text) are private — only the
+  //     exact words PINNED as citations belong in the public record, and those
+  //     ride on the body tokens, not here. So the transcript is stripped.
+  //
+  //   • HARD-REDACTED SOURCE: a source the author scrubbed PII from (Citey's
+  //     review, app/pii.js) has to reach the archive REDACTED FOR REAL. The █
+  //     scrub already lives in rec.text — but the ORIGINAL file's own bytes were
+  //     never redacted, only its text shadow was, so every pointer back to that
+  //     un-redacted original (file_url / mxc / original_url / archive_url) is
+  //     DROPPED here. Leaving any one of them would put the withheld data a single
+  //     click away inside the published piece. The text is re-asserted from the
+  //     recorded ranges (offset-preserving █, idempotent) so the public copy is
+  //     redacted even if the live in-place scrub was somehow lost — over-redacting
+  //     is the safe direction; under-redacting leaks. What survives is the
+  //     redacted text plus a content-free audit stub (counts, not the offsets or
+  //     identities behind them).
+  //
+  // Every other source passes through unchanged. Non-mutating: an interview or
+  // redacted projection is cloned, so the live working record (still openable in
+  // the newsroom) is never altered.
   function publishableSource(rec) {
     if (!rec) return rec;
-    if (window.NpjInterview && window.NpjInterview.redactForPublish) return window.NpjInterview.redactForPublish(rec);
-    if (rec.type === "interview") { const o = Object.assign({}, rec); o.text = ""; return o; }
+    const W = (typeof window !== "undefined") ? window : {};
+    if (W.NpjInterview && W.NpjInterview.redactForPublish) rec = W.NpjInterview.redactForPublish(rec);
+    else if (rec.type === "interview") { rec = Object.assign({}, rec); rec.text = ""; }
+    const review = rec.piiReview;
+    const redactions = (review && review.redactions) || [];
+    if (redactions.length) {
+      const o = Object.assign({}, rec);
+      if (W.NpjPII && W.NpjPII.redactText) o.text = W.NpjPII.redactText(o.text || "", redactions);
+      o.file_url = ""; o.mxc = ""; o.original_url = ""; o.archive_url = "";
+      o.redacted = true;
+      o.piiReview = { state: review.state || "reviewed", basis: review.basis || (W.NpjPII && W.NpjPII.BASIS) || "",
+        redactions: redactions.length, affirmations: ((review.affirmations) || []).length };
+      return o;
+    }
     return rec;
   }
 

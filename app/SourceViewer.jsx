@@ -194,6 +194,19 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
   // draft) — though a text source we already read words out of still renders
   const textOnly = kind === "text" && String(rec.text || "").trim();
   if (!SV || (!SV.hasFile(rec) && !textOnly)) {
+    // A source that was hard-redacted before archiving deliberately carries no
+    // original — its un-redacted bytes are withheld from the published record, on
+    // purpose. Say so, rather than implying a file is merely missing.
+    if (rec.redacted) {
+      return (
+        <div style={{ border: frameless ? 0 : "1px solid var(--review)", background: "var(--paper)", color: "var(--ink)", padding: "18px 16px", textAlign: "center" }}>
+          <I.shield style={{ fontSize: 26, color: "var(--review)" }} />
+          <div className="np-mono" style={{ fontSize: 11, marginTop: 8, lineHeight: 1.55, color: "var(--ink-soft)", maxWidth: 360, marginLeft: "auto", marginRight: "auto" }}>
+            Original withheld. This source was redacted before archiving — only the cited, scrubbed passages are in the public record.
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{ border: frameless ? 0 : "1px dashed var(--rule-strong)", background: "var(--paper)", color: "var(--ink-soft)", padding: "18px 16px", textAlign: "center" }}>
         <I.doc style={{ fontSize: 26 }} />

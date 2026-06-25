@@ -2832,22 +2832,29 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const words = text ? text.split(/\s+/).length : 0;
     const cites = Array.from(root.querySelectorAll("sup.md-cite[data-cite]")).filter(n => !n.hasAttribute("data-fn"));
     const missing = [];
+    const usedKeys = [];   // the source keys the piece actually CITES, in first-seen order
     let unpinned = 0;
     cites.forEach(n => {
       const k = n.getAttribute("data-cite");
+      if (k && usedKeys.indexOf(k) < 0) usedKeys.push(k);
       const rec = window.NPJ.SOURCES[k];
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
       // every bound span must point at the exact words in the source, not just
       // the page — a span with no pinned quote fails the build
       if (!(n.getAttribute("data-quote") || "").trim()) unpinned++;
     });
-    const archived = (sources || []).filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
+    // Only CITED sources ride in the committed record and get archived to
+    // archive.org — an uploaded-but-unused source is never pushed (it stays
+    // private). Mirrors genesisFromContent's usedKeys, so the gate's "X of Y
+    // archived" counts exactly the sources that actually ship.
+    const usedSources = (sources || []).filter(s => usedKeys.indexOf(s.key) >= 0);
+    const archived = usedSources.filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
     // images still on the media store get moved onto archive.org at publish
     const onStore = Array.from(root.querySelectorAll("figure image-slot")).filter(slot => {
       const s = slot.getAttribute("src");
       return s && window.NpjMedia && window.NpjMedia.isStoreUrl(s);
     }).length;
-    return { content: c, dek, words, spans: cites.length, missing, unpinned, srcTotal: (sources || []).length, archived, mediaToFreeze: onStore };
+    return { content: c, dek, words, spans: cites.length, missing, unpinned, usedKeys, srcTotal: usedSources.length, archived, mediaToFreeze: onStore };
   }, []);
 
   const [phase, setPhase] = useState("confirm");          // confirm | run
@@ -2969,7 +2976,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // back to their original URL in the .md — a warning, not a wall.
     upd(2, { state: "active", detail: "checking the wayback machine…" });
     let archivedNow = 0;
-    await Promise.all((sources || []).map(async s => {
+    // Only the sources the piece cites get archived — never an uploaded-but-unused
+    // one (it stays private, off archive.org). Same set genesisFromContent ships.
+    const usedSources = (sources || []).filter(s => flight.usedKeys.indexOf(s.key) >= 0);
+    await Promise.all(usedSources.map(async s => {
       const rec = window.NPJ.SOURCES[s.key] || {};
       if (rec.archive_url) { archivedNow++; return; }
       if (!rec.original_url) return;
