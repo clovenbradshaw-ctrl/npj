@@ -153,7 +153,7 @@
 .npj-pe-stage{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;
   padding:16px;background:repeating-conic-gradient(#1d1a13 0% 25%,#161309 0% 50%) 50%/22px 22px}
 .npj-pe-canvas{position:relative;line-height:0;touch-action:none;user-select:none;overflow:hidden;flex:0 0 auto}
-.npj-pe-canvas img{display:block;-webkit-user-drag:none;user-select:none;max-width:none}
+.npj-pe-canvas img{display:block;width:100%;height:100%;-webkit-user-drag:none;user-select:none;max-width:none}
 .npj-pe-crop{position:absolute;box-sizing:border-box;border:1.5px solid #fff;
   box-shadow:0 0 0 9999px rgba(0,0,0,.55);cursor:move}
 .npj-pe-canvas.mode-redact .npj-pe-crop{pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.32)}
