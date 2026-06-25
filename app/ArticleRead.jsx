@@ -651,6 +651,17 @@ function ArticleRead(props) {
     );
   });
 
+  // Images run wider than the text column — a 15% even bleed into the margins on
+  // either side, the same treatment the Newsroom canvas previews (styles.css
+  // `.nr-page figure.cmp-embed`) — so a photo carries more presence than the
+  // prose measure and the published page matches what the editor saw. Held to the
+  // column on a phone (no room to bleed) and in audit mode (the source rails claim
+  // those margins). Embeds (video / link cards) keep the text width.
+  const wideMedia = !audit && !isPhone;
+  const wideFig = (top, bottom) => wideMedia
+    ? { marginTop: top, marginBottom: bottom, marginLeft: "-7.5%", marginRight: "-7.5%", width: "115%" }
+    : { marginTop: top, marginBottom: bottom };
+
   const Body = (
     <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
       onMouseUp={() => setTimeout(refreshBubble, 0)} onKeyUp={(e) => { if (e.shiftKey || e.key === "Shift") setTimeout(refreshBubble, 0); }}>
@@ -669,7 +680,7 @@ function ArticleRead(props) {
         if (b.type === "img") {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
-            <figure key={i} style={{ margin: "26px 0" }}>
+            <figure key={i} style={wideFig(26, 26)}>
               <MediaImg srcs={[b.store, b.src]} alt={b.description || b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               {b.local ? <NotUploadedNote /> : null}
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
@@ -734,7 +745,7 @@ function ArticleRead(props) {
     ? A.image
     : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
-    <figure style={{ margin: "4px 0 24px" }}>
+    <figure style={wideFig(4, 24)}>
       <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.description || heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       {heroImg.local ? <NotUploadedNote /> : null}
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
