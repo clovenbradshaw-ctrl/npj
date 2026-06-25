@@ -178,6 +178,30 @@
     return _pdfPromise;
   }
 
+  /* ---------------- pdf-lib (lazy, from the CDN) ----------------
+     The WRITER half of the PDF story: pdf.js renders, pdf-lib assembles. Loaded
+     only when a redacted PDF is actually built (buildRedactedPdf). UMD bundle,
+     attaches window.PDFLib — same script-tag style as pdf.js / tesseract. */
+  var PDFLIB_VER = '1.17.1';
+  var PDFLIB_SRC = 'https://unpkg.com/pdf-lib@' + PDFLIB_VER + '/dist/pdf-lib.min.js';
+  var _pdfLibPromise = null;
+  function ensurePdfLib() {
+    if (root.PDFLib) return Promise.resolve(root.PDFLib);
+    if (_pdfLibPromise) return _pdfLibPromise;
+    _pdfLibPromise = new Promise(function (resolve, reject) {
+      var s = doc.createElement('script');
+      s.src = PDFLIB_SRC;
+      s.async = true;
+      s.onload = function () {
+        if (root.PDFLib) resolve(root.PDFLib);
+        else { _pdfLibPromise = null; reject(new Error('The PDF writer failed to initialise.')); }
+      };
+      s.onerror = function () { _pdfLibPromise = null; reject(new Error('Could not load the PDF writer (offline?).')); };
+      doc.head.appendChild(s);
+    });
+    return _pdfLibPromise;
+  }
+
   // key -> { state:'extracting'|'done'|'error', text, error }
   var _pdfText = {};
   function pdfTextState(rec) { return _pdfText[recKey(rec)] || { state: 'idle' }; }
@@ -212,6 +236,202 @@
     _pdfText[key] = { state: 'extracting', text: '', _p: p };
     try { return await p; }
     catch (e) { _pdfText[key] = { state: 'error', error: (e && e.message) || 'extraction failed' }; throw e; }
+  }
+
+  /* ---------------- pdf layout: text + where each run sits ----------------
+     extractPdfText gives the WORDS; a redaction expressed against those words
+     (Citey's review records {start,end} offsets) has to become BLACK BOXES burned
+     onto the page, and a box drawn on the page has to scrub the matching words out
+     of the text shadow too. Both need the same thing: the geometry of every text
+     run, tied to its offset in the extracted text. That's the layout.
+
+     The layout's `text` is the SAME string the offsets index into — the review
+     seeds rec.text from here — so geometry and offsets can never desync. Boxes are
+     stored NORMALIZED to each page (0..1 of width/height at scale 1), so they're
+     resolution-independent: the builder can rasterize at any scale and the page
+     viewer can overlay them with plain percentages. */
+
+  // Pure: assemble { text, items, pages } from per-page items. Exported for tests
+  // (no DOM). `pages`: [{ page, width, height, items:[{ str, x, y, w, h }] }] with
+  // x/y/w/h already normalized to that page. Each emitted item carries the [start,
+  // end) offset of its text in the joined string.
+  function buildLayout(pages) {
+    var text = '', items = [], dims = [];
+    (pages || []).forEach(function (pg, pi) {
+      dims.push({ page: pg.page, width: pg.width, height: pg.height });
+      if (pi > 0) text += '\n\n';
+      var first = true;
+      (pg.items || []).forEach(function (it) {
+        var s = String(it && it.str || '');
+        if (!s) return;
+        if (!first) text += ' ';
+        first = false;
+        var start = text.length;
+        text += s;
+        items.push({ page: pg.page, start: start, end: text.length, x: it.x, y: it.y, w: it.w, h: it.h });
+      });
+    });
+    return { text: text, items: items, pages: dims };
+  }
+
+  // Pure: drop duplicate boxes (same page + rounded rect) so overlapping ranges
+  // that map onto the same run don't burn the same black box twice.
+  function dedupeBoxes(boxes) {
+    var seen = {}, out = [];
+    (boxes || []).forEach(function (b) {
+      if (!b) return;
+      var k = b.page + ':' + Math.round(b.x * 1e4) + ':' + Math.round(b.y * 1e4) + ':' + Math.round(b.w * 1e4) + ':' + Math.round(b.h * 1e4);
+      if (seen[k]) return; seen[k] = 1; out.push(b);
+    });
+    return out;
+  }
+
+  // Pure: text ranges (offsets into layout.text) → the page boxes that cover them.
+  // A range that touches any part of a run redacts that whole run's box — over-
+  // covering is the safe direction, exactly like the text scrub.
+  function rangesToBoxes(items, ranges) {
+    var out = [];
+    (ranges || []).forEach(function (r) {
+      if (!r || !(r.end > r.start)) return;
+      (items || []).forEach(function (it) {
+        if (it.start < r.end && r.start < it.end) out.push({ page: it.page, x: it.x, y: it.y, w: it.w, h: it.h });
+      });
+    });
+    return dedupeBoxes(out);
+  }
+
+  // Pure: a page box → the text ranges of every run it overlaps, so a box drawn on
+  // the page also scrubs those words from the text shadow (and counts toward the
+  // gate). A box over a picture/signature with no text under it maps to nothing.
+  function boxesToRanges(items, boxes) {
+    var out = [];
+    (boxes || []).forEach(function (b) {
+      if (!b) return;
+      (items || []).forEach(function (it) {
+        if (it.page !== b.page) return;
+        if (it.x < b.x + b.w && b.x < it.x + it.w && it.y < b.y + b.h && b.y < it.y + it.h)
+          out.push({ start: it.start, end: it.end });
+      });
+    });
+    return out;
+  }
+
+  // key -> { state:'extracting'|'done'|'error', layout, error }
+  var _pdfLayout = {};
+  function pdfLayoutState(rec) { return _pdfLayout[recKey(rec)] || { state: 'idle' }; }
+
+  // Extract a PDF's layout (text + per-run geometry). Cached per source key, and
+  // keeps extractPdfText's cache in sync so a caller that only wants words agrees
+  // with the redaction map. Does NOT mutate the record. Scanned (image-only) pages
+  // contribute no runs — the page viewer still lets the author draw boxes on them.
+  async function extractPdfLayout(rec, opts) {
+    var key = recKey(rec);
+    var cached = _pdfLayout[key];
+    if (cached && cached.state === 'done') return cached.layout;
+    if (cached && cached.state === 'extracting' && cached._p) return cached._p;
+    var p = (async function () {
+      var lib = await ensurePdfJs();
+      var blob = await bytesFor(rec);
+      if (!blob) throw new Error('Could not read the file — sign in again, or re-upload it.');
+      var buf = await blob.arrayBuffer();
+      var pdf = await lib.getDocument({ data: buf }).promise;
+      var nPages = pdf.numPages;
+      var max = Math.min(nPages, (opts && opts.maxPages) || 300);
+      var pages = [];
+      for (var i = 1; i <= max; i++) {
+        var page = await pdf.getPage(i);
+        var vp = page.getViewport({ scale: 1 });
+        var tc = await page.getTextContent();
+        var runs = (tc.items || []).map(function (it) {
+          if (!it || !it.str) return null;
+          // device-space box of the run (top-left origin), via the same matrix
+          // compose pdf.js uses to place its own text layer
+          var tx = lib.Util.transform(vp.transform, it.transform);
+          var h = Math.hypot(tx[2], tx[3]) || it.height || 10;
+          var w = (it.width || 0) * vp.scale;
+          var left = tx[4], top = tx[5] - h;
+          return { str: it.str, x: left / vp.width, y: top / vp.height, w: w / vp.width, h: h / vp.height };
+        }).filter(Boolean);
+        pages.push({ page: i, width: vp.width, height: vp.height, items: runs });
+      }
+      try { pdf.destroy(); } catch (e) {}
+      var layout = buildLayout(pages);
+      layout.pageCount = nPages;
+      _pdfLayout[key] = { state: 'done', layout: layout };
+      _pdfText[key] = { state: 'done', text: layout.text, pages: nPages };
+      return layout;
+    })();
+    _pdfLayout[key] = { state: 'extracting', _p: p };
+    try { return await p; }
+    catch (e) { _pdfLayout[key] = { state: 'error', error: (e && e.message) || 'layout extraction failed' }; throw e; }
+  }
+
+  /* ---------------- build a REDACTED pdf (rasterize + burn boxes) ----------------
+     A redaction has to be REAL on the document that reaches archive.org, not just
+     on a text shadow. So every page that carries a redaction box is RASTERIZED
+     (rendered to a canvas — its selectable text is destroyed) with the boxes burned
+     in as solid black; there is nothing left under the box to fetch back out. Pages
+     with no box are COPIED THROUGH unchanged (still vector, crisp, small) — they
+     hold nothing the author chose to withhold.
+
+     A boxed page that fails to rasterize ABORTS the whole build (it must never fall
+     back to copying the un-redacted original through). Returns a Blob. */
+  function dataUrlToBytes(dataUrl) {
+    var b64 = String(dataUrl).split(',')[1] || '';
+    var bin = root.atob(b64), len = bin.length, arr = new Uint8Array(len);
+    for (var i = 0; i < len; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+  async function buildRedactedPdf(rec, boxes, opts) {
+    opts = opts || {};
+    var lib = await ensurePdfJs();
+    var PDFLib = await ensurePdfLib();
+    var blob = await bytesFor(rec);
+    if (!blob) throw new Error('Could not read the original to redact it.');
+    var buf = await blob.arrayBuffer();
+
+    var byPage = {};
+    (boxes || []).forEach(function (b) { if (b && b.page) (byPage[b.page] = byPage[b.page] || []).push(b); });
+
+    // pdf.js and pdf-lib each get their own copy — getDocument may detach the buffer
+    var pdf = await lib.getDocument({ data: buf.slice(0) }).promise;
+    var out = await PDFLib.PDFDocument.create();
+    var src = await PDFLib.PDFDocument.load(buf.slice(0));
+    var n = Math.min(pdf.numPages, opts.maxPages || 600);
+    var scale = opts.scale || 2;
+
+    for (var i = 1; i <= n; i++) {
+      var pageBoxes = byPage[i];
+      if (!pageBoxes || !pageBoxes.length) {
+        var copied = await out.copyPages(src, [i - 1]);
+        out.addPage(copied[0]);
+        if (opts.onProgress) opts.onProgress(i, n);
+        continue;
+      }
+      var page = await pdf.getPage(i);
+      var vp1 = page.getViewport({ scale: 1 });
+      var vp = page.getViewport({ scale: scale });
+      var canvas = doc.createElement('canvas');
+      canvas.width = Math.floor(vp.width);
+      canvas.height = Math.floor(vp.height);
+      var ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height); // flatten transparency
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      // burn the boxes: normalized → device px, padded a couple px so coverage is total
+      ctx.fillStyle = '#000000';
+      pageBoxes.forEach(function (b) {
+        var x = b.x * canvas.width - 2, y = b.y * canvas.height - 2;
+        var w = b.w * canvas.width + 4, h = b.h * canvas.height + 4;
+        ctx.fillRect(x, y, w, h);
+      });
+      var img = await out.embedJpg(dataUrlToBytes(canvas.toDataURL('image/jpeg', 0.85)));
+      var op = out.addPage([vp1.width, vp1.height]);
+      op.drawImage(img, { x: 0, y: 0, width: vp1.width, height: vp1.height });
+      if (opts.onProgress) opts.onProgress(i, n);
+    }
+    try { pdf.destroy(); } catch (e) {}
+    var outBytes = await out.save();
+    return new Blob([outBytes], { type: 'application/pdf' });
   }
 
   /* ---------------- OCR (lazy, from the CDN) ----------------
@@ -378,6 +598,9 @@
     ocrEligible: ocrEligible, ocrEnabled: ocrEnabled,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
+    ensurePdfLib: ensurePdfLib, extractPdfLayout: extractPdfLayout, pdfLayoutState: pdfLayoutState,
+    buildLayout: buildLayout, rangesToBoxes: rangesToBoxes, boxesToRanges: boxesToRanges, dedupeBoxes: dedupeBoxes,
+    buildRedactedPdf: buildRedactedPdf,
     ensureTesseract: ensureTesseract, extractImageText: extractImageText, ocrImage: ocrImage, imageTextState: imageTextState, cleanOcrText: cleanOcrText,
     ensureText: ensureText, decodeText: decodeText,
     humanSize: humanSize, download: download

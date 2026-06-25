@@ -36,7 +36,8 @@ founding admin curates the site and grows the network from there.
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
 | `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
-| `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing |
+| `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing. Reads PDFs/scans in-browser (text layer / OCR) and, for a PDF, builds a **real redacted copy** (boxes burned into rasterized pages) that ships in place of the original |
+| `app/PdfRedactView.jsx` | **redact ON the PDF** — renders the real pages and lets the author drag black boxes over anything (name, face, signature, scanned line); shows redactions already on the record. Each box is normalized to the page and burned into the archived copy by `NpjSourceView.buildRedactedPdf` |
 | `app/versions.jsx` | article version history + word-level diff |
 | `app/feedback.js` | **span feedback** — readers suggest an edit (or comment) on any selected words; stored as EVA events in the article's folder + a local mirror; an editor **merges** (apply + commit a REC) or declines |
 | `app/SuggestionRail.jsx` | the review surface — PR-shaped cards (diff, rationale, 👍, threaded replies) with **Merge / Decline** for editors |
@@ -430,11 +431,24 @@ but a source can't be archived until you've been through it):
   source record with its `basis` and offsets, so you can prove what was withheld
   without un-withholding it. The archive consent now checks that **`✓ PII
   reviewed`** gate instead of a self-ticked "no private info" box.
+- **PDFs are read AND redacted on the document.** A PDF is no longer opaque to
+  Citey: `app/source-view.js` pulls its text layer (so the recognizers scan the
+  real words) and the per-run geometry, and the review renders the actual pages
+  (`app/PdfRedactView.jsx`). Redact a flagged span and the black box is mapped
+  onto the page; **drag a box over anything** — a name, a face, a signature, a
+  scanned line — and it scrubs the words under it too. When the source is
+  archived, `NpjSourceView.buildRedactedPdf` ships a **real redacted PDF**: every
+  page that carries a box is rasterized (its text destroyed) with the box burned
+  in, clean pages copy through untouched, and that scrubbed copy reaches
+  archive.org **in place of the original** — not "original withheld", the
+  document itself, minus what you blacked out. (Can't build/store it — signed
+  out, offline — and it falls back to scrubbed-text + original withheld.)
 
-For a file type Citey can't read inside the browser (PDF, image, `.docx`), the
-review offers **paste-or-affirm**: paste the text for a real scan, or vouch that
-you've checked it. He's a first pass that surfaces candidates — **never a
-guarantee** — so for source-identifying material the human stays the decider.
+For a file type Citey still can't read inside the browser (`.docx`, a scan with
+no text Citey can OCR), the review offers **paste-or-affirm**: paste the text for
+a real scan, or vouch that you've checked it. He's a first pass that surfaces
+candidates — **never a guarantee** — so for source-identifying material the human
+stays the decider.
 
 ## Images ride archive.org — it's the media CDN
 

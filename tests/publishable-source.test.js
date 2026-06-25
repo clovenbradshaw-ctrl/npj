@@ -58,6 +58,63 @@ test("a redacted source ships scrubbed, with no link to the un-redacted original
   assert.equal(live.file_url, "https://store.example/abc");
 });
 
+test("a redacted PDF ships the burned-in redacted copy, never the original", () => {
+  // Citey built a real redacted PDF (boxes burned into rasterized pages) and stored
+  // it as redactedFile. That copy is safe to ship — its bytes are already scrubbed —
+  // so file_url/mxc point at IT, while every pointer to the un-redacted original goes.
+  const text = "SSN 123-45-6789 on the filing.";
+  const start = text.indexOf("123-45-6789"), end = start + "123-45-6789".length;
+  const live = {
+    id: "doc-pdf", type: "primary", outlet: "uploaded document", title: "filing.pdf", mime: "application/pdf",
+    text: NpjPII.redactText(text, [{ start, end }]),
+    file_url: "https://store.example/original", mxc: "mxc://h/original",
+    original_url: "https://leak.example/filing.pdf", archive_url: "https://web.archive.org/web/2/x",
+    piiReview: {
+      state: "reviewed", basis: NpjPII.BASIS,
+      redactions: [{ type: "US_SSN", start, end, length: end - start }],
+      affirmations: [],
+      pdfBoxes: [{ page: 1, x: 0.2, y: 0.1, w: 0.18, h: 0.02 }],
+      redactedFile: { url: "https://store.example/filing-redacted.pdf", mxc: "mxc://h/redacted", name: "filing-redacted.pdf" },
+    },
+  };
+  const before = JSON.stringify(live);
+  const pub = NpjArticles.publishableSource(live);
+
+  // the redacted copy is what ships
+  assert.equal(pub.file_url, "https://store.example/filing-redacted.pdf");
+  assert.equal(pub.mxc, "mxc://h/redacted");
+  assert.equal(pub.redactedPdf, true);
+  assert.equal(pub.piiReview.redactedPdf, true);
+  // pointers to the UN-redacted original are still withheld
+  assert.equal(pub.original_url, "");
+  assert.equal(pub.archive_url, "");
+  assert.notEqual(pub.file_url, "https://store.example/original");
+  // text shadow is still scrubbed, and the audit stub stays content-free
+  assert.ok(!/123-45-6789/.test(pub.text));
+  assert.equal(pub.redacted, true);
+  assert.equal(pub.piiReview.redactions, 1);
+  // non-mutating
+  assert.equal(JSON.stringify(live), before, "publishableSource must not mutate the live record");
+});
+
+test("a redacted source with no built copy still withholds the original entirely", () => {
+  // same source, but the redacted PDF couldn't be built/stored → fall back to text-only
+  const text = "SSN 123-45-6789 on the filing.";
+  const start = text.indexOf("123-45-6789"), end = start + "123-45-6789".length;
+  const live = {
+    id: "doc-pdf2", type: "primary", title: "filing.pdf", mime: "application/pdf",
+    text: NpjPII.redactText(text, [{ start, end }]),
+    file_url: "https://store.example/original", mxc: "mxc://h/original", original_url: "https://leak/x", archive_url: "https://web.archive.org/y",
+    piiReview: { state: "reviewed", redactions: [{ start, end }], affirmations: [] },   // no redactedFile
+  };
+  const pub = NpjArticles.publishableSource(live);
+  assert.equal(pub.file_url, "");
+  assert.equal(pub.mxc, "");
+  assert.equal(pub.redacted, true);
+  assert.equal(pub.redactedPdf, undefined);
+  assert.equal(pub.piiReview.redactedPdf, false);
+});
+
 test("the projection re-asserts redaction even if the live text scrub was lost", () => {
   const text = "SSN 123-45-6789 is on file.";
   const start = text.indexOf("123-45-6789"), end = start + "123-45-6789".length;
