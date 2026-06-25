@@ -2012,10 +2012,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setStatusBusy(false);
   };
 
+  // Lock the shell to the viewport so the two chrome bars (top bar + format
+  // toolbar) stay put and ONLY the body columns scroll. height:100dvh +
+  // overflow:hidden caps the container (the old minHeight:100vh was a floor, so
+  // a tall draft grew the page and scrolled the whole header away). The body's
+  // columns already scroll internally (overflowY:auto, minHeight:0).
   return (
-    <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
-      {/* top bar */}
-      <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center",
+    <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      {/* top bar — pinned: never shrinks or scrolls with the body */}
+      <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center", flexShrink: 0,
         ...(isMobile
           ? { display: "flex", flexWrap: "wrap", gap: 10 }
           : { display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", columnGap: 14 }) }}>
@@ -2121,8 +2126,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>{/* end RIGHT zone */}
       </div>
 
-      {/* formatting toolbar */}
-      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "6px 8px" : "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+      {/* formatting toolbar — pinned alongside the top bar */}
+      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "6px 8px" : "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap", flexShrink: 0 }}>
         <span className="np-eyebrow npj-hide-sm" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
         <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
         <TB onClick={() => exec("redo")} title="Redo"><I.redo /></TB>
@@ -2214,7 +2219,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
-        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail }}>
+        <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail, flexShrink: 0 }}>
           {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
