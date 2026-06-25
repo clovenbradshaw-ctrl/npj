@@ -505,6 +505,29 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     return () => { alive = false; };
   }, [signedIn]);
 
+  // shared project documents: pull each project room's docs INTO the local store
+  // (the room is the shared source of truth), then re-list — so an invited member
+  // actually SEES the project's articles instead of an empty room. Also opens the
+  // doc event to members on rooms we own, so they can edit, not just read. All
+  // best-effort: a hiccup just leaves the per-account view as it was.
+  useEffect(() => {
+    if (!signedIn || !rooms) return;
+    let alive = true;
+    (async () => {
+      const projs = []; const seen = {};
+      (rooms.drafts || []).forEach(d => { if (d.roomId && !seen[d.roomId]) { seen[d.roomId] = 1; projs.push({ roomId: d.roomId, title: d.title }); } });
+      (rooms.joined || []).forEach(r => { if (r.kind !== "control" && r.roomId && !seen[r.roomId]) { seen[r.roomId] = 1; projs.push({ roomId: r.roomId, title: r.name }); } });
+      let pulled = false;
+      for (const p of projs) {
+        if (!alive) return;
+        try { const docs = await window.NpjDrafts.pullRoomDocs(p.roomId, p.title); if (docs && docs.length) pulled = true; } catch (e) {}
+        if (window.MatrixAuth.ensureDocPower) window.MatrixAuth.ensureDocPower(p.roomId).catch(() => {});
+      }
+      if (alive && pulled) { try { const list = await window.NpjDrafts.list(); setDrafts(list || []); } catch (e) {} }
+    })();
+    return () => { alive = false; };
+  }, [rooms, signedIn]);
+
   // published record: the versioned event logs under articles/ (the real
   // record), plus any legacy .md files still at the repo root (best-effort)
   useEffect(() => {

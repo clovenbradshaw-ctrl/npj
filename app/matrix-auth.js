@@ -24,6 +24,7 @@
   const PERM_EVENT = "press.npj.permissions";          // state event type holding { roles }
   const APP_ROOM_TYPE = "press.npj.room";              // state event tagging a room as one of OURS
   const GUEST_STATE = "press.npj.guests";              // state event: { guests: { mxid → {name,by,ts} } }
+  const APP_DOC_TYPE = "press.npj.doc";                // state event per shared document: { mxc, title, updated, by, words, deleted }
   const LS_KEY = "npj_matrix_session_v1";               // localStorage → survives tab close & refresh
 
   let session = null; // { user_id, access_token, base_url, device_id, verified, admin }
@@ -407,11 +408,11 @@
     try {
       out = await api(session.base_url, "/_matrix/client/v3/createRoom", {
         method: "POST", token: session.access_token,
-        body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart, initial_state: [appRoomState("draft")] }
+        body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", room_alias_name: aliasLocalpart, initial_state: [appRoomState("draft")], power_level_content_override: { events: { [APP_DOC_TYPE]: 0 } } }
       });
     } catch (e) {
       // alias clash or restriction → make the room without an alias
-      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", initial_state: [appRoomState("draft")] } });
+      out = await api(session.base_url, "/_matrix/client/v3/createRoom", { method: "POST", token: session.access_token, body: { name: title || "Untitled project", topic, visibility: "private", preset: "private_chat", initial_state: [appRoomState("draft")], power_level_content_override: { events: { [APP_DOC_TYPE]: 0 } } } });
     }
     await registerDraft({ roomId: out.room_id, title: title || "Untitled project" });
     return { roomId: out.room_id, alias: out.room_alias || null };
@@ -595,6 +596,86 @@
     return null;
   }
 
+  /* ---- shared project documents: the draft lives IN the room, not just on the
+     author's account, so every invited member loads and edits the same article.
+     A small press.npj.doc STATE EVENT per document (state_key = draft id) holds
+     metadata + an mxc POINTER to the full draft JSON in the room's media — so the
+     64KB event cap never bounds an article. createDraftRoom opens this event type
+     to all members (power level 0), so invitees can write it, not just read. All
+     of this is best-effort at the call site: a hiccup degrades to the per-account
+     copy, never blocks editing. ---- */
+  async function uploadJson(obj) {
+    if (!session) return null;
+    const body = new Blob([JSON.stringify(obj || {})], { type: "application/json" });
+    const res = await fetch(session.base_url + "/_matrix/media/v3/upload?filename=npj-doc.json", {
+      method: "POST", headers: { "Authorization": "Bearer " + session.access_token, "Content-Type": "application/json" }, body
+    });
+    if (!res.ok) throw new Error("doc upload failed (" + res.status + ")");
+    const j = await res.json(); return (j && j.content_uri) || null;
+  }
+  async function fetchJson(mxc) {
+    if (!session || !mxc) return null;
+    const m = String(mxc).match(/^mxc:\/\/([^/]+)\/(.+)$/); if (!m) return null;
+    const paths = [
+      "/_matrix/client/v1/media/download/" + m[1] + "/" + encodeURIComponent(m[2]),  // authenticated media (1.11+)
+      "/_matrix/media/v3/download/" + m[1] + "/" + encodeURIComponent(m[2])           // legacy fallback
+    ];
+    for (const p of paths) {
+      try { const r = await fetch(session.base_url + p, { headers: { "Authorization": "Bearer " + session.access_token } }); if (r.ok) return await r.json(); } catch (e) {}
+    }
+    return null;
+  }
+  function draftWordCount(draft) {
+    const t = String((draft && draft.html) || "").replace(/<[^>]*>/g, " ").replace(/&[a-z#0-9]+;/gi, " ");
+    return t.trim() ? t.trim().split(/\s+/).length : 0;
+  }
+  // Write/update one document's shared record: upload the JSON, point the room
+  // state event at it. Throws on failure so the caller can fall back.
+  async function putRoomDoc(roomId, id, draft) {
+    if (!session || !roomId || !id) return false;
+    const mxc = await uploadJson(draft); if (!mxc) return false;
+    const content = { mxc, title: String((draft && draft.title) || ""), slug: String((draft && draft.slug) || ""),
+      updated: String((draft && draft.updated) || new Date().toISOString()), by: session.user_id, words: draftWordCount(draft), deleted: false };
+    await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(APP_DOC_TYPE) + "/" + encodeURIComponent(id),
+      { method: "PUT", token: session.access_token, body: content });
+    return true;
+  }
+  // Tombstone a shared document (Matrix state can't be deleted) — flagged hidden.
+  async function deleteRoomDoc(roomId, id) {
+    if (!session || !roomId || !id) return;
+    try { await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(APP_DOC_TYPE) + "/" + encodeURIComponent(id),
+      { method: "PUT", token: session.access_token, body: { deleted: true, updated: new Date().toISOString(), by: session.user_id } }); } catch (e) {}
+  }
+  // Every live shared document in a room as lightweight metas (id + pointer +
+  // title/updated/words) — the listing reads these; the body downloads on open.
+  async function getRoomDocs(roomId) {
+    if (!session || !roomId) return [];
+    try {
+      const st = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state", { token: session.access_token });
+      return (st || []).filter(ev => ev && ev.type === APP_DOC_TYPE && ev.state_key && ev.content && ev.content.mxc && !ev.content.deleted)
+        .map(ev => ({ id: ev.state_key, mxc: ev.content.mxc, title: ev.content.title || "", slug: ev.content.slug || "", updated: ev.content.updated || "", by: ev.content.by || "", words: ev.content.words || 0 }));
+    } catch (e) { return []; }
+  }
+  async function getRoomDocContent(mxc) { try { return await fetchJson(mxc); } catch (e) { return null; } }
+  // Open this room's press.npj.doc events to every member (power level 0) so
+  // invitees can edit, not just read. Additive + owner-only: reads the live power
+  // levels, adds only our key, and silently no-ops for anyone who can't edit them
+  // (a guest) or when it's already open.
+  async function ensureDocPower(roomId) {
+    if (!session || !roomId) return;
+    try {
+      const pl = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/m.room.power_levels/", { token: session.access_token });
+      if (!pl) return;
+      const events = pl.events || {};
+      if (events[APP_DOC_TYPE] === 0) return;
+      const mine = (pl.users && pl.users[session.user_id] != null) ? pl.users[session.user_id] : (pl.users_default || 0);
+      const needed = (pl.state_default != null) ? pl.state_default : 50;
+      if (mine < needed) return; // not allowed to change power levels — leave it
+      await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/m.room.power_levels/",
+        { method: "PUT", token: session.access_token, body: { ...pl, events: { ...events, [APP_DOC_TYPE]: 0 } } });
+    } catch (e) { /* best-effort */ }
+  }
+
   function onChange(fn) { listeners.add(fn); return () => listeners.delete(fn); }
 
   window.MatrixAuth = {
@@ -604,6 +685,8 @@
     register, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
-    joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange
+    joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange,
+    // shared project documents (the draft lives in the room, not just the account)
+    putRoomDoc, deleteRoomDoc, getRoomDocs, getRoomDocContent, ensureDocPower
   };
 })();
