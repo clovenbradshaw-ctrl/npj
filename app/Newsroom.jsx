@@ -1060,6 +1060,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
+  const [voidSearch, setVoidSearch] = useState(""); // the documented search behind a prose "cite a void"
   useEffect(() => {
     const onUp = (e) => {
       if (e && e.target && e.target.closest && e.target.closest(".sel-tb")) return;
@@ -1426,6 +1427,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
     return span;
   };
+  // Cite a VOID straight from the prose: wrap the highlighted words in a claim
+  // span (or reuse the one they sit in) and OWN it as an asserted absence — the
+  // claim is grounded not by a source but by the documented search in `note`.
+  const markVoid = (note) => {
+    const n = String(note || "").trim(); if (!n) return;
+    const r = spanRange(); if (!r) { setSel(null); setMenu(null); return; }
+    const span = claimHostOf(r) || wrapPlainClaim(r);
+    if (window.__npjGround && window.__npjGround.own) window.__npjGround.own(span, "absence", n);
+    if (window.__citey) { if (window.__citey.evaluateSpan) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    window.getSelection().removeAllRanges(); selRange.current = null;
+    setSel(null); setMenu(null); setVoidSearch(""); setRev(v => v + 1); scheduleSave(); renumberCites();
+  };
   // The claim span a table row acts on: reuse an existing one inside the sentence
   // (sub-sentence safe — never nest), else wrap the whole sentence.
   const rowSpanFor = (row, key, plain) => {
@@ -1470,9 +1483,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     },
     // re-open the picker for an already-bound span
     repin: (span) => { if (span) openPin(span.getAttribute("data-cid"), (span.getAttribute("data-src") || "").split(/\s+/)[0], (span.textContent || "").trim()); },
-    own: (row, stance) => {
+    own: (row, stance, note) => {
       const span = rowSpanFor(row, null, true); if (!span) return;
-      window.__npjGround.own(span, stance);
+      window.__npjGround.own(span, stance, note);
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
@@ -2311,6 +2324,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
           <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.link style={{ fontSize: 13 }} /> Link</FB>
           <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
+          <FB hot={menu === "void"} onClick={() => setMenu(menu === "void" ? null : "void")} title="Cite a void — ground this in a documented absence (no record exists)"><span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>∅</span> Void</FB>
 
           {menu === "link" && (
             <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9 }}>
@@ -2339,6 +2353,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 </button>); })}
               {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 8px" }}>Ingest a source first (left panel), or paste a URL:</div>}
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
+            </div>
+          )}
+          {menu === "void" && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>∅</span> Cite a void</div>
+              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.55, marginBottom: 8 }}>
+                For a claim that rests on an <b style={{ color: "var(--ink)" }}>absence</b> — “no record exists,” “the city never responded,” “it appears nowhere else.” There’s nothing to link, so document the search instead: where you looked, and that it came up empty. It publishes with the claim.
+              </div>
+              <textarea autoFocus value={voidSearch} onChange={e => setVoidSearch(e.target.value)} onMouseDown={e => e.stopPropagation()}
+                placeholder="Where you looked, and found nothing — e.g. Searched Metro records, the Banner & the Tennessean (2024–2026); no permit or filing."
+                style={{ width: "100%", boxSizing: "border-box", minHeight: 72, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12.5, lineHeight: 1.5, outline: "none", resize: "vertical", fontFamily: "var(--serif)" }} />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                <button className="btn btn-sm btn-ghost" onMouseDown={e => e.preventDefault()} onClick={() => setMenu(null)}>Cancel</button>
+                <button className="btn btn-sm btn-primary" onMouseDown={e => e.preventDefault()} disabled={!voidSearch.trim()} onClick={() => markVoid(voidSearch)} style={{ opacity: voidSearch.trim() ? 1 : .55 }}>∅ Cite this void</button>
+              </div>
             </div>
           )}
         </div>
