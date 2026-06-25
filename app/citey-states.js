@@ -35,6 +35,8 @@
   //   asserted (⊢)     the author's analysis — follows from grounded premises
   //   testimony (⊨)    the author's account — they are the primary witness
   //   voice (⊩)        the author's stated position — argument, not fact
+  //   context (⊪)      continuing coverage — the article substantiates it, set
+  //                    against prior reporting (context of past articles, not proof)
   //  GATE:
   //   flagged (⚑)      published-unverified — the build gate caught an undeclared claim
   const STATES = {
@@ -48,6 +50,10 @@
     asserted:   { glyph: '\u22A2', color: '#7C74DE', eyes: 'lookUp',  label: 'your analysis' },
     testimony:  { glyph: '\u22A8', color: '#1F9E76', eyes: 'heart',   label: 'your account' },
     voice:      { glyph: '\u22A9', color: '#5A6472', eyes: 'look',    label: 'your voice' },
+    context:    { glyph: '\u22AA', color: '#2E8B86', eyes: 'lookSide', label: 'in context' },
+    // an ASSERTED ABSENCE \u2014 a documented search that found nothing (\u2205). Owned and
+    // honest like a stance, but it grounds a negative: "looked, and it isn't there."
+    absence:    { glyph: '\u2205', color: '#4D7EA8', eyes: 'slit',    label: 'documented absence' },
     flagged:    { glyph: '\u2691', color: '#D8412C', eyes: 'slit',    label: 'flagged on publish' }
   };
 
@@ -61,7 +67,9 @@
     '\u22A8': ['M40 40 L40 152',  'M64 40 L64 152', 'M64 96 L122 96'], // ⊨  two uprights + arm
     '\u00AC': ['M28 84 L120 84',  'M120 84 L120 116'],          // ¬  top bar + drop hook
     '\u2262': ['M30 70 L120 70',  'M30 96 L120 96', 'M30 122 L120 122', 'M40 56 L110 136'], // ≢  three bars, slashed
-    '\u22A9': ['M48 40 L48 152',  'M48 80 L118 80', 'M48 116 L118 116']  // ⊩  upright + two arms (forces / author asserts)
+    '\u22A9': ['M48 40 L48 152',  'M48 80 L118 80', 'M48 116 L118 116'], //⊩  upright + two arms (forces / author asserts)
+    '⊪': ['M34 40 L34 152',  'M56 40 L56 152', 'M78 40 L78 152', 'M78 96 L122 96'],  // continuing coverage — three uprights + arm
+    '∅': ['M75 50 L40 96 L75 142 L110 96 Z', 'M46 60 L104 132']   // ∅ documented absence — a ring (diamond), slashed through
   };
 
   // Eye sprite-sheet cells (assets/eyes/rXcY.png). Each expression = a [left,right] pair.

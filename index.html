@@ -62,7 +62,11 @@
 <script src="app/data.js"></script>
 <!-- live sources: pulls archive.org items tagged "npj-source" into DATASETS/SOURCES -->
 <script src="app/archive-sources.js"></script>
-<!-- media CDN: resolves archive.org links to direct image URLs for <image-slot> -->
+<!-- best-effort source identity: guess a web source's title + outlet from its URL
+     slug/host, and read the real ones off the page's own <title>/og: tags. No model. -->
+<script src="app/source-title.js"></script>
+<!-- media CDN: resolves archive.org links to direct image URLs for <image-slot>,
+     and (pageMeta) reads a source's identity off the CORS-open archived HTML -->
 <script src="app/archive-cdn.js"></script>
 <!-- expose hooks globally so every babel file uses them bare without colliding -->
 <script>
@@ -75,6 +79,8 @@
 
 <!-- plain scripts: matrix auth, durable drafts -->
 <script src="app/matrix-auth.js"></script>
+<!-- passkey vault: lock your sign-in behind Face ID / a fingerprint (WebAuthn PRF) -->
+<script src="app/passkey-vault.js"></script>
 <!-- contributor profiles (the byline): name + About me, local + Matrix account, pulled from account info -->
 <script src="app/profiles.js"></script>
 <!-- media store: uploads image-slot drops to the Matrix homeserver while drafting, frozen to archive.org at publish -->
@@ -87,16 +93,31 @@
      post types (window.NpjStructure). Never published — stripped at build (I1). -->
 <script src="app/structure.js"></script>
 <script src="app/image-slot.js"></script>
+<!-- photo editor: crop + HARD redaction baked into the pixels before the image is
+     re-uploaded, so only the redacted copy can ever reach archive.org (window.NpjPhotoEditor) -->
+<script src="app/photo-editor.js"></script>
 <!-- the published record: per-document folders of timestamped version files
      (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
 <script src="app/articles.js"></script>
 <!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
      the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
 <script src="app/feedback.js"></script>
+<!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
+     (paste into Substack keeps headings, images, links & the sourcing). -->
+<script src="app/substack-export.js"></script>
+<!-- Outstanding fact checks: each ungrounded claim (⊥ needs source, ¬ conflict)
+     paired with the TYPE of evidence that would ground it — the negative space.
+     evidence-needs.js reads it mechanically (optionally sharpened by a local
+     LLM); fact-check-export.js shapes the plain, paste-anywhere list. -->
+<script src="app/evidence-needs.js"></script>
+<script src="app/fact-check-export.js"></script>
 <!-- grounding model: reusable citation records (spans of a source) + sentence
      segmentation for the table view. Plain scripts; require window.NPJ. -->
 <script src="app/citations.js"></script>
 <script src="app/sentences.js"></script>
+<!-- composition provenance: how a draft was assembled (typed vs. pasted, paste
+     sizes, revision, timeline). Counts + timestamps only — never the words. -->
+<script src="app/composition.js"></script>
 <!-- source provenance: synthetic dedup (one signature per content, linked across
      projects) + backtracking (source → every article that cites it). No model. -->
 <script src="app/sources.js"></script>
@@ -111,6 +132,13 @@
 <script src="app/citey-states.js"></script>
 <script src="app/CiteyBrain.js"></script>
 <script src="app/CiteyVoice.js"></script>
+<!-- proposition graph: eoreader4's model-free reading core, vendored + bridged
+     (window.EOReader4), the prose→doc adapter (window.NpjPropGraph) and the SVG
+     node-link renderer (window.NpjGraphRender). The bridge is an ES module that
+     publishes window.EOReader4 after load — consumers guard on its presence. -->
+<script src="app/prop-graph.js"></script>
+<script src="app/graph-render.js"></script>
+<script type="module" src="app/eoreader4-bridge.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 
@@ -128,19 +156,32 @@
 <script type="text/babel" src="app/Entities.jsx"></script>
 <script type="text/babel" src="app/SuggestionRail.jsx"></script>
 <script type="text/babel" src="app/FrontPage.jsx"></script>
+<!-- "Export for Substack" panel (window.SubstackExport), opened from the reader -->
+<script type="text/babel" src="app/SubstackExport.jsx"></script>
+<!-- "Export for fact-check" panel (window.FactCheckExport), opened from the grounding workspace -->
+<script type="text/babel" src="app/FactCheckExport.jsx"></script>
 <script type="text/babel" src="app/ArticleRead.jsx"></script>
 <script type="text/babel" src="app/ArticleEdit.jsx"></script>
 <script type="text/babel" src="app/SourcePicker.jsx"></script>
+<!-- attribute a claim to a conversation (interview / human source): window.NpjInterview
+     + window.InterviewComposer, used by the Newsroom's source panel -->
+<script type="text/babel" src="app/InterviewSource.jsx"></script>
 <script type="text/babel" src="app/GroundingWorkspace.jsx"></script>
 <!-- the post-structure rail + blank-page type picker (window.StructureRail),
      fed an api by the Newsroom; the only UI for the structure layer -->
 <script type="text/babel" src="app/PostStructure.jsx"></script>
+<!-- the Graph view: the live document as an eoreader4 proposition graph
+     (window.GraphView), a top-level view beside prose/grounding/citations -->
+<script type="text/babel" src="app/GraphView.jsx"></script>
 <script type="text/babel" src="app/Newsroom.jsx"></script>
 <script type="text/babel" src="app/Standards.jsx"></script>
 <script type="text/babel" src="app/Contributors.jsx"></script>
 <script type="text/babel" src="app/Submit.jsx"></script>
 <script type="text/babel" src="app/Data.jsx"></script>
 <script type="text/babel" src="app/Documents.jsx"></script>
+<!-- invite-by-link: mint a new account on the homeserver + the welcome wizard
+     (window.NewAccountInvite, window.WelcomeInvite) the single link opens -->
+<script type="text/babel" src="app/Invite.jsx"></script>
 <script type="text/babel" src="app/Citey.jsx"></script>
 <!-- Citey's PII review + hard-redaction surface (the archive.org gate) -->
 <script type="text/babel" src="app/CiteyRedact.jsx"></script>
@@ -195,6 +236,14 @@ function App() {
     });
   }, []);
   const [session, setSession] = useState(() => window.MatrixAuth.restore());
+  // a #welcome=<token> link drops a brand-new contributor into the onboarding
+  // wizard (sign in → name → password) before the rest of the app exists for them
+  const welcomePayload = useRef((() => {
+    const m = (location.hash || "").match(/(?:^#|[;&])welcome=([^;&]+)/);
+    return m ? window.MatrixAuth.parseInviteToken(m[1]) : null;
+  })()).current;
+  const [welcomeDone, setWelcomeDone] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
   const me = (session && session.user_id) || "@you:guest";
   const role = window.roleOf(layout, session && session.user_id);
   const isAdmin = role === "admin";
@@ -232,6 +281,25 @@ function App() {
     })();
     return () => { alive = false; };
   }, [session, setLayout]);
+
+  // Guest access. A signed-in account with no allowlist role still reaches the
+  // newsroom if it's a member of at least one project room — that's how an
+  // invite-link guest "has access" without the admin editing the allowlist.
+  // joinedRooms() self-heals a pending invite into a real join, so a guest who
+  // just followed a link resolves to a member here. It's membership-scoped: a
+  // guest only ever sees the room(s) they were invited to, and (no role →) still
+  // can't publish or manage anyone.
+  useEffect(() => {
+    if (!session || isEditorRole) { setIsGuest(false); return; }
+    let alive = true;
+    (async () => {
+      try {
+        const rooms = await window.MatrixAuth.joinedRooms();
+        if (alive) setIsGuest((rooms || []).some(r => r.kind !== "control"));
+      } catch (e) { if (alive) setIsGuest(false); }
+    })();
+    return () => { alive = false; };
+  }, [session, isEditorRole]);
 
   // hydrate MY durable profile from my Matrix account on sign-in, so my own
   // byline reads right even before the layout is (re)published. Best-effort; it
@@ -438,6 +506,16 @@ function App() {
   window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
+  // a valid invite link owns the whole screen until the newcomer finishes; then
+  // we drop the #welcome token and sign them into the workspace like anyone else
+  if (welcomePayload && !welcomeDone) {
+    return <WelcomeInvite payload={welcomePayload} onDone={(sess) => {
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+      setWelcomeDone(true);
+      if (sess) signIn(sess);
+    }} />;
+  }
+
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
       {route === "home" && <FrontPage key={"front-" + frontRev} onOpen={openArticle} onNewsroom={goNewsroom} onHome={goHome} />}
@@ -458,7 +536,7 @@ function App() {
             window.NpjArticles.loadFront().then(reflect).catch(reflect);
           }} />
       )}
-      {route === "newsroom" && (isEditorRole
+      {route === "newsroom" && ((isEditorRole || isGuest)
         ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
         : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)}
       {route === "standards" && <StandardsPage onHome={goHome} onNewsroom={goNewsroom} onSubmit={goSubmit} />}
@@ -491,7 +569,6 @@ function App() {
       </TweaksPanel>
 
       <AdminEditor />
-      <CiteyAgent route={route} signedIn={!!session} editorSelector=".md-preview" />
     </window.LayoutCtx.Provider>
   );
 }

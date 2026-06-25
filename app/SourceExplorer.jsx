@@ -14,18 +14,24 @@
 
    Publishes window.SourceExplorer.
    ============================================================ */
-function SourceExplorer({ items, initialKey, title, onClose }) {
+function SourceExplorer({ items, initialKey, title, onClose, onRename }) {
   const SV = window.NpjSourceView;
   const list = (items || []).filter(it => it && it.key);
   const [sel, setSel] = useState(initialKey || (list[0] && list[0].key) || null);
   const [q, setQ] = useState("");
   const [, bump] = useState(0);
+  // inline rename of the open file — uploaded docs land as "lj73Qxj7.pdf" and
+  // web grabs as "Web snapshot"; let the reader fix the name where they read it.
+  const [renaming, setRenaming] = useState(false);
+  const [renameText, setRenameText] = useState("");
+  const commitRename = () => { const t = renameText.trim(); if (t && onRename && sel) onRename(sel, t); setRenaming(false); bump(v => v + 1); };
 
   useEffect(() => {
-    const onKey = (e) => { if (e.key === "Escape") onClose && onClose(); };
+    const onKey = (e) => { if (e.key === "Escape" && !renaming) onClose && onClose(); };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, renaming]);
+  useEffect(() => { setRenaming(false); }, [sel]);   // switching files cancels an open rename
 
   const recOf = (it) => it.rec || (window.NPJ.SOURCES && window.NPJ.SOURCES[it.key]) || {};
   const kindIcon = (rec) => {
@@ -116,9 +122,23 @@ function SourceExplorer({ items, initialKey, title, onClose }) {
             ) : (
               <React.Fragment>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                  <h2 style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 21, lineHeight: 1.1, margin: 0 }}>{selRec.title || selRec.filename || selItem.key}</h2>
-                  <span className="np-mono" style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px solid var(--ink)", padding: "0 5px" }}>{SV ? SV.kindLabel(selRec) : "File"}</span>
-                  {archivedBadge(selRec)}
+                  {renaming ? (
+                    <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 220 }}>
+                      <input autoFocus value={renameText} onChange={e => setRenameText(e.target.value)}
+                        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitRename(); } else if (e.key === "Escape") { e.preventDefault(); setRenaming(false); } }}
+                        placeholder="Source title"
+                        style={{ flex: 1, minWidth: 0, border: "1.5px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 19, padding: "3px 8px", outline: "none" }} />
+                      <button onClick={commitRename} className="np-mono" style={{ flex: "0 0 auto", background: "var(--yellow)", border: "1.5px solid var(--ink)", color: "var(--ink)", fontWeight: 700, fontSize: 11, padding: "5px 9px", cursor: "pointer" }}>Save</button>
+                      <button onClick={() => setRenaming(false)} className="np-mono" style={{ flex: "0 0 auto", background: "transparent", border: "1.5px solid var(--ink)", color: "var(--ink-soft)", fontSize: 11, padding: "5px 9px", cursor: "pointer" }}>Cancel</button>
+                    </span>
+                  ) : (
+                    <React.Fragment>
+                      <h2 style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 21, lineHeight: 1.1, margin: 0 }}>{selRec.title || selRec.filename || selItem.key}</h2>
+                      {onRename && <button onClick={() => { setRenameText(selRec.title || selRec.filename || ""); setRenaming(true); }} title="Rename this source" className="np-mono" style={{ background: "transparent", border: "1px solid var(--rule)", color: "var(--ink-soft)", fontSize: 10, padding: "2px 6px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 3 }}>✎ Rename</button>}
+                      <span className="np-mono" style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".05em", border: "1px solid var(--ink)", padding: "0 5px" }}>{SV ? SV.kindLabel(selRec) : "File"}</span>
+                      {archivedBadge(selRec)}
+                    </React.Fragment>
+                  )}
                 </div>
                 <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {selRec.outlet && <span>{selRec.outlet}</span>}

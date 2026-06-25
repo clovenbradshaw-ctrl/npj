@@ -23,6 +23,42 @@ function Placeholder({ label, h = 220, dark = false }) {
   );
 }
 
+/* ---- "From the creators of" credit ---- */
+// The two publications behind NPJ. Each logo links out to its Substack. Two
+// responsive forms share one data source:
+//   • full (desktop) — names left of a tidy right-aligned column of logos; sits
+//     in the masthead's top-right beside the community taglines, wrapping onto
+//     its own line below them when the header gets tight.
+//   • compact (phones) — just the label + the two logos (names drop to save
+//     width), shown to the right of the logo where the taglines/utility hide.
+const NPJ_CREATORS = [
+  { name: "Jesus Urbanist", href: "https://jesusurbanist.substack.com/",
+    img: "https://substackcdn.com/image/fetch/$s_!9pwX!,w_80,h_80,c_fill,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2Ff6a460b9-d19c-4493-8ffc-6f3a72d8f209_650x650.png" },
+  { name: "{Rich Text}", href: "https://readrichtext.substack.com/",
+    img: "https://substackcdn.com/image/fetch/$s_!nVNQ!,w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F8722a66c-f873-4b99-ab10-2486beab6bd0_788x788.png" }
+];
+
+function CreatorCredits({ compact }) {
+  const sz = compact ? 30 : 40;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: compact ? 6 : 9, flexShrink: 0 }}>
+      <div className="np-mono" style={{ fontSize: compact ? 8.5 : 10.5, lineHeight: 1.15, letterSpacing: ".12em", textTransform: "uppercase", color: "var(--ink-soft)", textAlign: "right", maxWidth: compact ? 96 : undefined, whiteSpace: compact ? "normal" : "nowrap" }}>
+        From the creators of
+      </div>
+      <div style={{ display: "flex", flexDirection: compact ? "row" : "column", alignItems: compact ? "center" : "flex-end", gap: compact ? 7 : 8 }}>
+        {NPJ_CREATORS.map((c) => (
+          <a key={c.href} className="npj-creator" href={c.href} target="_blank" rel="noopener noreferrer" title={c.name}
+            style={{ display: "flex", alignItems: "center", gap: 9, textDecoration: "none" }}>
+            {!compact && <span className="npj-creator-name" style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15.5, lineHeight: 1, color: "var(--ink)", whiteSpace: "nowrap" }}>{c.name}</span>}
+            <img src={c.img} alt={c.name} width={sz} height={sz} loading="lazy"
+              style={{ width: sz, height: sz, objectFit: "cover", border: "1.5px solid var(--ink)", background: "var(--paper-2)", display: "block", flexShrink: 0 }} />
+          </a>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /* ---- Masthead ---- */
 // `narrow` (front page only) centers the chrome inside the 2/3 shell column so
 // the header lines up with the lineup below it. Every other route leaves it
@@ -47,7 +83,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
             <img className="npj-logo" src="assets/npj-logo-wide.png" alt="Nashville Peoples' Journal" style={{ height: 168, display: "block" }} />
           </button>
           <div style={{ flex: 1 }} />
-          <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", gap: 28 }}>
+          <div className="npj-hide-sm" style={{ display: "flex", alignItems: "stretch", justifyContent: "flex-end", flexWrap: "wrap", gap: 28 }}>
             <div style={{ width: 2.5, background: "var(--ink)" }} />
             <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 2 }}>
               <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 34, lineHeight: 1.04, textAlign: "right" }}>
@@ -65,7 +101,11 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
                 <button onClick={onNewsroom} style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "var(--ink)", fontWeight: 600, fontFamily: "var(--mono)", fontSize: "inherit", letterSpacing: "inherit", textTransform: "inherit" }}>⊠ Newsroom log in</button>
               </div>
             </div>
+            <CreatorCredits />
           </div>
+          {/* phones: the taglines/utility cluster hides, so the credit shows here
+              in its compact form (logos only) to the right of the logo */}
+          {mobile && <CreatorCredits compact />}
         </div>
       </div>
 
@@ -73,19 +113,25 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
       {route !== "article" && (
         <nav style={{ background: "var(--ink)", color: "var(--paper)" }}>
           <div className="npj-nav-inner" style={{ width: tight ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: tight ? "0" : "0 72px", display: "flex", alignItems: "stretch", height: 58 }}>
-            {sections.map((s, i) => {
-              const on = activeColumn ? activeColumn === s : i === 0;
-              return (
-                <button key={s + i} onClick={() => clickColumn(s)} style={{
+            {/* Two fixed tabs: the Latest feed and the Sources Archive (the
+                deduped, archive.org-backed record of every cited source). On
+                phones this strip scrolls sideways on its own (swipeable) so it
+                never widens the page past the viewport. */}
+            <div className="npj-nav-cols" style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
+              {[
+                { label: "Latest", active: route === "home", go: onHome },
+                { label: "Sources Archive", active: route === "explore", go: () => (window.__nav && window.__nav.explore ? window.__nav.explore() : onHome()) }
+              ].map((t) => (
+                <button key={t.label} onClick={t.go} style={{
                   flexShrink: 0, display: "flex", alignItems: "center", padding: "0 26px",
-                  background: on ? "var(--yellow)" : "none",
-                  color: on ? "var(--ink)" : "var(--paper)",
+                  background: t.active ? "var(--yellow)" : "none",
+                  color: t.active ? "var(--ink)" : "var(--paper)",
                   border: 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 17,
-                  letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer"
-                }}>{s}</button>
-              );
-            })}
-            <div style={{ flex: 1 }} />
+                  letterSpacing: ".1em", textTransform: "uppercase", cursor: "pointer", whiteSpace: "nowrap"
+                }}>{t.label}</button>
+              ))}
+            </div>
+            <div className="npj-nav-spacer" style={{ flex: 1 }} />
             <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 70 }}>
               <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "#8c8676" }}>⌕</span>
               <input type="text" placeholder="Search records, snapshots…" style={{ width: "100%", minWidth: 0, border: 0, borderBottom: "1px solid rgba(255,255,255,.35)", background: "transparent", fontFamily: "var(--mono)", fontSize: 13, color: "var(--paper)", outline: "none", padding: "4px 0" }} />
@@ -95,35 +141,11 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
               background: "var(--yellow)", color: "var(--ink)", padding: "9px 20px",
               fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, letterSpacing: ".1em",
               textTransform: "uppercase", border: 0, cursor: "pointer"
-            }}>Submit a story</button>
+            }}>{mobile ? "Submit" : "Submit a story"}</button>
           </div>
         </nav>
       )}
     </header>
-  );
-}
-
-/* ---- Archive status strip ---- */
-function ArchiveStrip() {
-  const mobile = window.useIsMobile();
-  const snaps = (window.NPJ && window.NPJ.SOURCES) ? Object.keys(window.NPJ.SOURCES).length : null;
-  if (snaps === 0) return null;
-  return (
-    <div style={{ background: "var(--paper)", borderBottom: "1px solid var(--rule)" }}>
-      <div className="npj-strip-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "11px 16px" : "11px 0", display: "flex", alignItems: "center", gap: 10, fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
-        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--reject)", display: "inline-block", flexShrink: 0 }} />
-        {snaps !== null
-          ? <span><strong style={{ color: "var(--ink)" }}>{snaps}</strong> sources captured</span>
-          : <span>Sources archived to web.archive.org</span>
-        }
-        <span style={{ flex: 1 }} />
-        <button onClick={() => window.__nav && window.__nav.explore && window.__nav.explore()} style={{
-          background: "none", border: 0, padding: 0, cursor: "pointer",
-          color: "var(--ink)", fontFamily: "var(--mono)", fontWeight: 600,
-          fontSize: 12, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3
-        }}>OPEN THE ARCHIVE →</button>
-      </div>
-    </div>
   );
 }
 
@@ -153,7 +175,6 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
     <div className="fade-in">
       <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
         activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
-      <ArchiveStrip />
       <main style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 0 0" : "34px 0 0" }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
@@ -197,7 +218,7 @@ function EmptyFront({ col, sections, onNewsroom, onSubmit }) {
         <button className="btn btn-primary" onClick={onNewsroom} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> Open the Newsroom</button>
         <button className="btn" onClick={onSubmit} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}><I.arrow style={{ fontSize: 14 }} /> Submit a tip</button>
       </div>
-      {sections.length > 0 && (
+      {sections.length > 1 && (
         <div style={{ marginTop: 34, paddingTop: 20, borderTop: "1.5px solid var(--rule)" }}>
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 10 }}>Columns</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>

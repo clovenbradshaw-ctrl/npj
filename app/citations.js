@@ -163,6 +163,28 @@
     return n;
   }
 
+  // ---- context links: sources cited for CONTEXT, not proof ----
+  // A second, lighter relation a claim span can carry: prior coverage it BUILDS
+  // ON — the context of past articles — rather than a pinned line that proves it.
+  // Stored as `data-context` (space-separated source keys), kept deliberately
+  // apart from the proof plumbing (data-src / data-quote / data-cite-id) so the
+  // publish gate and CiteyBrain — which only read proof — never see it. A sentence
+  // can thus be BOTH grounded (proved) AND set in context of prior coverage.
+  function contextKeys(span) {
+    return String((span && span.getAttribute && span.getAttribute('data-context')) || '')
+      .split(/\s+/).filter(Boolean);
+  }
+  function setContextKeys(span, list) {
+    if (!span || !span.setAttribute) return;
+    var uniq = [];
+    (list || []).forEach(function (x) { if (x && uniq.indexOf(x) < 0) uniq.push(x); });
+    if (uniq.length) span.setAttribute('data-context', uniq.join(' '));
+    else span.removeAttribute('data-context');
+  }
+  function addContext(span, key) { if (span && key) setContextKeys(span, contextKeys(span).concat([key])); }
+  function removeContext(span, key) { if (span) setContextKeys(span, contextKeys(span).filter(function (x) { return x !== key; })); }
+  function hasContext(span) { return contextKeys(span).length > 0; }
+
   function serialize() { return all(); }
   function hydrate(arr) {
     var R = reg();
@@ -173,6 +195,7 @@
     mint: mint, get: get, all: all, forSource: forSource, remove: remove,
     ids: ids, citationsFor: citationsFor, projectAttrs: projectAttrs,
     attach: attach, detach: detach, usage: usage,
+    contextKeys: contextKeys, addContext: addContext, removeContext: removeContext, hasContext: hasContext,
     migrateFromQuote: migrateFromQuote, migrateRoot: migrateRoot,
     serialize: serialize, hydrate: hydrate
   };

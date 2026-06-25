@@ -32,15 +32,16 @@ function MemberChips({ list, me }) {
   return (
     <span style={{ display: "inline-flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
       {list.map(m => {
-        const name = m.mxid.replace(/^@/, "").split(":")[0];
+        const name = (m.guest && m.guestName) ? m.guestName : m.mxid.replace(/^@/, "").split(":")[0];
         const invited = m.membership === "invite";
+        const tag = (m.guest ? " · guest" : "") + (invited ? " · invited" : "");
         return (
-          <span key={m.mxid} title={m.mxid + (invited ? " — invited, hasn't joined yet" : m.mxid === me ? " — you" : " — member")}
+          <span key={m.mxid} title={m.mxid + (m.guest ? " — guest" : "") + (invited ? " · invited, hasn't joined yet" : m.mxid === me ? " — you" : " — member")}
             className="np-mono" style={{ fontSize: 9.5, padding: "1px 7px", whiteSpace: "nowrap",
               border: invited ? "1px dashed var(--ink-soft)" : "1px solid var(--ink)",
               background: invited ? "transparent" : (m.mxid === me ? "var(--yellow)" : "var(--card)"),
               color: invited ? "var(--ink-soft)" : "var(--ink)" }}>
-            {invited ? "◌ " : "● "}{name}{invited ? " · invited" : ""}
+            {invited ? "◌ " : "● "}{name}{tag}
           </span>
         );
       })}
@@ -504,6 +505,29 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     return () => { alive = false; };
   }, [signedIn]);
 
+  // shared project documents: pull each project room's docs INTO the local store
+  // (the room is the shared source of truth), then re-list — so an invited member
+  // actually SEES the project's articles instead of an empty room. Also opens the
+  // doc event to members on rooms we own, so they can edit, not just read. All
+  // best-effort: a hiccup just leaves the per-account view as it was.
+  useEffect(() => {
+    if (!signedIn || !rooms) return;
+    let alive = true;
+    (async () => {
+      const projs = []; const seen = {};
+      (rooms.drafts || []).forEach(d => { if (d.roomId && !seen[d.roomId]) { seen[d.roomId] = 1; projs.push({ roomId: d.roomId, title: d.title }); } });
+      (rooms.joined || []).forEach(r => { if (r.kind !== "control" && r.roomId && !seen[r.roomId]) { seen[r.roomId] = 1; projs.push({ roomId: r.roomId, title: r.name }); } });
+      let pulled = false;
+      for (const p of projs) {
+        if (!alive) return;
+        try { const docs = await window.NpjDrafts.pullRoomDocs(p.roomId, p.title); if (docs && docs.length) pulled = true; } catch (e) {}
+        if (window.MatrixAuth.ensureDocPower) window.MatrixAuth.ensureDocPower(p.roomId).catch(() => {});
+      }
+      if (alive && pulled) { try { const list = await window.NpjDrafts.list(); setDrafts(list || []); } catch (e) {} }
+    })();
+    return () => { alive = false; };
+  }, [rooms, signedIn]);
+
   // published record: the versioned event logs under articles/ (the real
   // record), plus any legacy .md files still at the repo root (best-effort)
   useEffect(() => {
@@ -593,10 +617,11 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
 
   // optimistic UI: a just-sent invite shows pending immediately; a new project
   // appears without waiting on the next homeserver sync
-  const addPendingMember = (roomId, mxid) => setMembers(m => {
+  const addPendingMember = (roomId, mxid, name) => setMembers(m => {
     const cur = m[roomId] || [];
     if (cur.some(x => x.mxid === mxid)) return m;
-    return { ...m, [roomId]: [...cur, { mxid, membership: "invite" }] };
+    const chip = name ? { mxid, membership: "invite", guest: true, guestName: name } : { mxid, membership: "invite" };
+    return { ...m, [roomId]: [...cur, chip] };
   });
   const addProject = ({ roomId, title }) => setRooms(r => {
     const draftsIdx = (r && r.drafts) || [];
@@ -721,6 +746,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     <MemberChips list={members[p.roomId]} me={me} />
                     <span style={{ flex: 1 }} />
                     <InviteControl roomId={p.roomId} onInvited={(mx) => addPendingMember(p.roomId, mx)} />
+                    <NewAccountInvite roomId={p.roomId} roomTitle={p.title} onInvited={(mx, name) => addPendingMember(p.roomId, mx, name)} />
                   </div>
                   <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 5, display: "flex", alignItems: "center", gap: 5 }}>
                     <I.shield style={{ fontSize: 11 }} /> Everyone invited can open and edit every article and source in this project.

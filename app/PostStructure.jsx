@@ -46,11 +46,12 @@
   }
 
   // ---- a single section row (draggable; click the label to jump) ----
-  function SectionRow({ sec, api, NR, depth, drag }) {
+  function SectionRow({ sec, api, NR, depth, drag, activeId }) {
     const text = (sec.heading && sec.heading.trim()) || "Untitled section";
     const slug = sec.body && sec.body.headingSlug;
     const isStub = sec.body && sec.body.kind === "stubOnly";
     const isDragging = drag.dragId === sec.id;
+    const active = !!(slug && slug === activeId);
     const hint = drag.hint && drag.hint.kind === "section" && drag.hint.id === sec.id ? drag.hint.edge : null;
     return (
       <div
@@ -62,11 +63,13 @@
         style={{ position: "relative", opacity: isDragging ? 0.4 : 1,
           borderTop: hint === "before" ? "2px solid var(--yellow)" : "2px solid transparent",
           borderBottom: hint === "after" ? "2px solid var(--yellow)" : "2px solid transparent" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 0 3px " + (depth * 12) + "px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "3px 4px 3px " + (depth * 12 + 4) + "px",
+          background: active ? "rgba(255,236,1,.09)" : "transparent",
+          borderLeft: active ? "2px solid var(--yellow)" : "2px solid transparent" }}>
           <span title="Drag to reorder or move into a section" style={{ cursor: "grab", color: NR.muted, fontSize: 12, lineHeight: 1, userSelect: "none" }}>⠿</span>
           <button onClick={() => slug && api.jumpTo(slug)} className="np-cond"
             title={isStub ? "Empty — write under this heading" : "Jump to this section"}
-            style={{ flex: 1, textAlign: "left", background: "none", border: 0, color: isStub ? NR.muted : NR.soft, padding: "1px 0", fontSize: 12.5, fontWeight: 500, cursor: slug ? "pointer" : "default", lineHeight: 1.25, fontStyle: isStub ? "italic" : "normal", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            style={{ flex: 1, textAlign: "left", background: "none", border: 0, color: active ? NR.text : (isStub ? NR.muted : NR.soft), padding: "1px 0", fontSize: 12.5, fontWeight: active ? 700 : 500, cursor: slug ? "pointer" : "default", lineHeight: 1.25, fontStyle: isStub ? "italic" : "normal", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {text}
           </button>
           <button onClick={() => api.deleteSection(sec.id)} title="Remove from the outline (the heading & prose stay in the document)"
@@ -98,14 +101,19 @@
         </div>
         <div style={{ padding: "4px 6px" }}>
           {empty
-            ? <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.45, fontStyle: "italic", padding: "2px 0 2px 12px" }}>{slot.prompt || "Drag a section here, or write under this heading."}</div>
+            ? <div style={{ padding: "2px 0 2px 12px" }}>
+                <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.45, fontStyle: "italic", marginBottom: 5 }}>{slot.prompt || "Drag a section here, or write under this heading."}</div>
+                {api.startSlot &&
+                  <button onClick={() => api.startSlot(slot.id)} className="np-cond" title="Add this section to the document and start writing — its prompt guides you in the page"
+                    style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "2px 9px", fontSize: 11, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>Start →</button>}
+              </div>
             : children}
         </div>
       </div>
     );
   }
 
-  function StructureRail({ api, NR, isMobile }) {
+  function StructureRail({ api, NR, isMobile, mode, setMode, graphText, onSelectSentence, onExpand, activeId }) {
     const lib = S();
     const [menu, setMenu] = useState(null);          // "apply" | null
     const [dragId, setDragId] = useState(null);      // section being dragged
@@ -115,9 +123,39 @@
     const state = api.state;
     const hasType = !!(state && state.appliedTypeId);
 
+    // swap the rail's representation: the nested outline (holonic) ⇄ the actual
+    // proposition graph. The full Graph view (⤢) is the big interactive canvas.
+    const canGraph = !!(mode != null && setMode && window.GraphView);
+    const modeBtn = (k, label, title) => (
+      <button onClick={() => setMode(k)} className="np-cond" title={title}
+        style={{ flex: 1, background: mode === k ? "var(--yellow)" : "transparent", color: mode === k ? "var(--ink)" : NR.soft, border: "1px solid " + NR.line, padding: "3px 6px", fontSize: 11, fontWeight: 700, letterSpacing: ".02em", cursor: "pointer" }}>{label}</button>
+    );
+    const modeBar = canGraph ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 10 }}>
+        {modeBtn("nested", "Outline", "Nested outline (holonic nesting)")}
+        {modeBtn("graph", "Graph", "The document's propositions as a graph")}
+        {mode === "graph" && onExpand &&
+          <button onClick={onExpand} title="Open the full Graph view" style={{ background: "transparent", color: NR.soft, border: "1px solid " + NR.line, padding: "3px 7px", fontSize: 12, lineHeight: 1, cursor: "pointer" }}>⤢</button>}
+      </div>
+    ) : null;
+
+    if (mode === "graph") {
+      return (
+        <div style={{ padding: "2px 2px 16px" }}>
+          {modeBar}
+          <div style={{ height: 300, border: "1px solid " + NR.line, background: NR.bg, overflow: "hidden" }}>
+            {window.GraphView ? <window.GraphView text={graphText} onSelectSentence={onSelectSentence} NR={NR} isMobile={isMobile} bar={false} /> : null}
+          </div>
+          <div className="np-mono" style={{ fontSize: 10, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>
+            Entities and the relations between them, read from the prose. Click a node to jump to it; ⤢ opens the full view.
+          </div>
+        </div>
+      );
+    }
+
     // blank page → the picker
     if (!api.hasContent && !hasType) {
-      return <div style={{ padding: "2px 2px 20px" }}><TypePicker api={api} NR={NR} /></div>;
+      return <div style={{ padding: "2px 2px 20px" }}>{modeBar}<TypePicker api={api} NR={NR} /></div>;
     }
 
     // ---- drag plumbing (shared by rows + slots) ----
@@ -137,14 +175,10 @@
       dropSection: (e, sec) => {
         if (!dragId || dragId === sec.id) return;
         e.preventDefault(); e.stopPropagation();
-        const parent = sec.parentSlotId == null ? null : sec.parentSlotId;
-        const sibs = parent == null ? lib.topRefs(state).filter(r => r.kind === "section").map(r => r.id)
-          : lib.childRefs(state, parent).map(s => s.id);
-        let idx = sibs.indexOf(sec.id); if (idx < 0) idx = sibs.length;
-        if ((hint && hint.edge) === "after") idx += 1;
-        const from = sibs.indexOf(dragId);
-        if (from > -1 && from < idx) idx -= 1; // account for the dragged row leaving
-        api.moveSection(dragId, parent, idx);
+        // same drop math the in-document block drag uses (app/structure.js) — the
+        // rail and the page can never disagree about where a section lands.
+        const m = lib.sectionDropIndex(state, dragId, sec.id, (hint && hint.edge) || "before");
+        if (m) api.moveSection(dragId, m.parentSlotId, m.index);
         clear();
       },
       overSlot: (e, slot) => { if (!dragId) return; e.preventDefault(); setHint({ kind: "slot", id: slot.id }); },
@@ -171,6 +205,7 @@
 
     return (
       <div style={{ padding: "2px 2px 16px" }}>
+        {modeBar}
         {/* type bar */}
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, position: "relative" }}>
           {hasType ? (
@@ -210,14 +245,14 @@
         )}
         {refs.map(r => {
           if (r.kind === "slot") {
-            const kids = lib.childRefs(state, r.id).map(sec => <SectionRow key={sec.id} sec={sec} api={api} NR={NR} depth={1} drag={drag} />);
+            const kids = lib.childRefs(state, r.id).map(sec => <SectionRow key={sec.id} sec={sec} api={api} NR={NR} depth={1} drag={drag} activeId={activeId} />);
             return (
               <div key={r.id} onDragOver={e => dragSlot ? drag.reorderSlotOnto(e, r.ref) : null} onDrop={e => dragSlot ? drag.reorderSlotOnto(e, r.ref) : null}>
                 <SlotBlock slot={r.ref} api={api} NR={NR} drag={drag}>{kids}</SlotBlock>
               </div>
             );
           }
-          return <SectionRow key={r.id} sec={r.ref} api={api} NR={NR} depth={0} drag={drag} />;
+          return <SectionRow key={r.id} sec={r.ref} api={api} NR={NR} depth={0} drag={drag} activeId={activeId} />;
         })}
 
         {/* a place to drop a section back to the top level (only with a type applied) */}

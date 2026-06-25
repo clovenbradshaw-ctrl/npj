@@ -39,14 +39,10 @@ const SEED_ADMIN = "@collective_boundary730383:hyphae.social";
 
 const LAYOUT_DEFAULTS = {
   sections: [
-    { name: "Latest", publishers: [] },
-    { name: "Investigations", publishers: [] },
-    { name: "Data", publishers: [] },
-    { name: "Archive", publishers: [] }
+    { name: "Latest", publishers: [] }
   ],
   taglines: ["created", "backed", "edited"],
   utility: [
-    { label: "Data", nav: "explore" },
     { label: "Our standards", nav: "standards" },
     { label: "Submit", nav: "submit" }
   ],

@@ -244,7 +244,7 @@ function AdminEditor() {
                   <AdminField value={u.label} onChange={(v) => setUtility(layout.utility.map((x, j) => j === i ? { ...x, label: v } : x))} placeholder="Label" />
                   <select value={u.nav} onChange={(e) => setUtility(layout.utility.map((x, j) => j === i ? { ...x, nav: e.target.value } : x))}
                     style={{ border: "1px solid " + AE.line, background: AE.field, color: AE.text, fontFamily: "var(--cond)", fontSize: 13, padding: "0 6px" }}>
-                    <option value="explore">→ Data</option><option value="standards">→ Standards</option><option value="submit">→ Submit</option>
+                    <option value="explore">→ Sources Archive</option><option value="standards">→ Standards</option><option value="submit">→ Submit</option>
                   </select>
                   <MiniBtn danger onClick={() => setUtility(layout.utility.filter((_, j) => j !== i))} title="Remove">×</MiniBtn>
                 </div>

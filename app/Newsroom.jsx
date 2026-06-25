@@ -19,17 +19,24 @@ function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? 
 // source whose content the app can render inline (image / pdf / text). Web-link
 // snapshots are excluded — they keep their "open ↗".
 function nrIsFileSrc(rec) {
+  if (rec && rec.type === "interview") return false;   // a conversation isn't a file to open
   const SV = window.NpjSourceView;
   return !!(SV && rec && (/^doc-/.test(rec.id || "") || SV.isViewable(rec)));
 }
 
 const DEK_PH = "Subtitle — one line under the headline";
+// Editable caption + credit lines, shared by the banner and inline image figures.
+// The credit takes a markdown hyperlink like a contributor bio (name /
+// [outlet](https://…)), rendered safely via npjRichText in the reader.
+const FIG_CAPS =
+  '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
+  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
 // so the author fills in fields, not loose formatted prose.
 const START_DOC =
-  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot></figure>' +
+  '<figure contenteditable="false" class="nr-banner"><image-slot id="nr-banner" fitcontrol conform shape="rect" placeholder="Banner image — drag a photo or an archive.org link" style="width:100%;height:300px;display:block"></image-slot>' + FIG_CAPS + '</figure>' +
   '<h1></h1>' +
   '<p class="nr-dek" data-ph="' + DEK_PH + '"><br/></p>' +
   '<p><br/></p>';
@@ -38,23 +45,71 @@ const START_DOC =
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
-// The media-census thumbnails are plain <img>s, so they miss the resolution an
-// <image-slot> does for itself. Mirror that fallback chain on error: try the
-// archive.org copy (data-alt the slot carries), then resolve an auth-gated
-// media-store URL to a renderable blob. Without this, a banner whose primary
-// URL needs auth (or has lapsed to its archive copy) shows a broken image.
-function mediaThumbFallback(e, m) {
-  const img = e.currentTarget;
-  if (img.dataset.fbDone) return;
-  const cur = img.getAttribute("src") || "";
-  if (m && m.alt && m.alt !== cur && img.dataset.triedAlt !== m.alt) { img.dataset.triedAlt = m.alt; img.src = m.alt; return; }
-  const media = window.NpjMedia;
-  if (media && media.isStoreUrl && media.isStoreUrl(cur)) {
-    img.dataset.fbDone = "1";
-    media.resolveDisplay(cur).then(u => { if (u && u !== cur) img.src = u; }).catch(() => {});
-    return;
+// Show an image that may still live on the Matrix media store. A bare <img>
+// can't load such a URL on an authenticated-media homeserver (Matrix 1.11+):
+// the unauthenticated GET is refused, so a freshly dropped/uploaded photo that
+// hasn't been frozen to archive.org yet renders broken — the media census
+// thumbnail and the lightbox used to show exactly that. Resolve it the same way
+// the reader (MediaImg) and <image-slot> do — fetch the bytes with the session
+// token and hand back a blob: URL — before display; non-store URLs (archive.org,
+// author src, data:) pass straight through.
+function NrMediaImg({ url, alt, style, ...rest }) {
+  const [resolved, setResolved] = useState(null);
+  useEffect(() => {
+    let alive = true, made = null;
+    setResolved(null);
+    if (!url) return;
+    const media = window.NpjMedia;
+    if (media && media.isStoreUrl && media.isStoreUrl(url) && media.resolveDisplay) {
+      media.resolveDisplay(url).then(u => {
+        if (!alive) { if (u && u !== url && u.indexOf("blob:") === 0) URL.revokeObjectURL(u); return; }
+        if (u && u !== url && u.indexOf("blob:") === 0) made = u;
+        setResolved(u || url);
+      }).catch(() => { if (alive) setResolved(url); });
+    } else {
+      setResolved(url);
+    }
+    return () => { alive = false; if (made) URL.revokeObjectURL(made); };
+  }, [url]);
+  // hold a neutral box while an authenticated store fetch is in flight rather
+  // than flashing a doomed unauthenticated <img> GET
+  if (resolved == null) return <div aria-hidden="true" style={{ ...style, background: NR.field }} {...rest} />;
+  return <img src={resolved} alt={alt || ""} style={style} {...rest} />;
+}
+
+// A small, clickable PREVIEW of an uploaded file on its source card — the
+// screenshot/scan you cited, shown inline so you can see the content (and click
+// into the full viewer) instead of guessing from a filename. Images render as a
+// thumbnail; a PDF shows a labelled tile. The image URL resolves the same way
+// the reader does (session blob → token-fetched media-store blob → archive /
+// original), via NrMediaImg. Returns null for kinds with no useful thumbnail.
+function NrSourceThumb({ srcKey, rec, onOpen }) {
+  const SV = window.NpjSourceView;
+  if (!SV) return null;
+  const key = (rec && (rec.id || rec.key)) || srcKey || "";
+  const kind = SV.kindOf(rec);
+  if (kind === "image") {
+    const url = SV.blobUrl(key) || rec.file_url || rec.archive_url || rec.original_url || "";
+    if (!url) return null;
+    return (
+      <button onClick={onOpen} title="Open this image" style={{ display: "block", width: "100%", padding: 0, border: "1px solid " + NR.line, background: NR.bg, cursor: "pointer", position: "relative", overflow: "hidden", lineHeight: 0 }}>
+        <NrMediaImg url={url} alt={rec.title || "uploaded image"} style={{ width: "100%", height: 132, objectFit: "cover", display: "block" }} />
+        <span className="np-mono" style={{ position: "absolute", right: 5, bottom: 5, fontSize: 8.5, color: "#fff", background: "rgba(8,7,5,.66)", padding: "1px 5px", display: "inline-flex", alignItems: "center", gap: 3, pointerEvents: "none", lineHeight: 1.4 }}><I.eye style={{ fontSize: 10 }} /> view</span>
+      </button>
+    );
   }
-  img.dataset.fbDone = "1";
+  if (kind === "pdf") {
+    return (
+      <button onClick={onOpen} title="Open this PDF" style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, cursor: "pointer", padding: "10px 11px", textAlign: "left" }}>
+        <I.doc style={{ fontSize: 22, color: NR.warn, flex: "0 0 auto" }} />
+        <span style={{ minWidth: 0 }}>
+          <span style={{ display: "block", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.filename || rec.title || "PDF document"}</span>
+          <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>PDF · click to read &amp; cite</span>
+        </span>
+      </button>
+    );
+  }
+  return null;
 }
 
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
@@ -63,7 +118,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const canPub = window.canPublish(layout, session && session.user_id);
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
-  const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) — same draft
+  const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) | graph — same draft
+  const [graphText, setGraphText] = useState("");      // plain text fed to the eoreader4 proposition graph (refreshed on entering the Graph view)
+  const [structMode, setStructMode] = useState("nested"); // CONTENTS rail: nested outline (holonic) | graph
+  const [activeId, setActiveId] = useState(null);      // heading the reader is currently scrolled into (outline "you are here")
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
   const restored = useRef(false);                      // gate autosave until the first restore lands
@@ -81,8 +139,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
+  const [interviewOpen, setInterviewOpen] = useState(false); // the "cite a conversation" composer
   const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
+  const [previewDoc, setPreviewDoc] = useState(null); // built article for the live "exactly as published" preview
   const [statusBusy, setStatusBusy] = useState(false); // an unpublish in flight
   const [statusErr, setStatusErr] = useState(null);
   const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
@@ -134,7 +194,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
     const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room, structure: structLog.current });
+    const composition = window.NpjComposition ? window.NpjComposition.serialize(draftId) : undefined;
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -163,6 +224,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
         if (d.citations && window.NpjCitations) window.NpjCitations.hydrate(d.citations); // rehydrate citation records
         if (d.sentenceLedger && window.NpjSentences) sentenceLedger.current = window.NpjSentences.hydrateLedger(d.sentenceLedger); // stable sentence ids survive reload
+        if (d.composition && window.NpjComposition) window.NpjComposition.hydrate(draftId, d.composition); // carry the typed-vs-pasted record across reloads
         if (ed.current && d.html) {
           ed.current.innerHTML = d.html;
           // older drafts predate the dek — every article gets the field
@@ -196,7 +258,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (typeof d.slug === "string") setFileSlug(d.slug);
         if (Array.isArray(d.tags)) setTags(d.tags);
         if (d.column) setColumn(d.column);
-        if (Array.isArray(d.sources)) setSources(d.sources);
+        // Strip in-flight UI flags that may have been autosaved mid-operation:
+        // after a restore nothing is driving that async work, so a persisted
+        // snapshotting / uploading / ocr flag would spin its row forever. Re-derive
+        // "archived" from whether the rehydrated record actually has a snapshot.
+        if (Array.isArray(d.sources)) setSources(d.sources.map(s => {
+          const rec = (s && s.key && window.NPJ.SOURCES[s.key]) || null;
+          const { snapshotting, uploading, ocr, uploadErr, ...rest } = s || {};
+          return { ...rest, archived: !!(rec && rec.archive_url) };
+        }));
         if (Array.isArray(d.citeOrder)) { citeOrderRef.current = d.citeOrder; setCiteOrder(d.citeOrder); }
         if (d.room) setRoom(d.room);
         // rehydrate the structure log; the post-restore scanHeadings reconciles
@@ -208,6 +278,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         }
         setTimeout(scanHeadings, 30); setRev(v => v + 1);
       }
+      // baseline the composition tracker to whatever's now in the editor (seed or
+      // restored body) so the first real keystroke — not the load — starts the count
+      if (window.NpjComposition) window.NpjComposition.attach(draftId, ed.current ? (ed.current.textContent || "").length : 0);
       restored.current = true;
     })();
     return () => { alive = false; };
@@ -218,6 +291,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // entering a grounding view builds/extends the stable-id ledger (track()) — save
   // so those ids persist even if the author switches views without editing
   useEffect(() => { if (view !== "prose") scheduleSave(); }, [view, scheduleSave]);
+  // A plain Return is a paragraph break; pin the browser's block separator to <p>
+  // so Return splits into <p> blocks consistently (Chrome/Firefox/Safari differ on
+  // the default). The publish pipeline (htmlToBlocks) and the reader then render a
+  // Return as a spaced paragraph and a Shift+Return as a tight <br> — see onEditorKeyDown.
+  useEffect(() => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} }, []);
 
   // ---- headings → ids + contents rail (jump-links) ----
   const scanHeadings = useCallback(() => {
@@ -242,11 +320,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!f.dataset.mid) f.dataset.mid = "m" + Date.now().toString(36) + i;
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
-      const alt = slot ? slot.getAttribute("data-alt") : null;   // archive.org copy the slot falls back to
       const embed = f.getAttribute("data-embed-url");
-      const cap = f.querySelector("figcaption");
+      const cap = f.querySelector("figcaption:not(.cmp-credit)");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
-      if (url) found.push({ kind: "image", url, alt, mid: f.dataset.mid, caption });
+      if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
     });
     setMedia(found);
@@ -338,6 +415,56 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     cont.scrollTop += (er.top - cr.top) - 18;
   };
 
+  // Refresh the text the proposition graph reads. The editor is only editable in
+  // prose view, so a debounced refresh on input keeps the rail's compact graph
+  // live; entering either graph surface (the Graph view, or the rail in graph
+  // mode) refreshes at once. docFor() caches by text, so unchanged prose is free.
+  const graphTimer = useRef(null);
+  const refreshGraphText = useCallback(() => { setGraphText(ed.current ? (ed.current.innerText || "") : ""); }, []);
+  const scheduleGraphText = useCallback(() => { clearTimeout(graphTimer.current); graphTimer.current = setTimeout(refreshGraphText, 700); }, [refreshGraphText]);
+  useEffect(() => { if (view === "graph" || structMode === "graph") refreshGraphText(); }, [view, structMode, refreshGraphText]);
+
+  // Outline "you are here": track the heading the reader is currently scrolled
+  // into (the last heading above the top of the viewport) and highlight its row.
+  useEffect(() => {
+    const cont = scroller.current; if (!cont || view !== "prose") return;
+    let raf = 0;
+    const onScroll = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0; const root = ed.current; if (!root) return;
+        const hs = Array.from(root.querySelectorAll("h1,h2,h3")).filter(h => h.id);
+        const top = cont.getBoundingClientRect().top + 60;
+        let cur = null;
+        for (let i = 0; i < hs.length; i++) { if (hs[i].getBoundingClientRect().top <= top) cur = hs[i].id; else break; }
+        setActiveId(cur || (hs[0] && hs[0].id) || null);
+      });
+    };
+    cont.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => { cont.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [toc, view]);
+
+  // Clicking a node/edge in the graph jumps back to where that proposition sits
+  // in the prose: switch to the editor, find the block holding the sentence (or
+  // the entity name), scroll to it and flash it.
+  const jumpToProse = useCallback((info) => {
+    setView("prose");
+    setTimeout(() => {
+      const root = ed.current, cont = scroller.current; if (!root || !cont) return;
+      const needle = String((info && (info.text || info.label)) || "").trim().slice(0, 60).toLowerCase();
+      if (!needle) return;
+      const blocks = Array.from(root.querySelectorAll("h1,h2,h3,p,li,blockquote"));
+      let target = blocks.find(b => (b.innerText || "").toLowerCase().includes(needle));
+      if (!target && info && info.label) { const lb = String(info.label).toLowerCase(); target = blocks.find(b => (b.innerText || "").toLowerCase().includes(lb)); }
+      if (!target) return;
+      const cr = cont.getBoundingClientRect(), er = target.getBoundingClientRect();
+      cont.scrollTop += (er.top - cr.top) - 40;
+      target.classList.add("nr-jump-flash");
+      setTimeout(() => { try { target.classList.remove("nr-jump-flash"); } catch (e) {} }, 1200);
+    }, 50);
+  }, []);
+
   // the api the structure rail (app/PostStructure.jsx) drives. Every mutation
   // goes through dispatchStruct → append-only log → fold → (reflow) → persist.
   const structApi = useMemo(() => {
@@ -352,6 +479,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       removeType: () => dispatchStruct(lib.ops.removeType(), { reflow: true }),
       saveType: (name) => { const t = lib.saveFrom(structure, name); lib.types.save(t); setStructTypes(lib.types.all()); dispatchStruct(lib.ops.saveType(structure, t.id)); },
       addSlot: (slotId) => { const sl = lib.slotById(structure, slotId); if (sl) dispatchStruct(lib.ops.addSlot(structure, sl)); },
+      // "Start →": lay this slot's section into the page so the prompt guides
+      // writing in context. An H2 carrying the slot label (selected, so the first
+      // keystroke replaces it) + a ghost prompt paragraph that publishes nothing
+      // while empty (the .nr-dek mechanism). The section is created bound to this
+      // slot, then reflowed into place; reconcile keeps it bound as you type.
+      startSlot: (slotId) => {
+        const sl = lib.slotById(structure, slotId); if (!sl || !ed.current) return;
+        const label = sl.label || "New section";
+        const evs = lib.ops.createSection(slotId, 1e6, { heading: label });
+        const secId = evs[0] && evs[0].id; if (!secId) return;
+        const h = document.createElement("h2"); h.setAttribute("data-sec", secId); h.textContent = label;
+        const p = document.createElement("p"); p.className = "nr-prompt"; if (sl.prompt) p.setAttribute("data-ph", sl.prompt); p.innerHTML = "<br>";
+        ed.current.appendChild(h); ed.current.appendChild(p);
+        dispatchStruct(evs, { reflow: true });
+        setTimeout(() => {
+          scanHeadings();
+          try { const sel = window.getSelection(); const r = document.createRange(); r.selectNodeContents(h); sel.removeAllRanges(); sel.addRange(r); } catch (e) {}
+          if (h.id) scrollToId(h.id);
+          if (ed.current) ed.current.focus();
+        }, 0);
+      },
       moveSection: (id, parent, order) => dispatchStruct(lib.ops.moveSection(id, parent, order), { reflow: true }),
       moveBulk: (ids, parent, order) => dispatchStruct(lib.ops.moveBulk(ids, parent, order), { reflow: true }),
       reorderSlot: (id, order) => dispatchStruct(lib.ops.reorderSlot(id, order), { reflow: true }),
@@ -359,6 +507,138 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       jumpTo: (slug) => { if (isMobile) setMTab("write"); setTimeout(() => scrollToId(slug), isMobile ? 30 : 0); }
     };
   }, [structure, structTypes, blankChosen, toc.length, dispatchStruct, isMobile]);
+
+  // ---- in-document block drag (the Google-Docs/Notion grip) ----------------
+  // A grip in the page's left gutter lets the author grab any block — paragraph,
+  // image, quote, list — and drop it elsewhere. Grabbing a HEADING moves its
+  // whole section, routed through the structure log (lib.sectionDropIndex, the
+  // same math the Contents rail uses) so the outline stays in step. Any other
+  // block moves in the DOM directly — the structure layer only tracks headings,
+  // and a paragraph simply belongs to whichever section's span it now sits in.
+  // Desktop only: there's room in the gutter and a real pointer to grab with.
+  const blockDrag = useRef(null);    // { el, isHeading, secId } for the duration of a drag
+  const dropPlan = useRef(null);     // { refEl|null, indicator } recomputed on each dragover
+  const gripRaf = useRef(0);
+  const [grip, setGrip] = useState(null);      // { top, left, isHeading, block } — the hover handle
+  const [dropAt, setDropAt] = useState(null);  // { top, left, width } — the insertion line
+  const [dragging, setDragging] = useState(false);
+
+  const isLeadBlock = (b) => !!(b && (b.tagName === "H1" || (b.classList && (b.classList.contains("nr-dek") || (b.tagName === "FIGURE" && b.classList.contains("nr-banner"))))));
+  const isMovableBlock = (b) => !!(b && b.nodeType === 1 && b.tagName !== "BR" && !isLeadBlock(b));
+  const isHeadingBlock = (b) => !!(b && /^H[2-3]$/.test(b.tagName || ""));
+  // walk up to the direct child of the editor root that holds this node
+  const topBlockOf = (node) => {
+    const root = ed.current; if (!root) return null;
+    let el = node;
+    while (el && el !== root && el.parentNode !== root) el = el.parentNode;
+    return (el && el.parentNode === root) ? el : null;
+  };
+
+  // hover → place the grip beside the block under the cursor. While the pointer
+  // sits in the gutter (over the editor itself, not a block) we keep the last
+  // grip, so the author can travel out to grab it without it vanishing.
+  const onEdMouseMove = (e) => {
+    if (isMobile || dragging) return;
+    if (gripRaf.current) return;
+    const target = e.target;
+    gripRaf.current = requestAnimationFrame(() => {
+      gripRaf.current = 0;
+      const root = ed.current, sc = scroller.current; if (!root || !sc) return;
+      const block = topBlockOf(target);
+      if (!isMovableBlock(block)) return; // gutter / lead node — leave the grip where it is
+      const sRect = sc.getBoundingClientRect(), bRect = block.getBoundingClientRect();
+      const top = bRect.top - sRect.top + sc.scrollTop;
+      const left = bRect.left - sRect.left + sc.scrollLeft - 26;
+      setGrip(prev => (prev && prev.block === block && Math.abs(prev.top - top) < 0.5) ? prev : { top, left, isHeading: isHeadingBlock(block), block });
+    });
+  };
+  const clearGrip = () => { if (!dragging) setGrip(null); };
+
+  const onGripDragStart = (e) => {
+    const block = grip && grip.block;
+    if (!block || !ed.current || !ed.current.contains(block)) { e.preventDefault(); return; }
+    const isHeading = isHeadingBlock(block);
+    let secId = null;
+    if (isHeading) { try { reconcileStructure(); } catch (x) {} secId = block.getAttribute("data-sec"); }
+    blockDrag.current = { el: block, isHeading, secId };
+    setDragging(true);
+    block.classList.add("nr-block-dragging");
+    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); e.dataTransfer.setDragImage(block, 14, 12); } catch (x) {}
+  };
+
+  // where would a drop land right now? Returns the reference block to insert
+  // before (null = end of document) and the geometry of the insertion line.
+  const computeBlockDrop = (clientY) => {
+    const d = blockDrag.current, root = ed.current, sc = scroller.current;
+    if (!d || !root || !sc) return null;
+    const kids = Array.prototype.slice.call(root.children).filter(b => b.nodeType === 1);
+    let firstBody = 0;
+    for (let i = 0; i < kids.length; i++) { if (isLeadBlock(kids[i])) firstBody = i + 1; else break; }
+    let k = kids.length;
+    for (let i = firstBody; i < kids.length; i++) { const r = kids[i].getBoundingClientRect(); if (clientY < r.top + r.height / 2) { k = i; break; } }
+    if (k < firstBody) k = firstBody;
+    let refEl = null;
+    if (d.isHeading) {
+      // sections drop between sections — snap to the next section heading
+      for (let i = k; i < kids.length; i++) { const b = kids[i]; if (isHeadingBlock(b) && b !== d.el && b.getAttribute("data-sec")) { refEl = b; break; } }
+    } else {
+      refEl = kids[k] || null;
+    }
+    const sRect = sc.getBoundingClientRect();
+    const sample = kids[firstBody] || refEl || kids[kids.length - 1];
+    if (!sample) return null;
+    const smr = sample.getBoundingClientRect();
+    const left = smr.left - sRect.left + sc.scrollLeft;
+    const width = Math.max(40, smr.width);
+    let top;
+    if (refEl) { const rr = refEl.getBoundingClientRect(); top = rr.top - sRect.top + sc.scrollTop - 1; }
+    else { const last = kids[kids.length - 1]; const rr = last.getBoundingClientRect(); top = rr.bottom - sRect.top + sc.scrollTop - 1; }
+    return { refEl, indicator: { top, left, width } };
+  };
+
+  const onBlockDragOver = (e) => {
+    if (!blockDrag.current) return;
+    e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (x) {}
+    const plan = computeBlockDrop(e.clientY);
+    dropPlan.current = plan;
+    setDropAt(prev => (plan && prev && Math.abs(prev.top - plan.indicator.top) < 0.5 && prev.left === plan.indicator.left) ? prev : (plan ? plan.indicator : null));
+  };
+
+  const performBlockDrop = (d, plan) => {
+    const root = ed.current, lib = window.NpjStructure; if (!root) return;
+    if (d.isHeading && d.secId && lib) {
+      const st = lib.fold(structLog.current); // fold fresh — dragstart may have just reconciled
+      if (plan && plan.refEl) {
+        const refSec = plan.refEl.getAttribute("data-sec");
+        if (!refSec || refSec === d.secId) return;
+        const m = lib.sectionDropIndex(st, d.secId, refSec, "before");
+        if (m) structApi.moveSection(d.secId, m.parentSlotId, m.index);
+      } else {
+        const ids = lib.flattenIds(st), lastId = ids[ids.length - 1];
+        if (!lastId || lastId === d.secId) return; // already last
+        const lastSec = lib.sectionById(st, lastId);
+        structApi.moveSection(d.secId, lastSec ? lastSec.parentSlotId : null, 1e6);
+      }
+    } else {
+      const ref = plan ? plan.refEl : null;
+      if (ref === d.el || (ref && ref.previousSibling === d.el)) return; // no move
+      try { root.insertBefore(d.el, ref); } catch (x) { return; }
+      scanHeadings(); scheduleSave();
+    }
+  };
+
+  const endBlockDrag = () => {
+    const d = blockDrag.current;
+    if (d && d.el && d.el.classList) d.el.classList.remove("nr-block-dragging");
+    blockDrag.current = null; dropPlan.current = null;
+    setDragging(false); setDropAt(null); setGrip(null);
+  };
+  const onBlockDrop = (e) => {
+    const d = blockDrag.current; if (!d) return;
+    e.preventDefault(); e.stopPropagation();
+    performBlockDrop(d, dropPlan.current || computeBlockDrop(e.clientY));
+    endBlockDrag();
+  };
 
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
@@ -368,7 +648,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (cs && cs.getAttribute("data-cid")) {
       const cid = cs.getAttribute("data-cid");
       const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + cid + '"]');
-      openPin(cid, cs.getAttribute("data-src") || cs.getAttribute("data-cite"), span ? (span.textContent || "").trim() : "");
+      // clicking a marker pins THAT source; clicking the span opens its first source
+      // (the popover lists the rest, and can add another) — a span can cite several
+      const key = cs.classList && cs.classList.contains("md-cite")
+        ? cs.getAttribute("data-cite")
+        : ((span && span.getAttribute("data-src")) || cs.getAttribute("data-src") || cs.getAttribute("data-cite") || "").split(/\s+/).filter(Boolean)[0] || "";
+      openPin(cid, key, span ? (span.textContent || "").trim() : "");
     }
   };
 
@@ -379,10 +664,39 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return () => document.removeEventListener("selectionchange", f);
   }, []);
   const restore = () => { const s = window.getSelection(); if (selRange.current) { s.removeAllRanges(); s.addRange(selRange.current); } else ed.current && ed.current.focus(); };
+  // Land a usable caret INSIDE the body before a programmatic insert. Toolbar
+  // buttons keep focus on the button (their onMouseDown preventDefaults), so when
+  // the author hasn't clicked into the prose yet — they only filled the Title /
+  // Subtitle fields, say, or just bound a source (which clears the saved range) —
+  // the live selection sits outside the editor and execCommand would drop the
+  // node at offset 0, above the non-editable banner figure (the "add image seems
+  // broken" report). Prefer a live in-body selection, then the last saved in-body
+  // range, else the very end of the document.
+  const caretIntoBody = () => {
+    const root = ed.current; if (!root) return;
+    const s = window.getSelection(); if (!s) return;
+    const inBody = (r) => !!(r && r.startContainer && root.contains(r.startContainer));
+    // Read the live selection BEFORE focusing: focus() on a contenteditable that
+    // was never given a caret can synthesize an offset-0 range (which sits above
+    // the banner), and we must not mistake that for a caret the author placed.
+    let r = s.rangeCount ? s.getRangeAt(0) : null;
+    if (!inBody(r)) r = inBody(selRange.current) ? selRange.current.cloneRange() : null;
+    root.focus();
+    if (!r) { r = document.createRange(); r.selectNodeContents(root); r.collapse(false); }
+    s.removeAllRanges(); s.addRange(r);
+  };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
-  const insertHTML = (html) => { ed.current && ed.current.focus(); restore(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
-  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot><figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">photo · drag an image or an archive.org link, then caption &amp; credit</figcaption></figure><p><br/></p>`;
-  const insertImage = () => insertHTML(imageFigure("img-" + Date.now()));
+  const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  // Block-level components (image, embed, verse, poll) can't be nested inside the
+  // banner, headline or dek — put the caret in the body, then step past any such
+  // block, so the new block always lands in the prose flow rather than splitting a
+  // heading or vanishing into the non-editable banner figure.
+  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
+  // module scope). The credit carries a hyperlink the same way a contributor bio
+  // does — a name and an optional [outlet](https://…), via npjRichText at read.
+  const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
+  const insertImage = () => insertBlock(imageFigure("img-" + Date.now()));
 
   // ---- images come in by paste/drop too ----
   // A figure can't live inside the headline or the dek — if the caret is in
@@ -400,10 +714,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // was copied off the web WITH an archive.org URL in the html flavor, the
   // durable CDN link wins over the raw bytes.
   const insertImageFiles = (files, archiveUrl) => {
-    escapeBlock();
     files.forEach((f, i) => {
       const id = "img-" + Date.now().toString(36) + "-" + i;
-      insertHTML(imageFigure(id));
+      insertBlock(imageFigure(id));
       const el = ed.current && ed.current.querySelector("#" + id);
       if (!el) return;
       if (archiveUrl && files.length === 1) el.ingestUrl(archiveUrl);
@@ -417,22 +730,137 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // the draft. Drags that START here keep the browser's native move/copy —
   // the content is already clean.
   const dragFromSelf = useRef(false);
+  // Build a clean fragment from pasted HTML that KEEPS npj grounding and nothing
+  // else: claim-src spans (data-src / data-cite-id / data-quote / data-stance)
+  // and their md-cite markers survive — with fresh, collision-free cids — while
+  // foreign tags are unwrapped to their text and only a small inline whitelist is
+  // kept. Returns { html, keys }; html is "" when there's no provenance to keep.
+  const provenanceHtml = (html) => {
+    if (!html || !/claim-src|md-cite/.test(html)) return { html: "", keys: [] };
+    const src = document.createElement("div"); src.innerHTML = html;
+    if (!src.querySelector(".claim-src, sup.md-cite")) return { html: "", keys: [] };  // our markers only — never reroute a plain external paste
+    const newCid = () => "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e6).toString(36);
+    const cidMap = {};
+    const remap = (old) => old ? (cidMap[old] || (cidMap[old] = newCid())) : newCid();
+    const keys = {};
+    const INLINE = { strong: "strong", b: "strong", em: "em", i: "em", s: "s", code: "code", a: "a" };
+    const out = document.createElement("div");
+    const walk = (parent, node) => {
+      node.childNodes.forEach(c => {
+        if (c.nodeType === 3) { parent.appendChild(document.createTextNode(c.nodeValue)); return; }
+        if (c.nodeType !== 1) return;
+        const tag = c.tagName.toLowerCase();
+        if (tag === "span" && c.classList.contains("claim-src")) {
+          const span = document.createElement("span");
+          const st = c.getAttribute("data-stance");
+          const dq = c.getAttribute("data-quote");
+          span.className = (st || (dq && dq.trim())) ? "claim-src" : "claim-src needs-quote";
+          const ds = c.getAttribute("data-src"); if (ds) { span.setAttribute("data-src", ds); ds.split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; }); }
+          const dci = c.getAttribute("data-cite-id"); if (dci) span.setAttribute("data-cite-id", dci);
+          if (dq != null) span.setAttribute("data-quote", dq);
+          if (st) span.setAttribute("data-stance", st);
+          if (c.hasAttribute("data-cid")) span.setAttribute("data-cid", remap(c.getAttribute("data-cid")));
+          const ttl = c.getAttribute("title"); if (ttl) span.setAttribute("title", ttl);
+          walk(span, c);
+          parent.appendChild(span);
+          return;
+        }
+        if (tag === "sup" && c.classList.contains("md-cite")) {
+          const sup = document.createElement("sup");
+          sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
+          const dc = c.getAttribute("data-cite"); if (dc) { sup.setAttribute("data-cite", dc); keys[dc] = 1; }
+          const dci = c.getAttribute("data-cite-id"); if (dci) sup.setAttribute("data-cite-id", dci);
+          const dq = c.getAttribute("data-quote"); if (dq != null) sup.setAttribute("data-quote", dq);
+          if (c.hasAttribute("data-fn")) sup.setAttribute("data-fn", "1");
+          if (c.hasAttribute("data-cid")) sup.setAttribute("data-cid", remap(c.getAttribute("data-cid")));
+          const ttl = c.getAttribute("title"); if (ttl) sup.setAttribute("title", ttl);
+          sup.textContent = c.textContent || "";
+          parent.appendChild(sup);
+          return;
+        }
+        if (tag === "br") { parent.appendChild(document.createElement("br")); return; }
+        if (tag === "p" || tag === "div" || tag === "li") {
+          // collapse block wrappers to their text + a soft break, so foreign block
+          // styling never rides into the editable surface
+          walk(parent, c);
+          if (parent.lastChild && parent.lastChild.nodeName !== "BR") parent.appendChild(document.createElement("br"));
+          return;
+        }
+        const keep = INLINE[tag];
+        if (keep) {
+          const el = document.createElement(keep);
+          if (tag === "a") { const href = c.getAttribute("href"); if (href && /^(https?:|mailto:|#)/i.test(href)) { el.setAttribute("href", href); el.setAttribute("target", "_blank"); el.setAttribute("rel", "noopener"); } }
+          walk(el, c);
+          parent.appendChild(el);
+          return;
+        }
+        // any other element: keep only its text/children (drops styles, images…)
+        walk(parent, c);
+      });
+    };
+    walk(out, src);
+    return { html: out.innerHTML, keys: Object.keys(keys) };
+  };
+  // ---- composition provenance (app/composition.js) ----
+  // Record how the body is assembled — typed vs. pasted, paste sizes, deletions
+  // — as plain counts (never the words), so the preview + published footer can
+  // show a reader how the piece came together. Guarded behind `restored` so the
+  // initial draft load (seed / rehydrate) never counts as fresh writing.
+  const recordComposition = (e) => {
+    if (!restored.current || !window.NpjComposition || !ed.current) return;
+    const len = (ed.current.textContent || "").length;
+    const it = (e && e.nativeEvent && e.nativeEvent.inputType) || "";
+    window.NpjComposition.onInput(draftId, len, it);
+  };
+  // bracket OUR programmatic insertion so its synthetic input event isn't read
+  // as typing — the paste is booked here, by its known size, exactly once
+  const notePaste = (n, opts, insert) => {
+    if (window.NpjComposition && n) window.NpjComposition.recordPaste(draftId, n, opts || {});
+    if (window.NpjComposition) window.NpjComposition.mute(draftId);
+    try { insert(); }
+    finally {
+      if (window.NpjComposition) {
+        window.NpjComposition.unmute(draftId);
+        // re-baseline the length counter to the post-insert body, so the next real
+        // keystroke measures from here — robust even on browsers that don't fire an
+        // input event for our programmatic execCommand insert
+        window.NpjComposition.attach(draftId, ed.current ? (ed.current.textContent || "").length : 0);
+      }
+    }
+  };
   const onPaste = (e) => {
     const cd = e.clipboardData; if (!cd) return;
     e.preventDefault();
     const files = Array.from(cd.files || []).filter(f => /^image\//.test(f.type));
     if (files.length) {
       let archiveUrl = null;
-      const html = cd.getData("text/html") || "";
-      const m = html.match(/<img[^>]+src=["']([^"']+)["']/i);
+      const ih = cd.getData("text/html") || "";
+      const m = ih.match(/<img[^>]+src=["']([^"']+)["']/i);
       if (m && window.NpjArchiveCDN.isMediaUrl(m[1])) archiveUrl = m[1];
       insertImageFiles(files, archiveUrl);
       return;
     }
     const text = cd.getData("text/plain");
+    // our own grounded text, copied from anywhere in the session, re-lands cited
+    const prov = provenanceHtml(cd.getData("text/html") || "");
+    if (prov.html) {
+      if (/\n/.test(text)) escapeBlock(); // a multi-line paste never lands inside a headline / the dek
+      notePaste((text || "").length, { grounded: true }, () => document.execCommand("insertHTML", false, prov.html));
+      // re-register any source the pasted spans cite, so it shows in the library
+      if (prov.keys.length) setSources(s => {
+        const have = {}; s.forEach(x => { have[x.key] = 1; });
+        const add = prov.keys.filter(k => !have[k] && window.NPJ.SOURCES[k]).map(k => ({ key: k, archived: !!(window.NPJ.SOURCES[k] || {}).archive_url }));
+        return add.length ? [...s, ...add] : s;
+      });
+      renumberCites();
+      setRev(v => v + 1);
+      if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+      scanHeadings(); scheduleSave();
+      return;
+    }
     if (!text) return;
     if (/\n/.test(text)) escapeBlock(); // block-level paste never lands inside a headline or the dek
-    window.NpjPlainText.insert(text);
+    notePaste(text.length, { kind: "paste" }, () => window.NpjPlainText.insert(text));
     scanHeadings(); scheduleSave();
   };
   const caretToPoint = (e) => {
@@ -442,6 +870,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (r && ed.current && ed.current.contains(r.startContainer)) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
   };
   const onDropText = (e) => {
+    if (blockDrag.current) return; // a block-grip drag — onBlockDrop (on the scroller) owns this
     if (dragFromSelf.current || !e.dataTransfer) return; // internal rearrange — native handles it
     e.preventDefault(); // never let the browser insert the formatted flavor (or navigate to a dropped file)
     const files = Array.from(e.dataTransfer.files || []).filter(f => /^image\//.test(f.type));
@@ -451,8 +880,55 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!text) return;
     caretToPoint(e);
     if (/\n/.test(text)) escapeBlock();
-    window.NpjPlainText.insert(text);
+    notePaste(text.length, { kind: "drop" }, () => window.NpjPlainText.insert(text));
     scanHeadings(); scheduleSave();
+  };
+
+  // ---- Return vs Shift+Return ----
+  // Return = a paragraph break (a new <p>, which publishes with paragraph
+  // spacing). Shift+Return = a soft line break (a <br>, which publishes tight,
+  // no extra space). The browser default already gives <br> for Shift+Return,
+  // and defaultParagraphSeparator="p" (set on mount/focus) makes Return split
+  // into <p> — so the only case worth intercepting is a Return inside a code /
+  // verse block, where it must drop a literal newline instead of escaping the
+  // block into a paragraph.
+  const ensureParaSep = () => { try { document.execCommand("defaultParagraphSeparator", false, "p"); } catch (e) {} };
+  const onEditorKeyDown = (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    const sel = window.getSelection();
+    const node = sel && sel.anchorNode;
+    const host = node && (node.nodeType === 1 ? node : node.parentElement);
+    if (host && host.closest && host.closest("pre")) {
+      e.preventDefault();
+      document.execCommand("insertText", false, "\n");
+      scheduleSave();
+    } else if (host && host.closest && host.closest("li.nr-fnote")) {
+      // a footnote note is a single item — Enter adds a line break in place, never
+      // splits the list (which would strand a numberless, keyless <li>).
+      e.preventDefault();
+      document.execCommand("insertLineBreak");
+      scheduleSave();
+    }
+  };
+
+  // ---- live preview: the piece EXACTLY as it will publish ----
+  // Fold the editor's current content through the same builder publishing uses
+  // (genesisFromContent → the reader's article object), then hand it to the
+  // reader's own renderer in preview mode. No round-trip to GitHub, no archive
+  // freeze (image URLs render from where they already live) — just the words,
+  // laid out as the outside will lay them out.
+  const openPreview = () => {
+    if (!window.NpjArticles) return;
+    const html = ed.current ? ed.current.innerHTML : (htmlRef.current || "");
+    const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
+    try {
+      const gen = window.NpjArticles.genesisFromContent(
+        { html, title, tags, column, sources },
+        { slug: fileSlug || slugify(title), headline: title, actor,
+          composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null }
+      );
+      setPreviewDoc(gen.article);
+    } catch (e) { setPreviewDoc(null); }
   };
 
   // image slots mutate themselves (src attribute, local fills) — onInput
@@ -514,19 +990,65 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     else if (/\.(mp3|ogg|wav|m4a)(\?|$)/i.test(u)) inner = `<audio controls src="${esc}" style="width:100%"></audio>`;
     else if (/\.(mp4|webm|mov)(\?|$)/i.test(u)) inner = `<video controls src="${esc}" style="width:100%;max-height:420px;background:#000"></video>`;
     else inner = `<a href="${esc}" target="_blank" rel="noopener">${host || esc}</a>`;
-    insertHTML(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
+    insertBlock(`<figure contenteditable="false" class="cmp-embed" data-embed-url="${esc}">${inner}<figcaption class="np-mono" style="font-size:11px;color:${NR.muted};margin-top:4px">${host || "media"} · embedded — the published article keeps the link</figcaption></figure><p><br/></p>`);
     setEmbedUrl(""); setFmtMenu(null);
   };
-  // a numbered footnote: marker in the text, a markdown-ready definition at the end
+  // A footnote attaches to a WORD, so the marker must land against text. If the
+  // collapsed caret is on an empty line — a trailing/blank <p> you drop into when
+  // you click just past the end of a line — or it isn't in a prose block at all,
+  // snap it to the very end of the nearest paragraph above that actually has text,
+  // so a footnote never ends up as a lone "¹" stranded on its own line. With the
+  // caret already in text (end of a line, or mid-sentence) this is a no-op and the
+  // marker drops exactly where you put it. Updates the saved range insertHTML restores.
+  const anchorFootnoteCaret = () => {
+    const root = ed.current; if (!root) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return;
+    const r = sel.getRangeAt(0);
+    if (!r.collapsed) return;                              // a real selection — footnote that exact spot
+    const BLOCK = "p,li,h1,h2,h3,blockquote,figcaption";
+    const hasText = (el) => !!(el && (el.textContent || "").trim());
+    const start = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    let blk = start && start.closest ? start.closest(BLOCK) : null;
+    if (blk && blk.closest("ol.nr-fnotes")) blk = null;   // inside a note, not the prose
+    if (blk && root.contains(blk) && hasText(blk)) return; // already against text — leave it
+    // walk back to the nearest prose block with text (skip empty lines, code, figures, the notes list)
+    let prev = blk ? blk.previousElementSibling : root.lastElementChild;
+    while (prev && ((prev.matches && prev.matches("ol.nr-fnotes,pre,figure")) || !hasText(prev))) prev = prev.previousElementSibling;
+    if (!prev || !root.contains(prev) || !hasText(prev)) return; // nothing better above — leave as-is
+    const nr = document.createRange();
+    nr.selectNodeContents(prev); nr.collapse(false);      // caret at the very end of that block
+    sel.removeAllRanges(); sel.addRange(nr);
+    selRange.current = nr.cloneRange();
+  };
+  // A footnote, Substack-style: drop a numbered marker at the caret and open a
+  // real, editable note for it in the "Footnotes" list at the foot of the page —
+  // no raw "[^fn1]:" syntax in the prose. The marker carries a stable, unique
+  // key on data-cite; the printed number and the note's home are kept in step by
+  // renumberFootnotes (below), so adding, moving or deleting a marker renumbers
+  // everything live, exactly like Substack.
   const insertFootnote = () => {
-    const n = (ed.current ? ed.current.querySelectorAll("sup[data-fn]").length : 0) + 1;
-    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="fn${n}" contenteditable="false" title="footnote ${n}">fn${n}</sup>&nbsp;`);
-    if (ed.current) { const p = document.createElement("p"); p.textContent = `[^fn${n}]: footnote text…`; ed.current.appendChild(p); }
+    const key = "fn" + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+    caretIntoBody();                                // bring a real in-body caret live so we can anchor it
+    anchorFootnoteCaret();                          // never strand the marker on an empty line
+    // the bullet is a placeholder glyph; renumberFootnotes overwrites it with the number
+    insertHTML(`<sup class="md-cite" data-fn="1" data-cite="${key}" contenteditable="false" title="footnote">•</sup>&nbsp;`);
+    renumberFootnotes();
+    // focus the freshly-opened note so the author types it straight away
+    const root = ed.current;
+    const li = root && root.querySelector('li.nr-fnote[data-fn-key="' + key + '"]');
+    if (li) {
+      li.scrollIntoView({ block: "center", behavior: "smooth" });
+      try {
+        const r = document.createRange(); r.selectNodeContents(li); r.collapse(true);
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+      } catch (e) {}
+    }
     setFmtMenu(null); scheduleSave();
   };
-  const insertVerse = () => { insertHTML(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
+  const insertVerse = () => { insertBlock(`<pre class="verse">Write the verse here —\nline breaks hold,\nstanzas keep their shape.</pre><p><br/></p>`); setFmtMenu(null); };
   const insertPoll = () => {
-    insertHTML(`<div class="cmp-widget" data-widget="poll"><div class="cmp-widget-h"><span class="np-mono">◳ POLL</span><span class="cmp-tag">placeholder · interactive at publish</span></div><div class="cmp-widget-b"><strong>Ask the readers a question…</strong><span>Option one</span><br/><span>Option two</span></div><div class="cmp-widget-f">readers vote on the published page; results stay public</div></div><p><br/></p>`);
+    insertBlock(`<div class="cmp-widget" data-widget="poll"><div class="cmp-widget-h"><span class="np-mono">◳ POLL</span><span class="cmp-tag">placeholder · interactive at publish</span></div><div class="cmp-widget-b"><strong>Ask the readers a question…</strong><span>Option one</span><br/><span>Option two</span></div><div class="cmp-widget-f">readers vote on the published page; results stay public</div></div><p><br/></p>`);
     setFmtMenu(null);
   };
 
@@ -538,6 +1060,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
+  const [voidSearch, setVoidSearch] = useState(""); // the documented search behind a prose "cite a void"
   useEffect(() => {
     const onUp = (e) => {
       if (e && e.target && e.target.closest && e.target.closest(".sel-tb")) return;
@@ -553,6 +1076,91 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   }, []);
 
   const citeNum = (key) => { const i = citeOrderRef.current.indexOf(key); return i < 0 ? 0 : i + 1; };
+  // Sources in the order they FIRST appear in the prose — recomputed live from
+  // the document, so as the author moves text around the order tracks the page
+  // (the published reader numbers the same way; see ArticleRead useClaimModel).
+  // Cited keys come first in document order; a source ingested but not yet cited
+  // trails after in the order it was added.
+  const docOrderKeys = () => {
+    const root = ed.current;
+    const order = [];
+    if (root) {
+      root.querySelectorAll('sup.md-cite[data-cite]:not([data-fn]), .claim-src[data-src]').forEach(el => {
+        (el.getAttribute('data-cite') || el.getAttribute('data-src') || '')
+          .split(/\s+/).filter(Boolean).forEach(k => { if (order.indexOf(k) < 0) order.push(k); });
+      });
+    }
+    sources.forEach(s => { if (order.indexOf(s.key) < 0) order.push(s.key); });
+    return order;
+  };
+  // Renumber the inline [n] cite markers to match document order and keep
+  // citeOrder in step. Display-only and safe: the publish path reads the source
+  // KEY off each marker, never the printed number (articles.js htmlToBlocks), and
+  // the reader re-numbers by appearance — this just keeps the editor's chips
+  // honest as text is added, moved or deleted.
+  const renumberCites = () => {
+    const root = ed.current; if (!root) return;
+    const order = docOrderKeys();
+    root.querySelectorAll('sup.md-cite[data-cite]:not([data-fn])').forEach(s => {
+      const n = order.indexOf(s.getAttribute('data-cite')) + 1;
+      if (n > 0 && s.textContent !== String(n)) s.textContent = String(n);
+    });
+    const prev = citeOrderRef.current;
+    if (order.length !== prev.length || order.some((k, i) => k !== prev[i])) {
+      citeOrderRef.current = order; setCiteOrder(order);
+    }
+  };
+  // Keep footnotes in step with their markers — the Substack model. The markers
+  // in the prose are the source of truth: we number them by first appearance,
+  // keep exactly one editable note per referenced key in the "Footnotes" list at
+  // the foot of the page, create a note for any new marker, and DROP the note of
+  // a marker that's been deleted. Runs on every input (cheap, idempotent); the
+  // publish pass reads keys + note text, never the printed number.
+  const renumberFootnotes = () => {
+    const root = ed.current; if (!root) return;
+    const markers = Array.from(root.querySelectorAll('sup.md-cite[data-fn][data-cite]'));
+    // keys in first-reference order (a key reused by two markers shares its number)
+    const order = [];
+    markers.forEach(s => { const k = (s.getAttribute('data-cite') || '').trim(); if (k && order.indexOf(k) < 0) order.push(k); });
+    markers.forEach(s => {
+      const n = order.indexOf((s.getAttribute('data-cite') || '').trim()) + 1;
+      if (n > 0 && s.textContent !== String(n)) s.textContent = String(n);
+    });
+    let list = root.querySelector('ol.nr-fnotes');
+    if (!order.length) { if (list) list.remove(); return; }   // last footnote gone → no list
+    if (!list) {
+      list = document.createElement('ol');
+      list.className = 'nr-fnotes'; list.setAttribute('data-fnotes', '1');
+      root.appendChild(list);
+    }
+    // index the notes we already have; DROP orphans (marker deleted) and dupes,
+    // but FOLD any stray fragment (e.g. a list-split that slipped through) back
+    // into the note above it, so an edit never loses a note's words.
+    const have = {}; let lastValid = null;
+    Array.from(list.childNodes).forEach(node => {
+      const isNote = node.nodeType === 1 && node.classList && node.classList.contains('nr-fnote');
+      const k = isNote ? (node.getAttribute('data-fn-key') || '').trim() : '';
+      if (k && order.indexOf(k) >= 0 && !have[k]) { have[k] = node; lastValid = node; return; }
+      if (!k) { const t = (node.textContent || '').trim(); if (t && lastValid) lastValid.append((lastValid.textContent ? ' ' : '') + t); }
+      if (node.remove) node.remove(); else if (node.parentNode) node.parentNode.removeChild(node);
+    });
+    // Reorder/create ONLY when the note order is actually out of step with the
+    // markers. Typing inside a note fires input but doesn't change the order, so
+    // we must not re-append its <li> then — moving the node would drop the caret.
+    const cur = Array.from(list.querySelectorAll(':scope > li.nr-fnote')).map(li => (li.getAttribute('data-fn-key') || '').trim());
+    const inSync = order.every(k => have[k]) && cur.length === order.length && order.every((k, i) => k === cur[i]);
+    if (!inSync) {
+      order.forEach(k => {
+        let li = have[k];
+        if (!li) {
+          li = document.createElement('li');
+          li.className = 'nr-fnote'; li.setAttribute('data-fn-key', k);
+          li.setAttribute('data-ph', 'Write the note…');
+        }
+        list.appendChild(li);   // appendChild moves an existing <li> into marker order
+      });
+    }
+  };
   // the span to bind: the live in-editor selection if there is one, else the
   // last one we saved — a collapsed caret is never a span
   const spanRange = () => {
@@ -588,12 +1196,61 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
     return cid;
   };
+  // The .claim-src that a selection sits inside — the span a NEW source should be
+  // ADDED to rather than nesting a fresh span within. Owned claims (data-stance,
+  // no citation) are left alone; they aren't sourced.
+  const claimHostOf = (r) => {
+    if (!r) return null;
+    const node = r.commonAncestorContainer;
+    const el = node && node.nodeType === 1 ? node : (node && node.parentElement);
+    const host = el && el.closest ? el.closest(".claim-src") : null;
+    return (host && ed.current && ed.current.contains(host) && !host.getAttribute("data-stance")) ? host : null;
+  };
+  // Give a claim span a citation marker for `key` if it doesn't have one yet — so
+  // a span backed by several sources carries one numbered sup per source (the
+  // publish path reads each sup as another source+quote on the same claim). The
+  // sup is created only when a source is actually pinned, never on a bare add.
+  const ensureCiteSup = (span, key) => {
+    if (!span || !key || !ed.current) return null;
+    const cid = span.getAttribute("data-cid"); if (!cid) return null;
+    const here = Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]'));
+    const found = here.find(s => s.getAttribute("data-cite") === key);
+    if (found) return found;
+    let order = citeOrderRef.current;
+    if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
+    const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
+    sup.setAttribute("data-cite", key); sup.setAttribute("data-cid", cid); sup.setAttribute("data-quote", ""); sup.title = key; sup.textContent = String(order.indexOf(key) + 1);
+    // sit it right after the span's existing markers, so a claim's cites stay together
+    let anchor = span, n = span.nextSibling;
+    while (n && n.nodeType === 1 && n.tagName === "SUP" && n.classList.contains("md-cite") && n.getAttribute("data-cid") === cid) { anchor = n; n = n.nextSibling; }
+    anchor.after(sup);
+    if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
+    return sup;
+  };
+  // Pull back the pinned quote for one specific source on a span (a span can hold
+  // several), so re-opening the picker shows the right words — not source #1's.
+  const quoteForKey = (span, key) => {
+    if (!span) return "";
+    if (window.NpjCitations) { const c = (window.NpjCitations.citationsFor(span) || []).find(c => c.srcKey === key); if (c) return c.quote || ""; }
+    try { const m = JSON.parse(span.getAttribute("data-quotes") || "null"); if (m && m[key] != null) return m[key]; } catch (e) {}
+    return span.getAttribute("data-quote") || "";
+  };
   const bindSource = (key) => {
     const r = spanRange();
+    // Citing words that are ALREADY inside a sourced claim → add this source to
+    // that span (a second citation), don't nest a new claim inside it.
+    const host = claimHostOf(r);
+    if (host) {
+      const cid = host.getAttribute("data-cid");
+      window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null);
+      if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
+      openPin(cid, key, (host.textContent || "").trim());
+      return;
+    }
     if (!r) { setArmSrc(key); setMenu(null); return; }
     const claimText = String(r.toString() || "").trim();
     const cid = bindRangeToSource(r, key);
-    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave();
+    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave(); renumberCites();
     // now make the author point at the words in the source — the citation isn't
     // done until that span is pinned
     openPin(cid, key, claimText);
@@ -603,10 +1260,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [pinTarget, setPinTarget] = useState(null); // { cid, key, claimText }
   const [pinQuote, setPinQuote] = useState("");
   const pinLoc = useRef(null);                      // char offsets into the source, from the picker
+  // hover-to-remove: a floating × that tracks the cited span the pointer is over,
+  // so dropping a citation is one click in the prose — no popover, no menu.
+  const [citeHover, setCiteHover] = useState(null); // { cid, x, y }
+  const citeHideT = useRef(null);
+  // inline rename of a source straight from its rail card (the title is often a
+  // filename or a guess — fix it where you see it)
+  const [renameSrcKey, setRenameSrcKey] = useState(null);
+  const [renameSrcText, setRenameSrcText] = useState("");
   const openPin = (cid, key, claimText) => {
-    // re-opening an existing binding? read back whatever quote is on it
+    // re-opening an existing binding? read back this source's pinned quote (a span
+    // can carry several, so read the one for THIS key, not just source #1)
     let existing = "";
-    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = el.getAttribute("data-quote") || ""; }
+    if (ed.current) { const el = ed.current.querySelector('.claim-src[data-cid="' + cid + '"]'); if (el) existing = quoteForKey(el, key); }
     setPinQuote(existing); pinLoc.current = null;
     setPinTarget({ cid, key, claimText });
   };
@@ -616,18 +1282,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const q = String(pinQuote || "").trim();
     if (!q) return;
     const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
+    if (span) ensureCiteSup(span, t.key);   // a source ADDED to an existing span gets its own marker now (on pin, not on add)
     if (window.NpjCitations && span) {
       // mint a reusable citation RECORD and attach it — projectAttrs re-derives
-      // data-src / data-quote / data-quotes and syncs the sup marker, so every
-      // downstream reader (CiteyBrain, publishGate, htmlToBlocks) is unchanged.
+      // data-src / data-quote / data-quotes and syncs every sup marker, so a
+      // multi-source span publishes each source+quote and every downstream reader
+      // (CiteyBrain, publishGate, htmlToBlocks) is unchanged.
       const id = window.NpjCitations.mint({ srcKey: t.key, quote: q, loc: loc || null });
       window.NpjCitations.attach(span, id);
       span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
     } else if (ed.current) {
-      // registry unavailable — fall back to the old inline behaviour
-      ed.current.querySelectorAll('[data-cid="' + t.cid + '"]').forEach(el => {
-        el.setAttribute("data-quote", q);
-        if (el.classList.contains("claim-src")) { el.classList.remove("needs-quote"); el.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”"); }
+      // registry unavailable — fall back to the inline behaviour, but only the
+      // marker for THIS source (so other sources on the span keep their quotes)
+      if (span) span.classList.remove("needs-quote");
+      if (span) span.setAttribute("data-quote", q);
+      if (span) span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
+      ed.current.querySelectorAll('sup.md-cite[data-cid="' + t.cid + '"]').forEach(el => {
+        if (el.getAttribute("data-cite") === t.key) el.setAttribute("data-quote", q);
       });
     }
     // remember the passage on the source record too, so the next claim off the
@@ -638,6 +1309,62 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // let Citey flip ⊥→⊤ and re-cost the publish gate
     if (window.__citey) { if (span) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
   };
+  // Drop ONE source from a multi-source span: detach its citation record(s) and
+  // remove its marker; the span keeps every other source it cites. If it was the
+  // last one, NpjCitations.detach flags the span needs-quote (still bound, unpinned).
+  const removeSrcFromSpan = (span, key) => {
+    if (!span || !key) return;
+    if (window.NpjCitations) (window.NpjCitations.citationsFor(span) || []).filter(c => c.srcKey === key).forEach(c => window.NpjCitations.detach(span, c.id));
+    const cid = span.getAttribute("data-cid");
+    if (cid && ed.current) Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).filter(s => s.getAttribute("data-cite") === key).forEach(s => s.remove());
+    const left = (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean);
+    setRev(v => v + 1); scheduleSave(); renumberCites();
+    if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    // if the popover was editing the source we just removed, follow it to a survivor
+    if (pinTarget && pinTarget.key === key && pinTarget.cid === cid) {
+      if (left.length) openPin(cid, left[0], pinTarget.claimText); else closePin();
+    }
+  };
+  // Drop a citation ENTIRELY and hand the sentence back as plain prose: detach
+  // every source the span cites, delete its markers, and unwrap the span (the
+  // words stay, the binding goes). The reusable citation RECORDS survive in the
+  // registry — reusable on other sentences — so this only unbinds THIS span. It
+  // also clears an owned-claim stance / context the same way (unwrap drops both).
+  const removeCitation = (span) => {
+    if (!span) return;
+    const cid = span.getAttribute("data-cid");
+    if (window.NpjCitations) (window.NpjCitations.citationsFor(span) || []).forEach(c => window.NpjCitations.detach(span, c.id));
+    if (cid && ed.current) Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).forEach(s => s.remove());
+    const parent = span.parentNode;
+    if (parent) { while (span.firstChild) parent.insertBefore(span.firstChild, span); parent.removeChild(span); if (parent.normalize) parent.normalize(); }
+    if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; }
+    setCiteHover(null);
+    setRev(v => v + 1); scheduleSave(); renumberCites();
+    if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+  };
+  // a span carries a CITATION (a source binding) when it points at a source or a
+  // citation record, or is bound-but-unpinned — but NOT a pure owned-claim stance.
+  const spanIsCite = (span) => !!(span && (span.getAttribute("data-cite-id") || (span.getAttribute("data-src") || "").trim() || span.classList.contains("needs-quote")) && !span.getAttribute("data-stance"));
+  // track the cited span under the pointer so the floating × can anchor to it.
+  // Anchor to the span's last citation marker when it has one (the × sits right
+  // by the little superscript), else the end of the span's last line.
+  const onBodyOver = (e) => {
+    if (!ed.current) return;
+    const cs = e.target.closest && e.target.closest(".claim-src, sup.md-cite[data-cid]");
+    const cid = cs && cs.getAttribute("data-cid");
+    const span = cid ? ed.current.querySelector('.claim-src[data-cid="' + cid + '"]') : null;
+    if (!span || !spanIsCite(span)) { if (citeHover && !citeHideT.current) citeHideT.current = setTimeout(() => setCiteHover(null), 220); return; }
+    if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; }
+    const marker = Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).pop();
+    let r;
+    if (marker) r = marker.getBoundingClientRect();
+    else { const rects = span.getClientRects(); r = rects[rects.length - 1] || span.getBoundingClientRect(); }
+    const cy = r.top + r.height / 2;   // vertical center, so the × sits beside the marker, not over the line above
+    setCiteHover(prev => (prev && prev.cid === cid && Math.abs(prev.x - r.right) < 1 && Math.abs(prev.y - cy) < 1) ? prev : { cid, x: r.right, y: cy });
+  };
+  const onBodyLeave = () => { if (citeHideT.current) clearTimeout(citeHideT.current); citeHideT.current = setTimeout(() => setCiteHover(null), 220); };
+  // commit / cancel an inline source rename started from a rail card
+  const commitSrcRename = (key) => { const t = renameSrcText.trim(); if (t) tableApi.renameSource(key, t); setRenameSrcKey(null); setRenameSrcText(""); };
   // The source-span ranking + paste flow now lives in the SourcePicker component
   // (app/SourcePicker.jsx), rendered inside the pin popover and the table.
   // Citey's grounding bridge — the popover's pin / own / unown act here so React
@@ -647,17 +1374,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     window.__npjGround = {
       focused: () => window.__citey && window.__citey.focused ? window.__citey.focused() : null,
       pin: (el) => { if (!el) return; const cid = el.getAttribute("data-cid"); if (!cid) return; openPin(cid, el.getAttribute("data-src") || el.getAttribute("data-cite"), (el.textContent || "").trim()); },
-      own: (el, stance) => {
+      own: (el, stance, note) => {
         if (!el) return; const cid = el.getAttribute("data-cid");
         if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
         el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
         el.classList.remove("needs-quote");
-        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : "analysis";
+        const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : stance === "absence" ? "absence" : "analysis";
         el.setAttribute("data-stance", norm);
-        el.setAttribute("title", "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
-        setRev(v => v + 1); scheduleSave();
+        // an asserted absence records the documented search it rests on (what the
+        // author looked through, found nothing) on the span, so it publishes + reads
+        if (norm === "absence") { if (note != null) el.setAttribute("data-note", String(note)); else el.removeAttribute("data-note"); }
+        else el.removeAttribute("data-note");
+        el.setAttribute("title", norm === "context"
+          ? "Continuing coverage — the article substantiates this, set against prior reporting"
+          : norm === "absence"
+            ? "Asserted absence — a documented search did not find this" + (note ? ". Searched: " + note : "")
+            : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
+        setRev(v => v + 1); scheduleSave(); renumberCites();
       },
-      unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      unown: (el) => { if (!el) return; el.removeAttribute("data-stance"); el.removeAttribute("data-context"); el.classList.remove("claim-src"); setRev(v => v + 1); scheduleSave(); },
+      // context links — sources cited as CONTEXT (prior coverage), not proof. They
+      // ride a separate attribute so the gate, which only reads proof, is untouched.
+      addContext: (el, key) => { if (!el || !key || !window.NpjCitations) return; window.NpjCitations.addContext(el, key); setRev(v => v + 1); scheduleSave(); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
+      removeContext: (el, key) => { if (!el || !key || !window.NpjCitations) return; window.NpjCitations.removeContext(el, key); setRev(v => v + 1); scheduleSave(); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
       // attach an EXISTING reusable citation to a span (the many-to-many reuse path)
       attachCitation: (el, citeId) => {
         if (!el || !citeId || !window.NpjCitations) return;
@@ -688,6 +1427,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
     return span;
   };
+  // Cite a VOID straight from the prose: wrap the highlighted words in a claim
+  // span (or reuse the one they sit in) and OWN it as an asserted absence — the
+  // claim is grounded not by a source but by the documented search in `note`.
+  const markVoid = (note) => {
+    const n = String(note || "").trim(); if (!n) return;
+    const r = spanRange(); if (!r) { setSel(null); setMenu(null); return; }
+    const span = claimHostOf(r) || wrapPlainClaim(r);
+    if (window.__npjGround && window.__npjGround.own) window.__npjGround.own(span, "absence", n);
+    if (window.__citey) { if (window.__citey.evaluateSpan) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    window.getSelection().removeAllRanges(); selRange.current = null;
+    setSel(null); setMenu(null); setVoidSearch(""); setRev(v => v + 1); scheduleSave(); renumberCites();
+  };
   // The claim span a table row acts on: reuse an existing one inside the sentence
   // (sub-sentence safe — never nest), else wrap the whole sentence.
   const rowSpanFor = (row, key, plain) => {
@@ -703,6 +1454,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // the live editor node — the workspace observes it so the grounding table
     // imports every prose sentence the moment it lands (survives the restore race)
     editorEl: () => ed.current,
+    // the draft's title (the Title field, mirroring the body <h1>) — names the
+    // fact-check worksheet export
+    draftTitle: () => title,
     rev,
     toProse: () => setView("prose"),
     // scroll the (hidden) editor to a row and select it, then flip to prose
@@ -729,13 +1483,41 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     },
     // re-open the picker for an already-bound span
     repin: (span) => { if (span) openPin(span.getAttribute("data-cid"), (span.getAttribute("data-src") || "").split(/\s+/)[0], (span.textContent || "").trim()); },
-    own: (row, stance) => {
+    own: (row, stance, note) => {
       const span = rowSpanFor(row, null, true); if (!span) return;
-      window.__npjGround.own(span, stance);
+      window.__npjGround.own(span, stance, note);
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
-    sources: () => sources.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} })),
+    // ---- context links: prior coverage a sentence builds on (context, not proof) ----
+    // The source keys this sentence cites for context (across its claim spans).
+    contextFor: (row) => {
+      const out = [];
+      (row.claimSpans || []).forEach(s => (window.NpjCitations ? window.NpjCitations.contextKeys(s) : []).forEach(k => { if (out.indexOf(k) < 0) out.push(k); }));
+      return out;
+    },
+    // Link a source as CONTEXT to this sentence — context, not proof. If the
+    // sentence wasn't a claim yet, linking prior coverage also grounds it as
+    // continuing coverage ("in context"), so adding context never quietly creates
+    // an ungrounded claim that blocks the gate. An already-grounded (or
+    // mid-grounding) claim keeps its own status; the context just rides alongside.
+    addContext: (row, key) => {
+      const had = !!(row.claimSpans && row.claimSpans.length);
+      const span = rowSpanFor(row, null, true); if (!span) return;
+      if (!had && !span.getAttribute("data-stance") && !(span.getAttribute("data-quote") || "").trim()) {
+        window.__npjGround.own(span, "context");
+      }
+      window.__npjGround.addContext(span, key);
+    },
+    removeContext: (row, key) => {
+      (row.claimSpans || []).forEach(s => window.__npjGround.removeContext(s, key));
+    },
+    // sources in the order they appear in the document (the list tracks the prose)
+    sources: () => {
+      const ord = docOrderKeys();
+      return sources.slice().sort((a, b) => ord.indexOf(a.key) - ord.indexOf(b.key))
+        .map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }));
+    },
     allCitations: () => window.NpjCitations ? window.NpjCitations.all() : [],
     citationsFor: (span) => window.NpjCitations ? window.NpjCitations.citationsFor(span) : [],
     usageCount: (citeId) => window.NpjCitations ? window.NpjCitations.usage(citeId, ed.current).length : 0,
@@ -765,16 +1547,151 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       rec.text = (rec.text ? rec.text + "\n" : "") + t;
       setRev(v => v + 1);
       scheduleSave();   // pasted / PDF-extracted source text sticks to the draft
+    },
+    // Replace or clear a source's recognized/extracted text — fix or delete OCR
+    // that came out wrong on an uploaded photo. Unlike seedSourceText this
+    // OVERWRITES. Offsets into the old text may stop slicing clean, but the reader
+    // re-finds a quote by content and each bound claim keeps its own data-quote, so
+    // a citation is never silently dropped — its highlight just stops showing if the
+    // words are gone. Persists through the same autosave.
+    setSourceText: (key, text) => {
+      const rec = window.NPJ.SOURCES[key]; if (!rec) return;
+      rec.text = String(text || "");
+      setRev(v => v + 1); scheduleSave();
+    },
+    // rename a source — its display title across the editor, reader and exports.
+    // The citation records and bound spans (keyed by the stable source key) are
+    // untouched, so nothing about the grounding changes.
+    renameSource: (key, title) => {
+      const rec = window.NPJ.SOURCES[key]; const t = String(title || "").trim();
+      if (!rec || !t || rec.title === t) return false;
+      rec.title = t; rec.titleGuessed = false;   // an author's name is final — never re-guessed over
+      setRev(v => v + 1); scheduleSave();
+      return true;
+    },
+    // (re)guess a web source's title + outlet: the mechanical slug/host read right
+    // away, then the real <title>/og: tags off the archived page. Honors a manual
+    // rename (won't clobber a title the author set). Returns a promise for the UI.
+    guessSourceTitle: (key) => {
+      const rec = window.NPJ.SOURCES[key];
+      if (!rec || !rec.original_url) return Promise.resolve(false);
+      if (window.NpjSourceTitle && (rec.titleGuessed || !rec.title || /^web (snapshot|source)$/i.test(rec.title))) {
+        const g = window.NpjSourceTitle.guess(rec.original_url);
+        if (g.title && g.title !== rec.title) { rec.title = g.title; rec.titleGuessed = true; }
+        if (g.outlet && !rec.outlet) rec.outlet = g.outlet;
+        setRev(v => v + 1); scheduleSave();
+      }
+      return refineSourceTitle(key).then(() => true);
+    },
+    // a cheap, NETWORK-FREE pass: name every still-generic web source from its URL
+    // slug/host (so a draft loaded before titling existed gets readable names at
+    // once). Author-renamed titles are left alone. Returns how many it touched.
+    autoTitleSources: () => {
+      if (!window.NpjSourceTitle) return 0;
+      let n = 0;
+      Object.keys(window.NPJ.SOURCES || {}).forEach(key => {
+        const rec = window.NPJ.SOURCES[key];
+        if (!rec || !rec.original_url || rec.type === "interview") return;
+        if (rec.titleGuessed === false) return;                                 // author-named — keep
+        if (rec.title && !/^web (snapshot|source)$/i.test(rec.title)) return;    // already has a real title
+        const g = window.NpjSourceTitle.guess(rec.original_url);
+        if (g.title) { rec.title = g.title; rec.titleGuessed = true; n++; }
+        if (g.outlet && !rec.outlet) rec.outlet = g.outlet;
+      });
+      if (n) { setRev(v => v + 1); scheduleSave(); }
+      return n;
+    },
+    // delete a source from the draft: unbind every claim that cites it (unwrapping
+    // any span left grounding nothing, and dropping its marker), discard the
+    // citation records minted from it, then forget the record + library entry. The
+    // prose keeps its words; only this source's grounding is removed.
+    deleteSource: (key) => {
+      const root = ed.current;
+      if (root) {
+        Array.from(root.querySelectorAll('.claim-src')).forEach(span => {
+          const cites = window.NpjCitations ? window.NpjCitations.citationsFor(span) : [];
+          const srcs = (span.getAttribute('data-src') || '').split(/\s+/).filter(Boolean);
+          if (srcs.indexOf(key) < 0 && !cites.some(c => c.srcKey === key)) return;
+          if (window.NpjCitations) cites.forEach(c => { if (c.srcKey === key) window.NpjCitations.detach(span, c.id); });
+          const leftCites = window.NpjCitations ? window.NpjCitations.citationsFor(span) : [];
+          const leftSrcs = (span.getAttribute('data-src') || '').split(/\s+/).filter(Boolean).filter(k => k !== key);
+          if (leftSrcs.length || leftCites.length || span.getAttribute('data-stance')) {
+            if (leftSrcs.length) span.setAttribute('data-src', leftSrcs.join(' ')); else span.removeAttribute('data-src');
+          } else {
+            const cid = span.getAttribute('data-cid');
+            if (cid) Array.from(root.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).forEach(s => s.remove());
+            const p = span.parentNode; while (span.firstChild) p.insertBefore(span.firstChild, span); p.removeChild(span);
+          }
+        });
+        // sweep any leftover markers still pointing at this source
+        Array.from(root.querySelectorAll('sup.md-cite[data-cite="' + key + '"]')).forEach(s => {
+          const cid = s.getAttribute('data-cid');
+          const span = cid && root.querySelector('.claim-src[data-cid="' + cid + '"]');
+          if (!span || (span.getAttribute('data-src') || '').split(/\s+/).indexOf(key) < 0) s.remove();
+        });
+      }
+      if (window.NpjCitations) window.NpjCitations.forSource(key).forEach(c => window.NpjCitations.remove(c.id));
+      setSources(s => s.filter(x => x.key !== key));
+      const ord = citeOrderRef.current.filter(k => k !== key); citeOrderRef.current = ord; setCiteOrder(ord);
+      delete window.NPJ.SOURCES[key];
+      setRev(v => v + 1); scheduleSave(); renumberCites();
+      if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
+      return true;
     }
   };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
   React.useLayoutEffect(() => { if (armSrc && sel) bindSource(armSrc); }, [sel, armSrc]); // eslint-disable-line
+  // ---- source identity: our best guess at the title + where it's from ----
+  // Mechanical first (slug + host, no network, no model), then upgraded from the
+  // page's own <title>/og: tags once the archived HTML is reachable. The guess
+  // never blocks the bind, and a guessed title is flagged so a manual Rename wins.
+  const guessWebRec = (u, key, fallbackTitle) => {
+    let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+    const g = window.NpjSourceTitle ? window.NpjSourceTitle.guess(u) : null;
+    return {
+      id: key, type: "primary",
+      outlet: (g && g.outlet) || host,
+      title: (g && g.title) || fallbackTitle,
+      titleGuessed: true,
+      original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10)
+    };
+  };
+  // Upgrade a web source's title/outlet from the page's own metadata. Only ever
+  // replaces a title we guessed (never one the author renamed). Best-effort: a
+  // blocked network or a missing capture just leaves the mechanical guess in place.
+  const refineSourceTitle = async (key) => {
+    const rec = window.NPJ.SOURCES[key];
+    if (!rec || rec.type === "interview" || !rec.original_url) return;
+    if (!window.NpjArchiveCDN || !window.NpjArchiveCDN.pageMeta || !window.NpjSourceTitle) return;
+    const meta = await window.NpjArchiveCDN.pageMeta({ archiveUrl: rec.archive_url, url: rec.original_url }).catch(() => ({}));
+    if (!meta) return;
+    let changed = false;
+    if (meta.title && rec.titleGuessed) {
+      const t = window.NpjSourceTitle.cleanTitle(meta.title, meta.site || rec.outlet);
+      if (t && t !== rec.title) { rec.title = t; changed = true; }
+    }
+    // og:site_name is the outlet's own name for itself — authoritative over the bare host
+    if (meta.site && meta.site !== rec.outlet) { rec.outlet = meta.site; changed = true; }
+    if (changed) { setRev(v => v + 1); scheduleSave(); }
+  };
   const bindNewUrl = () => {
     const u = srcUrl.trim(); if (!/^https?:\/\//.test(u)) return;
     const key = "web-" + Date.now().toString(36);
-    window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: new URL(u).hostname.replace(/^www\./, ""), title: "Web source", original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10) };
-    bindSource(key);
+    window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web source");
+    bindSource(key);            // binds the span + opens "pin the source-span"
+    refineSourceTitle(key);
+    // …and snapshot the URL in the background, so the flow is the one you asked
+    // for: add a URL → it snapshots → pin the span. Non-blocking — the pin step
+    // opens now; the row flips to "archived" when the wayback capture confirms.
+    if (window.NpjArchiveCDN && window.NpjArchiveCDN.ensureSnapshot) {
+      setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: true } : x));
+      window.NpjArchiveCDN.ensureSnapshot(u).then(snap => {
+        if (snap && window.NPJ.SOURCES[key]) window.NPJ.SOURCES[key].archive_url = snap;
+        setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        setRev(v => v + 1); scheduleSave();
+      }).catch(() => setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false } : x)));
+    }
   };
   const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } setLinkUrl(""); setMenu(null); setSel(null); };
   const insertJump = (id, text) => { restore(); document.execCommand("insertHTML", false, `<a href="#${id}" class="jumplink">${text}</a>&nbsp;`); setMenu(null); setSel(null); };
@@ -787,17 +1704,36 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!urls.length) return; setBusy(true);
     const made = urls.map((u, i) => {
       const key = "web-" + Date.now().toString(36) + i;
-      window.NPJ.SOURCES[key] = { id: key, type: "primary", outlet: new URL(u).hostname.replace(/^www\./, ""), title: "Web snapshot", original_url: u, archive_url: "", retrieved: new Date().toISOString().slice(0, 10) };
+      window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web snapshot");
       return { key, archived: false, snapshotting: true, url: u };
     });
     setSources(s => [...made, ...s]); setUrlInput("");
     // real snapshots: confirm an existing wayback capture, or request one and
-    // wait for the availability API to verify it — "archived" is a fact here
+    // wait for the availability API to verify it — "archived" is a fact here.
+    // Each source is self-contained (try/catch) so one failure can't strand a
+    // sibling's row spinning, and the button always clears via finally — the bug
+    // where "Snapshotting…" spun forever (the source was already saved, hence
+    // "it's there on refresh") was a throw between setSources and setBusy(false).
     Promise.all(made.map(async m => {
-      const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
-      if (snap) window.NPJ.SOURCES[m.key].archive_url = snap;
-      setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
-    })).then(() => setBusy(false));
+      try {
+        const snap = await window.NpjArchiveCDN.ensureSnapshot(m.url).catch(() => null);
+        if (snap && window.NPJ.SOURCES[m.key]) window.NPJ.SOURCES[m.key].archive_url = snap;
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false, archived: !!snap } : x));
+        await refineSourceTitle(m.key).catch(() => {});   // titling is best-effort, never blocks the spinner
+      } catch (e) {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false } : x));
+      }
+    })).finally(() => setBusy(false));
+  };
+  // a conversation source (interview, named or anonymous) — built by the
+  // composer, registered like any other source so the bind + pin flow works on
+  // its notes. No URL to snapshot, so it never enters the archive/PII gate.
+  const addInterview = (rec) => {
+    if (!rec || !rec.id) return;
+    window.NPJ.SOURCES[rec.id] = rec;
+    setSources(s => [{ key: rec.id, archived: false, snapshotting: false }, ...s]);
+    setInterviewOpen(false);
+    setRev(v => v + 1); scheduleSave();
   };
   // the consented archive action (ArchiveModal) — request + verify for real;
   // a source with no original URL (an uploaded file) can't be auto-archived
@@ -824,7 +1760,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   // A source bound for archive.org that Citey can act on (an upload, or anything
   // with text/opaque bytes) must clear the review before it's archived.
-  const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
+  const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && rec.type !== "interview" && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
   const needsPiiReview = (key) => piiGated(key) && window.NpjPII && !window.NpjPII.gateClear(window.NPJ.SOURCES[key]);
   const piiReviewState = (key) => window.NpjPII ? window.NpjPII.reviewState(window.NPJ.SOURCES[key]) : "unscanned";
   // Archive: gated behind Citey's PII review. Pending → open the review first,
@@ -859,8 +1795,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setSources(s => s.map(x => x.key === m.key ? { ...x, uploading: false, uploadErr: (e && e.message) || "upload failed" } : x));
       }
     });
-    // read text out of text-like files so Citey can scan them and you can cite
-    // them, then stamp a pending PII review and open Citey on the first upload.
+    // read text out of text-like files so it can be scanned + cited, then stamp a
+    // pending PII review and open the review on the first upload.
     Promise.all(made.map(m => new Promise(resolve => {
       if (!isTextFile(m.file)) return resolve();
       const r = new FileReader();
@@ -873,6 +1809,25 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (made[0]) setRedactTarget(made[0].key);
       scheduleSave();
     });
+    // Screenshots & scans carry no machine-readable text. OCR them (lazy
+    // Tesseract) so an uploaded image becomes CITABLE — its words flow into the
+    // pin reader — and SCANNABLE — the PII review sees what's in it. Runs off the
+    // session blob, so it doesn't wait on the media-store upload. Best-effort: a
+    // failure leaves the image as-is (cite it by transcribing).
+    const SVocr = window.NpjSourceView;
+    if (SVocr && SVocr.extractImageText) {
+      made.filter(m => SVocr.kindOf(window.NPJ.SOURCES[m.key]) === "image").forEach(m => {
+        setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: true } : x));
+        SVocr.extractImageText(window.NPJ.SOURCES[m.key]).then(t => {
+          const rec = window.NPJ.SOURCES[m.key];
+          if (rec && t && t.trim()) { rec.text = t; rec.binary = false; scanSource(m.key); }
+          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
+          scheduleSave();
+        }).catch(() => {
+          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
+        });
+      });
+    }
   };
 
   // ---- Matrix: projects (shared rooms) + invites ----
@@ -969,14 +1924,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* top bar */}
       <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center",
         ...(isMobile
-          ? { display: "flex", flexWrap: "wrap", gap: 14 }
+          ? { display: "flex", flexWrap: "wrap", gap: 10 }
           : { display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr)", columnGap: 14 }) }}>
         {/* LEFT zone: exit + wordmark + document name. The view tabs live in the
             centered middle column, so a longer document name truncates HERE
             instead of shoving the tabs sideways. */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
         <button onClick={onExit} className="np-cond" style={{ background: "none", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", display: "inline-flex", alignItems: "center", gap: 6, flex: "0 0 auto" }}>
-          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> Public site
+          <I.arrow style={{ fontSize: 14, transform: "rotate(180deg)" }} /> <span className="npj-hide-sm">Public site</span>
         </button>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           <button onClick={onDocs || onExit} title="Newsroom home — your document explorer" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 10, flex: "0 0 auto" }}>
@@ -984,36 +1939,39 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
           {/* clipped so a long headline can't widen the bar and shove the controls */}
-          <span className="np-mono" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
+          <span className="np-mono npj-hide-sm" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileSlug || slugify(title) || "untitled"}</span>/
           </span>
         </div>
         </div>{/* end LEFT zone */}
         {/* CENTER zone: the four pivoting views — centered in the bar and fixed
             in place, so they never shift when the document name changes. */}
-        <div style={{ display: "inline-flex", border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
+        <div style={{ display: isMobile ? "flex" : "inline-flex", width: isMobile ? "100%" : undefined, border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
           {[["prose", "Prose", "The prose editor"],
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
-            ["sources", "Sources", "Read the source documents and grab the words that back a claim"]].map(([k, label, ti]) => (
-            <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
+            ["sources", "Sources", "Read the source documents and grab the words that back a claim"],
+            ["graph", "Graph", "The document as a graph of its propositions — entities and the relations between them"]].map(([k, label, ti]) => (
+            <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
         {/* RIGHT zone: autosave status + tools + publish */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, justifySelf: "end", flexWrap: "wrap", minWidth: 0 }}>
-        <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
-          what="text, title, tags, column and bound sources" />
+        <span className="npj-hide-sm" style={{ display: "inline-flex" }}>
+          <DraftStatusPill id={draftId} signedIn={!!session} user={session && session.user_id}
+            what="text, title, tags, column and bound sources" />
+        </span>
         <button onClick={toggleTheme} title={theme === "dark" ? "Switch the newsroom to light mode" : "Switch the newsroom to dark mode"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} {theme === "dark" ? "Light" : "Dark"}
+          {theme === "dark" ? <I.sun style={{ fontSize: 13 }} /> : <I.moon style={{ fontSize: 13 }} />} <span className="npj-hide-sm">{theme === "dark" ? "Light" : "Dark"}</span>
         </button>
         <window.VersionBadge sha="draft" count={versions.length} onClick={() => setShowVersions(true)} dark={theme === "dark"} />
-        {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> Docs</button>}
+        {onDocs && <button onClick={onDocs} title="All your documents" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.doc style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Docs</span></button>}
         <div style={{ position: "relative" }}>
-          <button onClick={openRooms} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> Projects</button>
+          <button onClick={openRooms} title="Your projects" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Projects</span></button>
           {showRooms && <ProjectsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
         </div>
         <div style={{ position: "relative" }}>
-          <button onClick={() => setInvite(v => !v)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> Invite</button>
+          <button onClick={() => setInvite(v => !v)} title="Invite a collaborator" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Invite</span></button>
           {invite && (
             <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, width: 300, maxWidth: "calc(100vw - 24px)", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Invite to the project</div>
@@ -1031,11 +1989,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
               </div>
               {inviteMsg && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.4 }}>{inviteMsg}</div>}
+              {/* invite someone with no Matrix account — mint one + a single link,
+                  and put them in the same project the typed-mxid invite would use */}
+              <NewAccountInvite
+                roomId={room ? room.roomId : null}
+                roomTitle={room ? (room.title || title) : title}
+                ensureRoom={async () => {
+                  let rm = room;
+                  if (!rm) {
+                    const existing = projPick && (projects || []).find(p => p.roomId === projPick);
+                    if (existing) rm = { roomId: existing.roomId, title: existing.title || "Untitled project" };
+                    else { const made = await window.MatrixAuth.createDraftRoom(title || "Untitled draft"); rm = { ...made, title: title || "Untitled draft" }; }
+                    setRoom(rm);
+                  }
+                  return rm.roomId;
+                }}
+                onInvited={(mx) => setCollabs(c => c.includes(mx) ? c : [...c, mx])} />
               {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>{room.alias}</div>}
             </div>
           )}
         </div>
-        <div style={{ display: "flex" }}>
+        <div className="npj-hide-sm" style={{ display: "flex" }}>
           {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
         {statusErr && <span className="np-mono" title={statusErr} style={{ fontSize: 10.5, color: NR.warn, maxWidth: 240, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{statusErr}</span>}
@@ -1045,6 +2019,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>
         )}
+        <button onClick={openPreview} title="Preview — see the piece exactly as it will appear once published" className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "7px 13px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <I.eye style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Preview</span>
+        </button>
         <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? (isLive ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Republish — this piece is off the site; committing pushes the draft and brings it back live") : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> {isRepublish ? "Republish" : "Publish"}
         </button>
@@ -1052,8 +2029,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       </div>
 
       {/* formatting toolbar */}
-      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
-        <span className="np-eyebrow" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
+      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "6px 8px" : "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap" }}>
+        <span className="np-eyebrow npj-hide-sm" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
         <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
         <TB onClick={() => exec("redo")} title="Redo"><I.redo /></TB>
         <Sep />
@@ -1144,7 +2121,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       )}
 
       {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
-      <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px" }}>
+      <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px", gridTemplateRows: isMobile ? undefined : "minmax(0, 1fr)" }}>
         {/* contents / jumplinks */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
           <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
@@ -1152,18 +2129,18 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               (labeled containers showing their prompt when empty) + orphan
               sections, draggable. Editing-only; none of it reaches a reader. */}
           {structApi && window.StructureRail
-            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} />
+            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} mode={structMode} setMode={setStructMode} graphText={graphText} onSelectSentence={jumpToProse} onExpand={() => setView("graph")} activeId={activeId} />
             : (toc.length === 0
                 ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>
                 : toc.map(h => <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>))}
           {/* media census — every image/embed in the piece; images open the viewer */}
           <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
             <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
-            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Paste an image straight into the page.</div>}
+            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Click <b>Image</b> in the toolbar to drop an image into the body where you're writing — or paste / drag a photo straight onto the page.</div>}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {media.map(m => m.kind === "image"
                 ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
-                    <img src={m.url} alt={m.caption || ""} onError={e => mediaThumbFallback(e, m)} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                   </button>
                 : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
             </div>
@@ -1174,7 +2151,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
               {columns.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>Tags <button onClick={() => window.__citey && window.__citey.suggest()} title="Citey: suggest tags" style={{ background: "none", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "2px 6px", cursor: "pointer", display: "inline-flex", alignItems: "center" }}><I.sparkle /></button></div>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Tags</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
               {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
               <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
@@ -1187,7 +2164,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} style={{ display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
           <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
             <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
@@ -1197,15 +2174,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); scheduleSave(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+            onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
+            onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
+          {/* the Google-Docs grip + the live insertion line. Editing chrome only —
+              they live OUTSIDE the contentEditable, so they never serialize. */}
+          {!isMobile && grip && (
+            <div className={"nr-grip" + (dragging ? "" : " show")} draggable
+              onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
+              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } }}
+              title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}
+              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>⠿</div>
+          )}
+          {!isMobile && dropAt && (
+            <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
+          )}
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
           <div style={{ flex: isMobile ? 1 : undefined, background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0, overflow: "hidden" }}>
-            <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />
+            {view === "graph"
+              ? (window.GraphView
+                  ? <window.GraphView text={graphText} onSelectSentence={jumpToProse} NR={NR} isMobile={isMobile} />
+                  : null)
+              : <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />}
           </div>
         )}
 
@@ -1220,7 +2215,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
           {(() => { const nq = needsQuoteCount(); return nq ? (
             <div className="np-mono" style={{ fontSize: 10.5, color: NR.warn, lineHeight: 1.5, border: "1px solid " + NR.warn, padding: "8px 9px", marginBottom: 12 }}>
-              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — Citey can find them.
+              ⚑ {nq} cited span{nq === 1 ? "" : "s"} still point at a whole page. Click the flagged span{nq === 1 ? "" : "s"} in the draft and pin the exact words in the source — the picker can help you find them.
             </div>
           ) : null; })()}
           <div style={{ border: "1px solid " + NR.line, padding: "10px", marginBottom: 14 }}>
@@ -1236,6 +2231,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input type="file" multiple style={{ display: "none" }} onChange={e => { addFiles(e.target.files); e.target.value = ""; }} />
               <I.doc style={{ fontSize: 15 }} /> Upload documents
             </label>
+            {/* a source that isn't a document or a link: a conversation with a
+                person — named, or anonymous. Citable on what they said. */}
+            {window.InterviewComposer && (
+              <button onClick={() => setInterviewOpen(true)} className="np-cond" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", marginTop: 8, border: "1px solid " + NR.line, background: "transparent", color: NR.text, padding: "8px", fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: "pointer" }}>
+                <I.chat style={{ fontSize: 15 }} /> Cite a conversation
+              </button>
+            )}
             <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 8, lineHeight: 1.5 }}>Sourcing is manual and two-sided: select the exact words in your draft, bind a source, then <b>pin the exact words IN the source</b> that back the claim. You can't cite a whole page. One source can back several spans.</div>
           </div>
 
@@ -1245,35 +2247,83 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
             const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
             const reviewSt = piiGated(s.key) ? piiReviewState(s.key) : null;
+            const iv = !!(window.NpjInterview && window.NpjInterview.isInterview(rec));
             return (
               <div key={s.key} style={{ border: "1px solid " + NR.line, padding: "9px 10px", marginBottom: 8, background: NR.field }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  {s.uploading ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> storing file</span>
+                  {iv ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok, display: "inline-flex", alignItems: "center", gap: 4 }} title="A conversation — cited on what the source said">● conversation</span>
+                    : s.uploading ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> storing file</span>
                     : s.snapshotting ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn, display: "inline-flex", alignItems: "center", gap: 4 }}><Spinner /> snapshotting</span>
                     : s.archived ? <span className="np-mono" style={{ fontSize: 9.5, color: NR.ok }}>● archived</span>
                     : <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>● snapshot only</span>}
+                  {iv && <span className="np-mono" title={(rec.talk && rec.talk.anonymous) ? "Anonymous — identity is never stored in the draft" : "Named, cited source"} style={{ fontSize: 8.5, color: (rec.talk && rec.talk.anonymous) ? NR.warn : NR.soft, border: "1px solid " + ((rec.talk && rec.talk.anonymous) ? NR.warn : NR.line), padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{(rec.talk && rec.talk.anonymous) ? "Anonymous" : "Named"}</span>}
                   {nrIsFileSrc(rec) && <span className="np-mono" title={rec.file_url ? "Stored on your account" : "In this browser only — sign-in stores it to your account"} style={{ fontSize: 8.5, color: NR.soft, border: "1px solid " + NR.line, padding: "0 5px", textTransform: "uppercase", letterSpacing: ".04em" }}>{window.NpjSourceView.kindLabel(rec)}{!rec.file_url && !s.uploading ? " · local" : ""}</span>}
                   {s.uploadErr && <span className="np-mono" title={s.uploadErr} style={{ fontSize: 8.5, color: NR.warn, border: "1px solid " + NR.warn, padding: "0 5px" }}>storage failed</span>}
-                  {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Citey reviews this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
-                  {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="Citey's PII review is done — cleared to archive">✓ PII reviewed</span>}
+                  {(reviewSt === "pending" || reviewSt === "unscanned") && <button onClick={() => setRedactTarget(s.key)} title="Review this for PII before it can be archived" className="np-mono" style={{ fontSize: 9, color: NR.warn, border: "1px solid " + NR.warn, background: "transparent", padding: "1px 5px", cursor: "pointer" }}>⚑ PII review</button>}
+                  {reviewSt === "reviewed" && <span className="np-mono" style={{ fontSize: 9, color: NR.ok }} title="PII review done — cleared to archive">✓ PII reviewed</span>}
                   <span style={{ flex: 1 }} />
                   {cnt > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: unpinned ? NR.warn : NR.soft }}>{cnt} span{cnt !== 1 ? "s" : ""}{unpinned ? " · " + unpinned + " ⚑" : ""}</span>}
                 </div>
-                <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</div>
+                {renameSrcKey === s.key ? (
+                  <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+                    <input autoFocus value={renameSrcText} onChange={e => setRenameSrcText(e.target.value)} onMouseDown={e => e.stopPropagation()}
+                      onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commitSrcRename(s.key); } else if (e.key === "Escape") { e.preventDefault(); setRenameSrcKey(null); setRenameSrcText(""); } }}
+                      placeholder="Source title" className="np-cond"
+                      style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.bg, color: NR.text, fontSize: 13.5, padding: "3px 6px", outline: "none" }} />
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => commitSrcRename(s.key)} title="Save name" style={{ flex: "0 0 auto", background: "var(--yellow)", border: "1px solid var(--yellow)", color: "var(--ink)", fontWeight: 700, fontSize: 11, padding: "3px 7px", cursor: "pointer" }}>Save</button>
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => { setRenameSrcKey(null); setRenameSrcText(""); }} title="Cancel" style={{ flex: "0 0 auto", background: "transparent", border: "1px solid " + NR.line, color: NR.soft, fontSize: 11, padding: "3px 7px", cursor: "pointer" }}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+                    <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14, lineHeight: 1.1, color: NR.text }}>{rec.title}</span>
+                    <button onClick={() => { setRenameSrcKey(s.key); setRenameSrcText(rec.title || ""); }} title="Rename this source" style={{ flex: "0 0 auto", background: "transparent", border: 0, color: NR.muted, cursor: "pointer", fontSize: 12, padding: "0 1px", lineHeight: 1 }}>✎</button>
+                  </div>
+                )}
                 <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, marginTop: 2 }}>{rec.outlet}</div>
+                {/* a clickable preview of the file itself — the screenshot/scan/PDF you cited */}
+                {(() => {
+                  const k = window.NpjSourceView ? window.NpjSourceView.kindOf(rec) : "unknown";
+                  if (k !== "image" && k !== "pdf") return null;
+                  return (
+                    <div style={{ marginTop: 8 }}>
+                      <NrSourceThumb srcKey={s.key} rec={rec} onOpen={() => setExplorer({ key: s.key })} />
+                      {s.ocr
+                        ? <div className="np-mono" style={{ fontSize: 9, color: NR.warn, marginTop: 4, display: "inline-flex", alignItems: "center", gap: 5 }}><Spinner /> reading the text in this image…</div>
+                        : (k === "image" && String(rec.text || "").trim()
+                          ? <div className="np-mono" style={{ fontSize: 9, color: NR.ok, marginTop: 4 }}>✓ text recognized — cite it below</div>
+                          : null)}
+                    </div>
+                  );
+                })()}
                 <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
                   <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {nrIsFileSrc(rec) && <button onClick={() => setExplorer({ key: s.key })} title="Open and read this file" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.eye style={{ fontSize: 12 }} /> View</button>}
-                  {!s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Citey reviews this for PII first, then archives" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review &amp; archive" : "Archive"}</button>}
+                  {!iv && !s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Review this for PII first, then archive" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review & archive" : "Archive"}</button>}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {/* the hover-to-remove × — floats by the cited span the pointer is over, so
+          dropping a citation is one click in the prose (no popover). Rendered
+          OUTSIDE the contenteditable, so it never lands in the saved/published HTML. */}
+      {citeHover && (() => {
+        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + citeHover.cid + '"]');
+        if (!span || !spanIsCite(span)) return null;
+        return (
+          <button key="cite-x" onMouseDown={e => e.preventDefault()}
+            onMouseEnter={() => { if (citeHideT.current) { clearTimeout(citeHideT.current); citeHideT.current = null; } }}
+            onMouseLeave={onBodyLeave}
+            onClick={() => removeCitation(span)}
+            title="Remove this citation — the words stay, the source binding is dropped"
+            className="np-mono" style={{ position: "fixed", left: citeHover.x + 3, top: citeHover.y - 8.5, zIndex: 4500, width: 17, height: 17, padding: 0, lineHeight: "15px", textAlign: "center", borderRadius: "50%", border: "1px solid var(--ink)", background: NR.warn, color: "var(--paper)", fontSize: 12, cursor: "pointer", boxShadow: "0 1px 5px rgba(0,0,0,.4)" }}>×</button>
+        );
+      })()}
 
       {/* selection toolbar */}
       {sel && (
@@ -1285,6 +2335,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
           <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.link style={{ fontSize: 13 }} /> Link</FB>
           <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
+          <FB hot={menu === "void"} onClick={() => setMenu(menu === "void" ? null : "void")} title="Cite a void — ground this in a documented absence (no record exists)"><span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>∅</span> Void</FB>
 
           {menu === "link" && (
             <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9 }}>
@@ -1309,10 +2360,25 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               {sources.filter(s => { const r = window.NPJ.SOURCES[s.key] || {}; const q = srcQuery.trim().toLowerCase(); return !q || ((r.title || "") + " " + (r.outlet || "") + " " + (r.id || s.key)).toLowerCase().includes(q); }).map(s => { const rec = window.NPJ.SOURCES[s.key] || { title: s.key, outlet: "" }; const n = citeNum(s.key); return (
                 <button key={s.key} onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} style={{ display: "flex", gap: 7, alignItems: "baseline", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "7px 4px", cursor: "pointer" }}>
                   {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  <span><span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5 }}>{rec.title}</span><span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {s.archived ? "· archived" : "· snapshot"}{n > 0 ? " · +span" : ""}</span></span>
+                  <span><span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5 }}>{rec.title}</span><span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {rec.type === "interview" ? "" : (s.archived ? "· archived" : "· snapshot")}{n > 0 ? " · +span" : ""}</span></span>
                 </button>); })}
               {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 8px" }}>Ingest a source first (left panel), or paste a URL:</div>}
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
+            </div>
+          )}
+          {menu === "void" && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>∅</span> Cite a void</div>
+              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.55, marginBottom: 8 }}>
+                For a claim that rests on an <b style={{ color: "var(--ink)" }}>absence</b> — “no record exists,” “the city never responded,” “it appears nowhere else.” There’s nothing to link, so document the search instead: where you looked, and that it came up empty. It publishes with the claim.
+              </div>
+              <textarea autoFocus value={voidSearch} onChange={e => setVoidSearch(e.target.value)} onMouseDown={e => e.stopPropagation()}
+                placeholder="Where you looked, and found nothing — e.g. Searched Metro records, the Banner & the Tennessean (2024–2026); no permit or filing."
+                style={{ width: "100%", boxSizing: "border-box", minHeight: 72, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12.5, lineHeight: 1.5, outline: "none", resize: "vertical", fontFamily: "var(--serif)" }} />
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                <button className="btn btn-sm btn-ghost" onMouseDown={e => e.preventDefault()} onClick={() => setMenu(null)}>Cancel</button>
+                <button className="btn btn-sm btn-primary" onMouseDown={e => e.preventDefault()} disabled={!voidSearch.trim()} onClick={() => markVoid(voidSearch)} style={{ opacity: voidSearch.trim() ? 1 : .55 }}>∅ Cite this void</button>
+              </div>
             </div>
           )}
         </div>
@@ -1330,7 +2396,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* pin the source-span: the exact words IN the source that back the claim.
           A page is not a citation — this is what makes it one. */}
-      {pinTarget && (() => { const rec = window.NPJ.SOURCES[pinTarget.key] || {}; const ready = !!String(pinQuote || "").trim(); return (
+      {pinTarget && (() => {
+        const rec = window.NPJ.SOURCES[pinTarget.key] || {};
+        const ready = !!String(pinQuote || "").trim();
+        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
+        const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
+        const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;   // include the one being added
+        const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
+        const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
+        const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
+        return (
         <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
             <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
@@ -1343,6 +2418,24 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
             </div>
           )}
+          {/* every source on this span — one claim can rest on several. Click to edit
+              that one's pinned words; × drops it. The right-hand picker adds more. */}
+          {onSpan.length > 1 && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
+              <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
+              {onSpan.map(k => {
+                const cur = k === pinTarget.key;
+                return (
+                  <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
+                    <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
+                      style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
+                    <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
+                      style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
+                  </span>
+                );
+              })}
+            </div>
+          )}
           <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
           <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
             style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
@@ -1352,6 +2445,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
+            {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
+              className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
+            {others.length > 0 && (
+              <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
+                title="Add another source to this same span — one claim can rest on several"
+                className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
+                <option value="">+ add a source…</option>
+                {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
+              </select>
+            )}
             <span style={{ flex: 1 }} />
             <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
             <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
@@ -1362,7 +2465,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
         <div className="fade-in" onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 5600, background: "rgba(8,7,5,.93)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 26 }}>
-          <img src={mediaImages[viewer].url} alt={mediaImages[viewer].caption || ""} onClick={e => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", border: "1.5px solid rgba(255,255,255,.25)", background: "#000" }} />
+          <NrMediaImg url={mediaImages[viewer].url} alt={mediaImages[viewer].caption || ""} onClick={e => e.stopPropagation()} style={{ maxWidth: "92vw", maxHeight: "76vh", objectFit: "contain", border: "1.5px solid rgba(255,255,255,.25)", background: "#000" }} />
           <div className="np-mono" onClick={e => e.stopPropagation()} style={{ color: "#cfc8b6", fontSize: 11.5, marginTop: 12, maxWidth: 720, textAlign: "center", lineHeight: 1.5 }}>
             {mediaImages[viewer].caption || "untitled image"} · {viewer + 1} / {mediaImages.length}
           </div>
@@ -1382,6 +2485,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           title="Source files — this article"
           initialKey={explorer.key}
           items={sources.filter(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])).map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
+          onRename={(key, t) => tableApi.renameSource(key, t)}
           onClose={() => { setExplorer(null); setSources(x => [...x]); }} />
       )}
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
@@ -1389,9 +2493,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
+      {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => setInterviewOpen(false)} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
+      {previewDoc && window.ArticleRead && (
+        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} me={session && session.user_id} />
+      )}
     </div>
   );
 }
@@ -1456,16 +2564,27 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const liveUnpublished = isRepublish && liveMeta.status === "unpublished";
 
   // ---- byline: who the piece is credited to (outward-facing) ----
-  // Authors default to you (pulled from your account/profile). Editors are an
-  // optional separate "Edited by" credit. "Publish unsigned" ships with no author.
+  // You type the name readers see (defaults to your own); your account id is what
+  // gets stored on the record. Editors are an optional separate "Edited by"
+  // credit. "Publish unsigned" ships with no author.
   const meMx = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || "";
-  const [unsigned, setUnsigned] = useState(false);
-  const [authorsInput, setAuthorsInput] = useState(meMx);
-  const [editorsInput, setEditorsInput] = useState("");
   const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
-  const bylineAuthors = parseMx(authorsInput);
-  const bylineEditors = parseMx(editorsInput);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
+  const [unsigned, setUnsigned] = useState(false);
+  // Byline is a plain name now — type how you want to be credited. It defaults
+  // to your profile display name. Whatever name you show, your Matrix id (meMx)
+  // is recorded as the author on the committed record, so attribution survives.
+  const defaultName = meMx ? nameOfMx(meMx) : "";
+  const [nameInput, setNameInput] = useState(defaultName);
+  const [editorsInput, setEditorsInput] = useState("");
+  const bylineEditors = parseMx(editorsInput);
+  // the userid stored on the backend record — you, the signed-in publisher
+  const bylineAuthors = meMx ? [meMx] : [];
+  // Publishing under your own name keeps the rich contributor chip (the byline
+  // resolves from your id); a free-text override is stored only when you type a
+  // name different from your own — either way the userid above is what's saved.
+  const typedName = nameInput.trim();
+  const bylineOverride = typedName && typedName !== defaultName ? typedName : "";
 
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {
@@ -1632,7 +2751,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     const gen = window.NpjArticles.genesisFromContent(flight.content, {
       slug, headline: title, actor,
-      authors: bylineAuthors, editors: bylineEditors, byline: unsigned ? "Unsigned" : ""
+      // authors carries the userid (meMx); byline overrides the shown name only
+      // when it was customized away from the contributor's own resolved name
+      authors: bylineAuthors, editors: bylineEditors,
+      byline: unsigned ? "Unsigned" : bylineOverride,
+      // how the draft was assembled (typed vs. pasted, paste sizes, timeline) —
+      // aggregate counts only, no words; ships with the piece for the reader's footer
+      composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null
     });
     // move any media-store images onto archive.org (download + reupload, or the
     // Wayback fallback), then rebuild the genesis line from the mutated operand
@@ -1725,19 +2850,20 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             <Row k="Subtitle">{flight.dek || "—"}</Row>
             <Row k="Column">{flight.content.column || "—"}</Row>
             <Row k="Tags">{(flight.content.tags || []).length ? flight.content.tags.map(t => "#" + t).join("  ") : "—"}</Row>
-            {/* Byline — outward-facing credit. Defaults to you; editors optional; can be Unsigned. */}
+            {/* Byline — type the name readers see; your account id is recorded
+                on the backend either way. Editors optional; can be Unsigned. */}
             <div style={{ display: "flex", gap: 10, padding: "9px 0", borderBottom: "1px solid " + NR.line, alignItems: "baseline" }}>
               <span className="np-eyebrow" style={{ color: NR.muted, flex: "0 0 86px" }}>Byline</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5, color: NR.text }}>
-                  {unsigned || !bylineAuthors.length ? "Unsigned" : "By " + bylineAuthors.map(nameOfMx).join(", ")}
+                  {unsigned || (!typedName && !defaultName) ? "Unsigned" : "By " + (typedName || defaultName)}
                   {bylineEditors.length ? <span style={{ color: NR.muted }}>{"  ·  Edited by " + bylineEditors.map(nameOfMx).join(", ")}</span> : null}
                 </div>
                 {!unsigned && (
                   <React.Fragment>
-                    <input value={authorsInput} onChange={e => setAuthorsInput(e.target.value)} placeholder="@you:server" className="np-mono" spellCheck={false}
-                      style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
-                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Authors · Matrix IDs, comma-separated. Defaults to you; the name comes from each contributor's profile.</div>
+                    <input value={nameInput} onChange={e => setNameInput(e.target.value)} placeholder="Your name"
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 13, fontFamily: "var(--cond)", outline: "none" }} />
+                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>The name readers see. {meMx ? "Recorded on the record as " + meMx + "." : "Sign in so your account is recorded with the byline."}</div>
                   </React.Fragment>
                 )}
                 <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:server  (optional)" className="np-mono" spellCheck={false}
@@ -1851,10 +2977,16 @@ function htmlToMarkdown(html) {
   const lines = [];
   const footnotes = {};
   root.querySelectorAll("sup.md-cite").forEach(sup => {
-    if (sup.hasAttribute("data-fn")) return; // manual footnote — its definition is typed in the doc
+    if (sup.hasAttribute("data-fn")) return; // manual footnote — its note lives in the footnotes list
     const key = sup.getAttribute("data-cite"); if (!key) return;
     const rec = window.NPJ.SOURCES[key] || {};
     footnotes[key] = rec.archive_url || rec.original_url || rec.title || key;
+  });
+  // manual footnotes: their notes live in the structured "Footnotes" list, not
+  // in the prose — read each note straight off its <li data-fn-key>.
+  root.querySelectorAll("ol.nr-fnotes > li.nr-fnote[data-fn-key]").forEach(li => {
+    const key = (li.getAttribute("data-fn-key") || "").trim(); if (!key) return;
+    footnotes[key] = inline(li).trim();
   });
   Array.from(root.childNodes).forEach(node => {
     if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) lines.push(t, ""); return; }
@@ -1864,6 +2996,7 @@ function htmlToMarkdown(html) {
     else if (tag === "h2") lines.push("## " + inline(node).trim(), "");
     else if (tag === "h3") lines.push("### " + inline(node).trim(), "");
     else if (tag === "blockquote") lines.push("> " + inline(node).trim().replace(/\n/g, "\n> "), "");
+    else if (tag === "ol" && node.classList.contains("nr-fnotes")) { /* the footnotes list — emitted as [^key]: defs below, not as a numbered list */ }
     else if (tag === "ul") { node.querySelectorAll(":scope > li").forEach(li => lines.push("- " + inline(li).trim())); lines.push(""); }
     else if (tag === "ol") { Array.from(node.querySelectorAll(":scope > li")).forEach((li, i) => lines.push((i + 1) + ". " + inline(li).trim())); lines.push(""); }
     else if (tag === "hr") lines.push("---", "");
@@ -1882,8 +3015,10 @@ function htmlToMarkdown(html) {
       lines.push("");
     }
     else if (tag === "figure") {
-      const cap = node.querySelector("figcaption");
+      const cap = node.querySelector("figcaption:not(.cmp-credit)");
       const capText = cap ? cap.textContent.trim() : "";
+      const credEl = node.querySelector(".cmp-credit");
+      const creditText = credEl ? credEl.textContent.trim() : "";
       // an image slot that resolved an archive.org link carries it in `src` —
       // the published .md hotlinks the IA copy (archive.org is the media CDN);
       // local-only drops have no durable URL and stay out of the .md
@@ -1895,6 +3030,7 @@ function htmlToMarkdown(html) {
         lines.push("![" + capText.replace(/[\[\]\n]/g, " ").trim() + "](" + img + ")", "");
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
       if (capText) lines.push("*" + capText + "*", "");
+      if (creditText) lines.push("*Credit: " + creditText.replace(/\n/g, " ") + "*", "");
     }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });

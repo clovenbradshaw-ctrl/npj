@@ -19,10 +19,23 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const [dek, setDek] = useState(A.dek || "");
   const [note, setNote] = useState("");
   const [assignees, setAssignees] = useState((A.assignees || []).join(", "));
-  // byline — outward-facing credit, editable by anyone who can edit the piece
-  const [authorsInput, setAuthorsInput] = useState((A.authors || []).join(", "));
+  // byline — the name readers see, editable by anyone who can edit the piece.
+  // It's a plain name now: seed it from the stored byline string, else the
+  // resolved name of the first credited author. The author's userid stays in
+  // A.authors and rides through every edit untouched (the backend keeps it).
+  const initialName = (() => {
+    const bl = (A.byline || "").trim();
+    if (bl && bl.toLowerCase() !== "unsigned") return bl;
+    const first = (A.authors || []).filter(Boolean)[0];
+    if (first) return window.npjPerson ? window.npjPerson(first).name : String(first).replace(/^@/, "").split(":")[0];
+    return "";
+  })();
+  const [nameInput, setNameInput] = useState(initialName);
   const [editorsInput, setEditorsInput] = useState((A.editors || []).join(", "));
   const [unsigned, setUnsigned] = useState((A.byline || "").trim().toLowerCase() === "unsigned");
+  // the userid kept on the record — the original author(s), or (only if the piece
+  // had none) the editor making it signed. The displayed name never rewrites it.
+  const recordedId = (A.authors || []).filter(Boolean)[0] || (me && /^@[^:]+:[^:]+$/.test(me) ? me : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const bodyRef = useRef(null);
@@ -33,13 +46,30 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
+  // caption + credit are editable lines under the (non-editable) figure. The
+  // credit carries a markdown hyperlink like a contributor bio — name /
+  // [outlet](https://…) — rendered safely via npjRichText in the reader.
+  const figCaps =
+    '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px"></figcaption>' +
+    '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>';
   const imageFigure = (id, banner) =>
-    '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" fitcontrol shape="rect" placeholder="' +
+    '<figure contenteditable="false" class="cmp-embed"' + (banner ? ' data-banner="1"' : '') + '><image-slot id="' + id + '" conform fitcontrol shape="rect" placeholder="' +
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
-    '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + (banner ? "banner" : "photo") +
-    ' · drag an image or an archive.org link, then caption</figcaption></figure><p><br/></p>';
-  const insertImage = () => { if (bodyRef.current) bodyRef.current.focus(); document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false)); };
+    figCaps + '</figure><p><br/></p>';
+  // Insert an inline image at the caret. When focus was last in the Headline /
+  // Subtitle field (or nowhere), the body has no live caret and execCommand would
+  // drop the figure at offset 0, above the existing copy — so fall back to the end
+  // of the body. Read the selection BEFORE focusing: focus() can synthesize an
+  // offset-0 range that we'd otherwise mistake for a placed caret.
+  const insertImage = () => {
+    const root = bodyRef.current; if (!root) return;
+    const s = window.getSelection();
+    const inBody = !!(s && s.rangeCount && root.contains(s.getRangeAt(0).startContainer));
+    root.focus();
+    if (!inBody && s) { const r = document.createRange(); r.selectNodeContents(root); r.collapse(false); s.removeAllRanges(); s.addRange(r); }
+    document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false));
+  };
   const addBanner = () => { if (bodyRef.current) bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); };
 
   // ---- sourcing: bind the selected words to a (new) source, like the newsroom ----
@@ -98,7 +128,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
       (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
     });
     const sources = {};
-    Object.keys(usedKeys).forEach(k => { const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || (A.sources && A.sources[k]); if (rec) sources[k] = rec; });
+    const pub = (window.NpjArticles && window.NpjArticles.publishableSource) || ((r) => r);
+    Object.keys(usedKeys).forEach(k => { const rec = (window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || (A.sources && A.sources[k]); if (rec) sources[k] = pub(rec); });
 
     // the REC operand carries ONLY what changed (plus body, which is the edit)
     const operand = { body: blocks };
@@ -107,10 +138,19 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     if (dek.trim() !== (A.dek || "")) operand.dek = dek.trim();
     const nextAssignees = parseAssignees();
     if (isAdmin && nextAssignees.join(",") !== (A.assignees || []).join(",")) operand.assignees = nextAssignees;
-    // byline diff — only the fields that actually changed ride the REC
-    const nextAuthors = unsigned ? [] : parseMx(authorsInput);
+    // byline diff — only the fields that actually changed ride the REC. The
+    // displayed credit is the typed name (stored in `byline`); the userid(s)
+    // stay in `authors` so the backend keeps the real identity. Editing the name
+    // never rewrites who the record credits — we preserve the original author id,
+    // falling back to the editor's own id only when the piece had no author yet.
+    const origAuthors = (A.authors || []).filter(Boolean);
+    const nextAuthors = unsigned ? [] : (origAuthors.length ? origAuthors : (me && /^@[^:]+:[^:]+$/.test(me) ? [me] : []));
     const nextEditors = parseMx(editorsInput);
-    const nextByline = unsigned ? "Unsigned" : "";
+    // keep the rich chip when the name still matches the credited author; store a
+    // free-text byline only when it's been customized away from that name
+    const defaultName = recordedId ? nameOfMx(recordedId) : "";
+    const typedName = nameInput.trim();
+    const nextByline = unsigned ? "Unsigned" : (typedName && typedName !== defaultName ? typedName : "");
     if (nextAuthors.join(",") !== (A.authors || []).join(",")) operand.authors = nextAuthors;
     if (nextEditors.join(",") !== (A.editors || []).join(",")) operand.editors = nextEditors;
     if (nextByline !== (A.byline || "")) operand.byline = nextByline;
@@ -195,16 +235,17 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             style={{ minHeight: 320, maxHeight: "46vh", overflowY: "auto", border: "1.5px solid var(--ink)", background: "var(--card)",
               padding: "16px 18px", fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.6, outline: "none" }} />
 
-          {/* Byline — outward-facing credit. Editable by anyone who can edit. */}
+          {/* Byline — the name readers see. Editable by anyone who can edit.
+              The userid (recordedId) stays on the record; only the name changes. */}
           <div className="np-eyebrow" style={{ margin: "16px 0 6px" }}>Byline · how the piece is credited</div>
           <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, marginBottom: 8 }}>
-            {unsigned || !parseMx(authorsInput).length ? "Unsigned" : "By " + parseMx(authorsInput).map(nameOfMx).join(", ")}
+            {unsigned || (!nameInput.trim() && !recordedId) ? "Unsigned" : "By " + (nameInput.trim() || nameOfMx(recordedId))}
             {parseMx(editorsInput).length ? <span style={{ color: "var(--ink-soft)" }}>{"  ·  Edited by " + parseMx(editorsInput).map(nameOfMx).join(", ")}</span> : null}
           </div>
           {!unsigned && (
             <React.Fragment>
-              <input value={authorsInput} onChange={e => setAuthorsInput(e.target.value)} placeholder="@author:hyphae.social" className="np-mono" style={{ ...field, fontSize: 12.5 }} />
-              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 8px" }}>Authors · comma-separated Matrix IDs. Names come from each contributor's profile.</div>
+              <input value={nameInput} onChange={e => setNameInput(e.target.value)} placeholder="Author name" style={{ ...field, fontSize: 14 }} />
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 8px" }}>The name readers see.{recordedId ? " Recorded on the record as " + recordedId + "." : ""}</div>
             </React.Fragment>
           )}
           <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:hyphae.social  (optional)" className="np-mono" style={{ ...field, fontSize: 12.5 }} />

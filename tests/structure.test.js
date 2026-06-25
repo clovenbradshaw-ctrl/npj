@@ -76,6 +76,46 @@ test("§6 apply-after-the-fact: organic sections stay put as orphans, slots appe
   assert.equal(S.sectionById(s, "b").parentSlotId, slot0);
 });
 
+test("sectionDropIndex: orphan reorder maps to the move that moveSection performs", () => {
+  // a,b,c at the top level. The index it returns must feed straight into
+  // moveSection and land the row exactly where the drop implied.
+  const base = [].concat(
+    S.ops.fromHeader("s-a", { id: "a", heading: "A" }),
+    S.ops.fromHeader("s-b", { id: "b", heading: "B" }),
+    S.ops.fromHeader("s-c", { id: "c", heading: "C" })
+  );
+  const after = (draggedId, refId, edge) => {
+    const m = S.sectionDropIndex(S.fold(base), draggedId, refId, edge);
+    return S.flattenIds(S.fold(base.concat(S.ops.moveSection(draggedId, m.parentSlotId, m.index))));
+  };
+  assert.deepEqual(after("a", "c", "before"), ["b", "a", "c"]); // drag A down, before C
+  assert.deepEqual(after("c", "a", "before"), ["c", "a", "b"]); // drag C up, before A
+  assert.deepEqual(after("a", "b", "after"),  ["b", "a", "c"]); // drag A just after B
+  assert.deepEqual(after("b", "b", "before"), ["a", "b", "c"]); // onto itself → no move
+});
+
+test("sectionDropIndex: dropping next to a slotted section lands in that slot", () => {
+  let log = S.ops.applyType(S.fold([]), typeById("news-report"));
+  let s = S.fold(log);
+  const slot0 = S.topRefs(s).find((r) => r.kind === "slot").id;
+  log = log.concat(
+    S.ops.fromHeader("s-in", { id: "in", heading: "Inside", parentSlotId: slot0 }),
+    S.ops.fromHeader("s-orphan", { id: "orphan", heading: "Orphan" }) // top level
+  );
+  s = S.fold(log);
+  const m = S.sectionDropIndex(s, "orphan", "in", "before");
+  assert.equal(m.parentSlotId, slot0, "target container is the ref's slot");
+  log = log.concat(S.ops.moveSection("orphan", m.parentSlotId, m.index));
+  s = S.fold(log);
+  assert.equal(S.sectionById(s, "orphan").parentSlotId, slot0);
+  assert.deepEqual(S.childRefs(s, slot0).map((x) => x.id), ["orphan", "in"]); // dropped before "in"
+});
+
+test("sectionDropIndex: unknown ref → null (caller no-ops)", () => {
+  const s = S.fold(S.ops.fromHeader("s-a", { id: "a", heading: "A" }));
+  assert.equal(S.sectionDropIndex(s, "a", "nope", "before"), null);
+});
+
 test("I1 — flatten never leaks structural fields", () => {
   // a fully mixed post: slots with children, an interleaved orphan, an empty slot
   let s = S.fold([]);

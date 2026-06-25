@@ -55,21 +55,21 @@ function ArchiveModal({ items, onClose, onDone, srcKey }) {
               You're about to archive <strong style={{ color: "var(--ink)" }}>{list.length} source{list.length !== 1 ? "s" : ""}</strong> to <em>archive.org</em>. Each becomes part of the permanent public record, and every citation that points to it will resolve to its archived snapshot.
             </p>
             <div style={{ padding: "10px 12px", background: "color-mix(in srgb, var(--review) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--review) 36%, transparent)", fontFamily: "var(--serif)", fontSize: 13, color: "var(--review)", marginBottom: 8 }}>
-              <strong style={{ fontWeight: 700 }}>Permanent &amp; public. </strong>An archived source can't be edited or deleted later. Citey reviews each upload for PII first and <strong>hard-redacts</strong> anything you don't want public — there's no taking it back once it's on archive.org.
+              <strong style={{ fontWeight: 700 }}>Permanent &amp; public. </strong>An archived source can't be edited or deleted later. Each upload is reviewed for PII first and <strong>hard-redacts</strong> anything you don't want public — there's no taking it back once it's on archive.org.
             </div>
             <Chk k="permanence" label="Permanence">This is uploaded permanently to the Internet Archive and cannot be deleted.</Chk>
             {gateable ? (
               <div style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--rule)", alignItems: "flex-start" }}>
                 <span style={{ marginTop: 1, color: reviewed ? "var(--verified)" : "var(--review)", fontSize: 16, width: 16, textAlign: "center", flex: "0 0 auto" }}>{reviewed ? <I.check /> : "⚑"}</span>
                 <div style={{ flex: 1 }}>
-                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>Privacy — Citey's PII review. </span>
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, textTransform: "uppercase", letterSpacing: ".04em" }}>Privacy — PII review. </span>
                   <span style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.45, color: "var(--ink-soft)" }}>
                     {reviewed
                       ? <React.Fragment>Reviewed — {(rec.piiReview.redactions || []).length} redacted, {(rec.piiReview.affirmations || []).length} kept on purpose.</React.Fragment>
-                      : "Citey has to scan this, and you have to redact or affirm each flagged span, before it can be archived."}
+                      : "This has to be scanned, and each flagged span redacted or affirmed, before it can be archived."}
                   </span>
                   <div style={{ marginTop: 6 }}>
-                    <button className="btn btn-sm btn-primary" onClick={() => setReviewOpen(true)} style={reviewed ? { background: "transparent", color: "var(--ink)", borderColor: "var(--ink)" } : {}}>{reviewed ? "Re-open review" : "Review with Citey"}</button>
+                    <button className="btn btn-sm btn-primary" onClick={() => setReviewOpen(true)} style={reviewed ? { background: "transparent", color: "var(--ink)", borderColor: "var(--ink)" } : {}}>{reviewed ? "Re-open review" : "Review for PII"}</button>
                   </div>
                 </div>
               </div>
@@ -247,6 +247,65 @@ function PublishedSourceCard({ g, onOpenArticle }) {
   );
 }
 
+/* ============ pivot by article: each story with the sources it rests on ============ */
+// Invert the deduped source index (source → carriers) into article → sources, so
+// the same archive can be read either way. Sources are already one-per-signature,
+// so an article never lists the same source twice. Newest-cited (most sources) first.
+function articlePivot(groups) {
+  const byArticle = new Map();
+  (groups || []).forEach(g => {
+    (g.carriers || []).filter(c => c.kind === "published").forEach(c => {
+      const key = c.slug || c.id;
+      let a = byArticle.get(key);
+      if (!a) { a = { slug: c.slug, title: c.title, sources: [] }; byArticle.set(key, a); }
+      a.sources.push({ g, quotes: c.quotes || [] });
+    });
+  });
+  return Array.from(byArticle.values()).sort((a, b) => b.sources.length - a.sources.length);
+}
+
+// One article, with the deduped sources its claims are pinned to — each linked to
+// its archived snapshot. The inverse view of PublishedSourceCard.
+function ArticleSourcesCard({ a, onOpenArticle }) {
+  const open = () => onOpenArticle && a.slug && onOpenArticle(a.slug);
+  const n = a.sources.length;
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 14px", borderBottom: n ? "1px solid var(--rule)" : 0 }}>
+        <I.doc style={{ fontSize: 20, color: "var(--ink-soft)", flex: "0 0 auto" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <button onClick={open} title="Read this article" style={{ display: "block", maxWidth: "100%", cursor: "pointer", textAlign: "left", border: 0, background: "transparent", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17, lineHeight: 1.08, color: "var(--ink)", padding: 0 }}>{a.title}</button>
+          <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3 }}>{n} source{n !== 1 ? "s" : ""} cited</div>
+        </div>
+        <button className="btn btn-sm btn-ghost" onClick={open} style={{ flex: "0 0 auto" }}>Read ↗</button>
+      </div>
+      {n > 0 && (
+        <div style={{ padding: "2px 14px 8px" }}>
+          {a.sources.map(({ g, quotes }) => {
+            const k = g.kind || {};
+            const url = g.rec && (g.rec.archive_url || g.rec.original_url);
+            return (
+              <div key={g.signature} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "8px 0", borderTop: "1px solid var(--rule)", flexWrap: "wrap" }}>
+                <I.archive style={{ fontSize: 14, color: k.archived ? "var(--verified)" : "var(--data)", flex: "0 0 auto", alignSelf: "flex-start", marginTop: 2 }} />
+                <div style={{ flex: "1 1 200px", minWidth: 0 }}>
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5 }}>{g.title}</span>
+                  <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginLeft: 8 }}>{k.label}</span>
+                  {(quotes || []).slice(0, 1).map((qt, i) => (
+                    <div key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>“{qt.length > 140 ? qt.slice(0, 140) + "…" : qt}”</div>
+                  ))}
+                </div>
+                {url
+                  ? <a href={url} target="_blank" rel="noopener" className={k.archived ? "chip chip-accepted" : "btn btn-sm"} style={{ flex: "0 0 auto", textDecoration: "none", alignSelf: "center" }}><I.archive style={{ fontSize: 12 }} /> {k.archived ? "Archived" : "Open"}</a>
+                  : <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", flex: "0 0 auto", alignSelf: "center" }}>no snapshot</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ============ data explorer page ============ */
 function ArchiveTagHowTo({ failed }) {
   const tag = (window.NPJ.ARCHIVE || {}).tag || "npj-source";
@@ -271,13 +330,16 @@ function ArchiveTagHowTo({ failed }) {
 }
 
 function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
+  const mobile = window.useIsMobile();
   const data = useArchiveData();
   const arc = window.NPJ.ARCHIVE || {};
   const pub = usePublishedSources();
   const projects = ["All", ...Array.from(new Set(data.map(d => d.project)))];
-  // "published" (default) = the archive behind released stories, backtracked.
-  // "all" = every archive.org item carrying the tag, story or no story.
-  const [mode, setMode] = useState("published");
+  // The archive of cited sources, pivotable two ways, plus the raw archive.org list:
+  //   "source"  (default) — one row per unique source, backtracked to the stories citing it
+  //   "article"           — pivoted by article: each story with the deduped sources it rests on
+  //   "all"               — every archive.org item carrying the tag, cited or not
+  const [mode, setMode] = useState("source");
   const [q, setQ] = useState("");
   const [proj, setProj] = useState("All");
   const [archiveTarget, setArchiveTarget] = useState(null);
@@ -285,21 +347,23 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
   const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(ql));
   const pubGroups = (pub.groups || []).filter(g =>
     !ql || ((g.title || "") + " " + ((g.rec && (g.rec.archive_url || g.rec.original_url)) || "") + " " + g.carriers.map(c => c.title).join(" ")).toLowerCase().includes(ql));
+  const articles = articlePivot(pub.groups).filter(a =>
+    !ql || ((a.title || "") + " " + a.sources.map(s => s.g.title).join(" ")).toLowerCase().includes(ql));
 
   return (
     <div className="fade-in">
       <Masthead route="explore" onHome={onHome} onNewsroom={onNewsroom} />
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "36px 22px 70px" }}>
-        <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Data explorer</div>
-        <h1 style={{ fontFamily: "var(--display)", fontSize: 58, lineHeight: .95, margin: "0 0 10px" }}>The evidence, behind the story.</h1>
-        <p style={{ fontFamily: "var(--serif)", fontSize: 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "62ch", margin: "0 0 16px" }}>
-          The archive of record — every source a published article rests on, in one place, with a trail back to the stories that cite it. Identical material uploaded more than once is linked, not duplicated, even across projects.
+        <div className="np-eyebrow" style={{ color: "var(--reject)", marginBottom: 10 }}>Sources archive</div>
+        <h1 style={{ fontFamily: "var(--display)", fontSize: mobile ? 38 : 58, lineHeight: .95, margin: "0 0 10px" }}>Every source, behind every story.</h1>
+        <p style={{ fontFamily: "var(--serif)", fontSize: mobile ? 16 : 18, lineHeight: 1.5, color: "var(--ink-soft)", maxWidth: "62ch", margin: "0 0 16px" }}>
+          The archive of record — every source a published article rests on, archived on the Internet Archive and gathered in one place. Pivot it by source or by article; identical material uploaded more than once is linked, not duplicated, even across projects.
         </p>
 
-        {/* the two cuts: the archive behind released stories, vs. every tagged item */}
-        <div style={{ display: "flex", gap: 0, marginBottom: 18, border: "1.5px solid var(--ink)", width: "fit-content" }}>
-          {[["published", "Published sources"], ["all", "All tagged items"]].map(([m, label]) => (
-            <button key={m} onClick={() => setMode(m)} className="np-cond" style={{ fontSize: 13, padding: "7px 16px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, border: 0, borderRight: m === "published" ? "1.5px solid var(--ink)" : 0, cursor: "pointer",
+        {/* pivot the cited-source archive by source or by article, or browse the raw archive.org list */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 0, marginBottom: 18, border: "1.5px solid var(--ink)", width: "fit-content", maxWidth: "100%" }}>
+          {[["source", "By source"], ["article", "By article"], ["all", "All on archive.org"]].map(([m, label], i) => (
+            <button key={m} onClick={() => setMode(m)} className="np-cond" style={{ fontSize: 13, padding: "7px 16px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, border: 0, borderRight: i < 2 ? "1.5px solid var(--ink)" : 0, cursor: "pointer",
               background: mode === m ? "var(--ink)" : "var(--card)", color: mode === m ? "var(--yellow)" : "var(--ink)" }}>{label}</button>
           ))}
         </div>
@@ -307,13 +371,13 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
         <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, border: "1.5px solid var(--ink)", background: "var(--card)", padding: "0 12px", flex: "1 1 260px" }}>
             <I.search style={{ fontSize: 16, color: "var(--ink-soft)" }} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "published" ? "Search sources, or the stories citing them…" : "Search datasets, columns, projects…"}
-              style={{ flex: 1, border: 0, background: "transparent", padding: "11px 0", fontFamily: "var(--serif)", fontSize: 15, outline: "none" }} />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "all" ? "Search datasets, columns, projects…" : mode === "article" ? "Search articles, or the sources they cite…" : "Search sources, or the stories citing them…"}
+              style={{ flex: 1, border: 0, background: "transparent", padding: "11px 0", fontFamily: "var(--serif)", fontSize: 15, outline: "none", minWidth: 0 }} />
           </div>
-          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{mode === "published" ? pubGroups.length + " source" + (pubGroups.length !== 1 ? "s" : "") : shown.length + " of " + data.length}</span>
+          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{mode === "source" ? pubGroups.length + " source" + (pubGroups.length !== 1 ? "s" : "") : mode === "article" ? articles.length + " article" + (articles.length !== 1 ? "s" : "") : shown.length + " of " + data.length}</span>
         </div>
 
-        {mode === "published" ? (
+        {mode === "source" ? (
           <React.Fragment>
             <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               {pub.state === "loading" && <span><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", verticalAlign: "-1px", marginRight: 6 }} />reading the published record…</span>}
@@ -324,7 +388,22 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
             {pubGroups.length === 0 && pub.state !== "loading" && (
               <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No source matches" : "No published sources yet"}</div>
-                <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: 0 }}>{q ? "Try another search, or switch to All tagged items." : "When a story ships, every source its claims rest on lands here — with a trail back to the article. Browse everything on archive.org under All tagged items."}</p>
+                <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: 0 }}>{q ? "Try another search, or switch to All on archive.org." : "When a story ships, every source its claims rest on lands here — with a trail back to the article. Browse everything on archive.org under All on archive.org."}</p>
+              </div>
+            )}
+          </React.Fragment>
+        ) : mode === "article" ? (
+          <React.Fragment>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {pub.state === "loading" && <span><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", verticalAlign: "-1px", marginRight: 6 }} />reading the published record…</span>}
+              {pub.state === "ok" && <span style={{ color: "var(--verified)" }}>● {articles.length} article{articles.length !== 1 ? "s" : ""} — each with the deduped sources it cites</span>}
+              {pub.state === "error" && <span style={{ color: "var(--reject)" }}>couldn't read the published record</span>}
+            </div>
+            {articles.map(a => <ArticleSourcesCard key={a.slug || a.title} a={a} onOpenArticle={onOpenArticle} />)}
+            {articles.length === 0 && pub.state !== "loading" && (
+              <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No article matches" : "No published articles yet"}</div>
+                <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: 0 }}>{q ? "Try another search, or switch to By source." : "When a story ships, it appears here with every source its claims rest on."}</p>
               </div>
             )}
           </React.Fragment>

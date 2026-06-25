@@ -26,10 +26,11 @@ founding admin curates the site and grows the network from there.
 | `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
 | `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
 | `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
-| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation |
+| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation. One span can hold **several citations** (`data-cite-id`, one `md-cite` marker per source) |
+| `app/source-title.js` | best-effort **source identity** — guess a web source's title (URL slug) + outlet (host), and read the real ones off the page's own `<title>`/`og:` tags. No model; pure + tested |
 | `app/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
 | `app/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
-| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
+| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩, or **⊪ in context** — continuing coverage that builds on prior articles), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
 | `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
 | `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
 | `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
@@ -198,8 +199,13 @@ back the claim. Until it does, the span is flagged (⚑ `needs-quote`) and the
 publish build refuses it — right next to the "no source record" check. The pinned
 passage rides the article (`data-quote` → the claim token's `q` map) and shows in
 the reader's citation card as *"the cited passage — in the source."* One source can
-back **several spans**, each pinned to its own words. Sources are snapshotted to
-archive.org; a claim that points at a page but no span fails the build.
+back **several spans**, each pinned to its own words — and one span can rest on
+**several sources**: cite the same words again (or use the pin popover's **+ add a
+source**) and each source gets its own pinned passage, so a claim corroborated by
+two documents publishes as a single ⊨ claim carrying both (`data-cite-id` holds the
+records; the publish path reads one `md-cite` marker per source into the token's
+`src[]` + `q{}`). Sources are snapshotted to archive.org; a claim that points at a
+page but no span fails the build.
 
 **Citey finds the span — he never invents the citation.** When you bind a source,
 hit **📎 Find the line**: Citey takes your claim and the source's text, ranks the
@@ -216,8 +222,11 @@ Next to **Prose** (the editor), the Newsroom's view switcher opens the
 that always shows a second view and **pivots** as you work:
 
 - **Grounding** — every sentence is a row: its status pill (⊤ grounded · ⊨ N
-  sources · ⊥ needs source · ⊩/⊨/⊢ owned · ¬ sources disagree), the citations
-  attached to it, and its stance. Click a sentence and the panel shows its
+  sources · ⊥ needs source · ⊩/⊨/⊢ owned · ⊪ in context · ¬ sources disagree), the
+  citations attached to it, and its stance. A sentence can *also* carry **context**
+  — the prior coverage it builds on (⊪), cited for context rather than proof and
+  kept apart from the citations that back it, so a claim can be *both* proved by the
+  article **and** set against past articles. Click a sentence and the panel shows its
   grounding card; click a citation chip and the panel pivots to the registry.
 - **Citations** — the registry of reusable records. A citation is a pinned span
   of a source — exact words plus character offsets (multi-part when the support
@@ -229,20 +238,41 @@ that always shows a second view and **pivots** as you work:
   registry (best mechanical match first, but never hidden behind a threshold), so
   a citation you've already pinned attaches in one click instead of being hunted
   down in its source and re-grabbed.
-- **Sources** — the documents themselves, rendered as paper with a letterhead
-  (kind · title · archived-or-not). Search within the document, see every cited
-  span highlighted in place, and — from any "+ Cite" — go in **armed**: Citey
-  shades the passages he scents (mechanical word overlap, dotted, never a
-  one-click pin), and you drag-select the exact words. Grab two spans if the
-  support lives in two places; *⊕ Cite this span* mints the reusable record.
+- **Sources** — a **table** of the documents: where each is from, our best guess
+  at its title, how many citations rest on it, archived-or-not, and the
+  housekeeping (**⟲ Guess · ✎ Rename · ✕**). **The library names its own sources.**
+  A web source no longer lands as a generic *"Web snapshot"* — it's named
+  mechanically from its URL (the slug → a readable title, the host → the outlet),
+  then **upgraded from the page's own `<title>`/`og:` tags** when the CORS-open
+  archived HTML is reachable (`app/source-title.js` parses, `archive-cdn.pageMeta`
+  fetches — no model, best-effort, a manual Rename always wins). Pick a row to open
+  the document as paper with a letterhead: search within it, see every cited span
+  highlighted in place, and — from any "+ Cite" — go in **armed**: Citey shades the
+  passages he scents (mechanical word overlap, dotted, never a one-click pin), and
+  you drag-select the exact words. Grab two spans if the support lives in two
+  places; *⊕ Cite this span* mints the reusable record.
 
 A **Ground truth** strip keeps the running tally (grounded / yours / conflicts /
 needs sources) and the gate chip — **⚑ N blockers** until every sentence is
 grounded or owned, **⊤ gate open** after. **Walk me through** hands Citey the
 floor: he steps sentence-by-sentence through everything unsourced with one
-honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / Infer ⊢).
+honest choice each — 🔍 find support, or own it (Argue ⊩ / Assert ⊨ / Infer ⊢ / In context ⊪).
 All of it reads and writes the same editor DOM and autosave as Prose; the views
 can't diverge.
+
+**Export outstanding fact checks.** When some claims can't be sourced from the
+desk, hand them off: the **Export for fact-check** action turns every blocker
+(⊥ needs source · ¬ conflict) into a plain, paste-anywhere list of *outstanding
+fact checks* — one line per claim, each naming the **type of evidence** that
+would ground it (the negative space), e.g. `… → an official document (court
+filing, permit, or ordinance)`. The evidence type is read **mechanically** from
+cues in the claim (`app/evidence-needs.js` — quotation marks, legal/governmental
+verbs, figures, attribution, dates → a coarse evidence category; no model, never
+prescriptive about the specific document). A **Sharpen with local model** button
+upgrades the types through a local LLM when one is reachable (Ollama, or any
+`setLLM` hook — the same ladder as Citey's voice), falling back silently to the
+mechanical read. `app/fact-check-export.js` shapes the plain text; nothing here
+judges a claim, only what would let someone else judge it.
 
 ## Citey — every claim grounded before it ships
 
@@ -261,6 +291,12 @@ Click him on a flagged claim and he offers the two honest ways to ground it:
   analysis**, your **⊨ account** (you witnessed it), or your **⊩ stated position**.
   Owning records the stance and clears the flag; it publishes as your prose, not a
   citation. The thing Citey won't rest beside is the *undeclared* claim.
+- **In context** — a fourth, lighter declaration for *continuing coverage*: a claim
+  the article itself substantiates while building on the outlet's prior reporting
+  (a topic or thesis sentence like "The war over benches continues"). It grounds
+  the claim (⊪) and carries links to the **past articles** it builds on — cited for
+  context, not proof. Context links ride a separate channel from the proof
+  citations, so the same sentence can be *both* proved **and** set in context.
 
 Citey also reflects the **publish gate**: a live count of how many claims would
 still ship unverified, and a wary face until they're all sourced or owned — the
@@ -275,6 +311,46 @@ fonts, colors and backgrounds never enter a draft. **Images paste too**: a
 screenshot or a copied image lands as a regular image figure (and if it was
 copied off archive.org, the durable CDN link is kept instead of raw bytes).
 
+**Return vs Shift+Return.** A plain **Return** is a paragraph break — a new
+`<p>`, which ships with paragraph spacing between it and the last one. A
+**Shift+Return** is a soft line break — a `<br>`, which ships tight, with no
+extra space (addresses, verse, a forced wrap). The editor pins the browser's
+block separator to `<p>` so a Return splits consistently across browsers, and
+the publish pipeline (`htmlToBlocks` → the reader) renders each exactly that
+way; inside a code/verse block a Return is a literal newline instead.
+
+**Preview is the real thing, not a mock.** The editor's **Preview** button folds
+the live draft through the *same* builder that publishing uses
+(`NpjArticles.genesisFromContent`) and hands the result to the reader's own
+renderer (`ArticleRead` in preview mode) — same Header, same body blocks, same
+paper page. So what you see in Preview is byte-for-byte what ships: paragraph
+spacing, soft line breaks, images, the byline and the sources footer. Esc (or
+✕ Close) drops you back in the editor.
+
+**Transparency — the grounding, painted onto the prose.** Both the **Preview**
+overlay and the published reader carry a **Transparency** toggle that colours
+every grounded span by *how* it stands — the **same vocabulary the editor's
+Grounding workspace uses** (`proseShade`/`pillFor`), so a reader (or an author
+auditing a draft) sees the evidence behind each claim at a glance instead of
+hovering one by one:
+
+- **⊤ Grounded** / **⊨ Multiple sources** (yellow): pinned to one — or more than
+  one — source passage that backs it.
+- **⊢ analysis · ⊨ account · ⊩ position** (violet): claims the author *owns* —
+  grounded by honest declaration, not a citation.
+- **⊥ Needs a source** (orange, dashed): bound to a source but with no passage
+  pinned — the same claim the publish gate flags; normally only visible in
+  Preview.
+- **¬ Sources disagree** (red): two pinned quotes pull opposite ways.
+
+Each span also carries the small logic glyph the workspace uses, and a legend
+keys the colours and tallies each kind; everything unmarked is uncited prose.
+The lens reads the body's own grounding, so it lights up the same way in Preview
+and on the live page. Owning a claim used to flatten to plain prose at publish —
+now the stance rides the published body (`{c, stance}` tokens through
+`htmlToBlocks`/`tokensToHtml`), so the record itself carries *which kind* of
+grounding each owned claim has, and the lens can show it.
+
 **The page knows its own media.** The contents rail keeps a census of every
 image and embed in the piece; image thumbnails open a full-size viewer
 (arrows page through, esc closes, "show in document" jumps to the figure).
@@ -286,6 +362,44 @@ rides the article's EO genesis event as `dek`.
 **The filename is the author's call.** It follows the headline by default,
 but the publish gate has a rename field — a custom name sticks with the
 draft and the committed file is named accordingly.
+
+## Export to Substack — a paste that lands perfectly
+
+Any published piece carries an **Export** button (the reader's control bar)
+that opens the Substack panel (`app/SubstackExport.jsx`, over
+`app/substack-export.js`). The mechanic it leans on: Substack's editor honors
+**pasted HTML** (headings, bold/italic, links, lists, blockquotes, `<img>`) but
+treats **pasted markdown syntax as literal text** — so the formatting has to
+travel as HTML, not as `#`/`*` characters. Two paths, both land formatted:
+
+- **Copy article** — one click puts rich HTML *and* a markdown fallback on the
+  clipboard in a single write; paste into a new Substack post and headings,
+  emphasis, links, lists, blockquotes and photos come across. Substack re-hosts
+  each image straight from its **archive.org URL** (auth-gated Matrix
+  `store:`/`mxc:` copies are dropped, since Substack fetches server-side), so
+  there's nothing to re-upload.
+- **Download .html — the file that copies perfectly.** A self-contained web
+  page (`toHtmlDocument`): open it in any browser and click its own **Copy
+  article** button for the same rich paste, **offline** and **without the
+  clipboard quirks** — even a plain select-all + ⌘/Ctrl-C copies as formatted
+  HTML, because a rendered browser selection already is. This is the durable,
+  shareable artifact; a `.md` download is offered too, but only as the
+  plain-text archival record (pasted markdown stays literal in Substack).
+
+**The sourcing rides along, as footnotes.** NPJ's distinctive payload — every
+claim bound to an archived snapshot *and the exact pinned passage that backs it*
+— survives the export. Each sourced claim gets a superscript footnote marker,
+and a **Sources** section closes the piece: every source, with the passage(s) it
+backs quoted in full. The catch that makes it auditable on someone else's
+platform: **every one of those links opens the archive.org snapshot deep-linked
+to the cited words** — a [Text Fragment](https://developer.mozilla.org/en-US/docs/Web/Text_fragments)
+(`#:~:text=…`) the browser scrolls to and highlights — so a reader lands on
+*precisely the evidence*, not the top of a long archived article (long passages
+anchor by their first/last words, so the highlight survives small drifts; an
+unmatched fragment just opens the snapshot normally). Both footnote markers and
+the Sources list are toggleable for a clean copy. **Title and subtitle** are
+handed over as their own one-click chips, because Substack fills those from its
+own fields — so the copied body omits them.
 
 ## Citey reviews every source for PII before it's archived
 
@@ -334,6 +448,26 @@ article hotlinks the same copy in its `img` block.
 
 Local file drops still preview instantly, but they have no durable URL — they
 stay out of the published article until they're on archive.org.
+
+### Edit the photo before it's frozen — crop + hard redaction
+
+Hover a filled image slot and hit **Edit** (`app/photo-editor.js`) to crop the
+frame and paint hard black over anything that shouldn't be public — a face, a
+plate, a screen, an address. Both are **baked into a new image**: the editor
+flattens the crop and the redaction boxes onto a canvas, and `<image-slot>`
+re-uploads *that* copy to the media store. So when publish freezes the slot onto
+archive.org it can only ever copy the redacted version — the un-redacted original
+never reaches the permanent, public record. This is the pixel counterpart to
+Citey's text redaction: a redaction is **hard** (black pixels, not a removable
+overlay or render-time metadata) and **before the archive**, by construction.
+
+### Every photo carries a credit
+
+Each image figure has a **credit** line under the caption. It takes a hyperlink
+the same way a contributor bio does — a name and an optional `[outlet](https://…)`
+in markdown — sanitized through `safeHref`/`npjRichText` (http(s)/mailto only,
+escaped text, `rel="noopener noreferrer nofollow"`) and rendered as a safe link
+in the reader, the hero banner, and the Substack export.
 
 ## Projects, articles & sources
 

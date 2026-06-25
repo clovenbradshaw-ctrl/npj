@@ -112,7 +112,16 @@
     const draft = loadLocal(id);
     if (!draft) return;
     if (!signedIn()) { setStatus("localonly", id); return; }
-    try { setStatus("syncing", id); await pushRemote(id, draft); setStatus("synced", id); }
+    try {
+      setStatus("syncing", id);
+      await pushRemote(id, draft);
+      // a draft attached to a project also lives in the shared room, so every
+      // invited member loads + edits it — best-effort, never blocks the account sync
+      if (draft.room && draft.room.roomId && window.MatrixAuth && window.MatrixAuth.putRoomDoc) {
+        try { await window.MatrixAuth.putRoomDoc(draft.room.roomId, id, draft); } catch (e) {}
+      }
+      setStatus("synced", id);
+    }
     catch (e) { setStatus("error", id); }
   }
 
@@ -171,12 +180,62 @@
     return Object.values(map).sort((a, b) => String(b.updated || "").localeCompare(String(a.updated || "")));
   }
 
+  // Pull a project room's shared documents into the local store so they list +
+  // open like any draft. The room is the shared source of truth: for each doc we
+  // take the room's copy when it's newer than what's local (last-write-wins) and
+  // mirror it locally, so restore() and the editor's existing path just work — and
+  // an invited member finally SEES the articles in a project, not an empty room.
+  // Best-effort: a homeserver hiccup yields whatever's already local.
+  async function pullRoomDocs(roomId, title) {
+    if (!signedIn() || !roomId || !window.MatrixAuth || !window.MatrixAuth.getRoomDocs) return [];
+    let metas = [];
+    try { metas = await window.MatrixAuth.getRoomDocs(roomId); } catch (e) { return []; }
+    const out = [];
+    for (const meta of metas) {
+      const id = meta && meta.id; if (!id) continue;
+      const local = loadLocal(id);
+      const roomNewer = !local || String(meta.updated || "") > String((local && local.updated) || "");
+      if (roomNewer && meta.mxc) {
+        let body = null;
+        try { body = await window.MatrixAuth.getRoomDocContent(meta.mxc); } catch (e) {}
+        if (body && typeof body === "object") {
+          body.id = id;
+          body.room = (body.room && body.room.roomId) ? body.room : { roomId, title: title || "Your project" };
+          if (!body.updated) body.updated = meta.updated || nowIso();
+          saveLocal(id, body);
+          out.push(body);
+          continue;
+        }
+      }
+      if (local) out.push(local);
+    }
+    // push any local project draft the room is missing or that's newer here, so an
+    // author's EXISTING work (and a member's offline edits) reach everyone — not
+    // only drafts saved after this first synced. Best-effort; needs write power
+    // (new rooms grant it to members; the owner opens it on older rooms).
+    const haveMeta = {}; metas.forEach(m => { if (m && m.id) haveMeta[m.id] = m; });
+    for (const d of localList()) {
+      if (!d || !d.room || d.room.roomId !== roomId) continue;
+      const m = haveMeta[d.id];
+      if (m && !(String(d.updated || "") > String(m.updated || ""))) continue;
+      if (window.MatrixAuth.putRoomDoc) { try { await window.MatrixAuth.putRoomDoc(roomId, d.id, d); } catch (e) {} }
+      if (!out.find(x => x.id === d.id)) out.push(d);
+    }
+    return out;
+  }
+
   function discard(id) { dropLocal(id); clearTimeout(timers[id]); }
 
   // Delete a draft from BOTH layers (used by the document explorer). Best-effort
   // on the remote side: a homeserver hiccup leaves only the local copy gone.
   async function remove(id) {
+    const local = loadLocal(id);
     discard(id);
+    // a project document also lives in the shared room — tombstone it there so it
+    // leaves every member's view, not just this browser's (best-effort)
+    if (local && local.room && local.room.roomId && window.MatrixAuth && window.MatrixAuth.deleteRoomDoc) {
+      try { await window.MatrixAuth.deleteRoomDoc(local.room.roomId, id); } catch (e) {}
+    }
     if (!signedIn()) return false;
     try {
       const store = await remoteStore();
@@ -199,5 +258,5 @@
     });
   }
 
-  window.NpjDrafts = { save, flush, flushAll, restore, list, localList, loadLocal, discard, remove, onStatus, ACCOUNT_TYPE };
+  window.NpjDrafts = { save, flush, flushAll, restore, list, localList, loadLocal, discard, remove, pullRoomDocs, onStatus, ACCOUNT_TYPE };
 })();

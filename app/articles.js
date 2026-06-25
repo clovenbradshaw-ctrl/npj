@@ -32,8 +32,9 @@
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
  *
- * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN. */
-(function () {
+ * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN.
+ * Also module.exports the pure fold/revert helpers for node tests. */
+(function (root) {
   'use strict';
 
   const SCHEMA = "npj/article-eo/1";
@@ -81,7 +82,20 @@
   }
 
   /* ---------------- plain text of a body (versions, diffing, engines) ---------------- */
-  function tokenText(t) { return typeof t === "string" ? t : (t && (t.c != null ? t.c : t.text)) || ""; }
+  // A footnote marker ({t:"sup"}) carries no reading text — it's a reference, so
+  // it must not leak its "fn1"/number into plaintext, word counts or diffs.
+  function tokenText(t) { return typeof t === "string" ? t : (t && (t.c != null ? t.c : (t.t === "sup" ? "" : t.text))) || ""; }
+  // Owned-claim stance, normalized to the three the editor records — analysis
+  // (⊢), testimony/account (⊨) and voice/position (⊩). Anything else → null
+  // (not an owned claim). An owned claim is grounded by the author's honest
+  // declaration, not a citation, and rides the published body as a {c, stance}
+  // token so the reader's transparency lens can show how it stands.
+  function stanceNorm(s) {
+    s = String(s || "").trim().toLowerCase();
+    // absence = an ASSERTED ABSENCE: the claim is grounded not by a citation but
+    // by a documented search that found nothing (its `note` records what/where).
+    return (s === "analysis" || s === "testimony" || s === "voice" || s === "absence") ? s : null;
+  }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
     return body.map(b => {
@@ -90,6 +104,7 @@
       if (b.type === "h2" || b.type === "h3") return b.text || "";
       if (b.type === "pull") return (b.text || "") + (b.attribution ? " — " + b.attribution : "");
       if (b.type === "ul" || b.type === "ol") return (b.items || []).map(it => "· " + it.map(tokenText).join("")).join("\n");
+      if (b.type === "footnotes") return (b.notes || []).map(n => n && n.text || "").filter(Boolean).join("\n");
       if (b.type === "img") return b.caption || "";
       if (b.type === "embed") return b.url || "";
       if (b.type === "code" || b.type === "verse") return b.text || "";
@@ -99,6 +114,42 @@
   function readMins(body) {
     const words = (plainText(body).match(/\S+/g) || []).length;
     return Math.max(1, Math.round(words / 220));
+  }
+
+  /* ---------------- footnote hygiene: never strand a marker on its own line ----
+     A footnote marker ({t:"sup"}) references a WORD, so a paragraph holding
+     nothing but markers (and whitespace) is a stranded marker — it renders as a
+     lone "1" on its own line in every reader and the Substack export. Fold those
+     markers onto the END of the previous paragraph (where the marker belongs);
+     with no paragraph above, onto the START of the next one. Idempotent, and the
+     plaintext is unchanged (a sup carries no reading text — see tokenText). This
+     repairs older drafts already saved this way AND backstops the composer's
+     anchorFootnoteCaret, so the marker lands against its text everywhere. */
+  function isFnMarker(t) { return !!t && typeof t === "object" && t.t === "sup"; }
+  function onlyFnMarkers(tokens) {
+    const ts = tokens || [];
+    return ts.length > 0 && ts.some(isFnMarker) &&
+      ts.every(t => isFnMarker(t) || (typeof t === "string" && !t.trim()));
+  }
+  // Non-mutating: blocks are cloned (Object.assign) when markers attach, so a
+  // shared article body is never corrupted by a repeat call (read model + export).
+  function mergeStrandedFootnotes(blocks) {
+    const src = Array.isArray(blocks) ? blocks : [];
+    const out = [];
+    let carry = [];   // markers with no paragraph above them yet — attach to the next one
+    src.forEach(b => {
+      if (b && b.type === "p" && onlyFnMarkers(b.tokens)) {
+        const markers = b.tokens.filter(isFnMarker);
+        const prev = out[out.length - 1];
+        if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
+        else carry = carry.concat(markers);
+        return;   // drop the stranded paragraph
+      }
+      if (carry.length && b && b.type === "p") { out.push(Object.assign({}, b, { tokens: carry.concat(b.tokens || []) })); carry = []; return; }
+      out.push(b);
+    });
+    if (carry.length) out.push({ type: "p", tokens: carry });   // nowhere to attach — keep the marker rather than lose it
+    return out;
   }
 
   /* ---------------- standardized article metadata ----------------
@@ -140,7 +191,7 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status", "composition"];
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -168,9 +219,22 @@
       }
       versions.unshift({
         sha: lineSha(line), ts: ev.ts || "", author: ev.actor || "",
+        op: ev.op,
+        note: ev.note || "",
         message: ev.note || (ev.op === "INS" ? "Published" : "Edited"),
         headline: state.headline || "", dek: state.dek || "",
-        text: plainText(state.body)
+        text: plainText(state.body),
+        // A full, restorable snapshot of the folded state AT this version, so the
+        // changelog can REVERT to it (re-emit it as a REC) without re-reading the
+        // log. A shallow clone is exact here: every event REPLACES a field's value
+        // wholesale (state[k] = o[k]) rather than mutating it in place, and the
+        // accumulating `sources` is copied out so a later add can't leak backward.
+        snapshot: Object.assign({}, state, { sources: Object.assign({}, sources) }),
+        // The structured revert marker, present iff this event was itself a revert
+        // (the changelog's revert/undo writes operand.revert). A non-fold operand
+        // key, so it rides the event without disturbing the folded state — it just
+        // lets the changelog label the entry and offer a one-click "undo revert".
+        revert: (o && o.revert) || null
       });
     });
     if (!state || !state.headline) return { article: null, sources, versions, events: events.map(e => e.ev) };
@@ -204,12 +268,54 @@
       status: state.status === "unpublished" ? "unpublished" : "published",
       image: bannerBlock ? {
         src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
+        credit: bannerBlock.credit || "",
         banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
       } : null,
-      body: Array.isArray(state.body) ? state.body : [],
+      // normalize on read too, so a draft already saved with a stranded marker
+      // renders right for every consumer (reader + Substack export) without a re-save
+      body: mergeStrandedFootnotes(Array.isArray(state.body) ? state.body : []),
+      // how the piece was assembled (typed vs. pasted, paste sizes, timeline) —
+      // aggregate counts only, never the words; absent on pieces published before
+      // this shipped, so the reader's footer simply omits it for them
+      composition: (state.composition && typeof state.composition === "object") ? state.composition : null,
       sources, versions
     };
     return { article, sources, versions, events: events.map(e => e.ev) };
+  }
+
+  /* ---------------- revert: restore a prior version, append-only ----------------
+     A revert is not a delete and not a rewrite — it is one more REC event that
+     re-asserts an earlier version's folded state, so the document reads as it did
+     then while the whole history (including the revert itself) stays in GitHub.
+     Undo-a-revert is the same move aimed at the pre-revert version, so it needs no
+     special path. snapshotOperand turns a version's `snapshot` (see foldLog) back
+     into the operand a REC must carry to reproduce it exactly. */
+  function snapshotOperand(snapshot) {
+    const snap = snapshot || {};
+    const o = {};
+    FOLD_FIELDS.forEach(k => {
+      // status is set explicitly below (so a revert also restores whether the
+      // piece was live); assignees are the access-control list, NOT content — a
+      // revert must never change who can edit, so it's left to the current state.
+      if (k === "status" || k === "assignees") return;
+      if (snap[k] != null) o[k] = snap[k];
+    });
+    o.status = snap.status === "unpublished" ? "unpublished" : "published";
+    // Sources MERGE on fold, so re-asserting the snapshot's sources is enough to
+    // resolve the restored body's citations. A source introduced by a later (now
+    // reverted) edit lingers in the merged ledger but is unreferenced by the
+    // restored body — harmless, and never silently dropped from the record.
+    if (snap.sources && Object.keys(snap.sources).length) o.sources = snap.sources;
+    return o;
+  }
+  // The same operand, tagged so the event self-identifies as a revert: `to`/`ts`
+  // name the version restored; `undo:true` marks an undo-of-a-revert. The marker
+  // is a non-fold key (foldLog ignores it), surfaced back on the version object so
+  // the changelog can label it and offer "undo revert".
+  function revertOperand(snapshot, meta) {
+    const o = snapshotOperand(snapshot);
+    o.revert = { to: (meta && meta.to) || null, ts: (meta && meta.ts) || null, undo: !!(meta && meta.undo) };
+    return o;
   }
 
   /* ---------------- the published index (drives the front page) ---------------- */
@@ -434,25 +540,53 @@
           if (c.nodeType !== 1) return;
           const tag = c.tagName.toLowerCase();
           if (tag === "br") { flush(); toks.push({ t: "br" }); return; }
-          if (tag === "span" && c.classList.contains("eo-claim")) {
-            flush();
+          if (tag === "span" && (c.classList.contains("eo-claim") || c.classList.contains("claim-src"))) {
+            const isEo = c.classList.contains("eo-claim");
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
-            if (src.length) {
-              let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
-              // single-source spans carry the quote inline on data-quote; multi-source
-              // spans carry the data-quotes map. Either way, backfill anything still
-              // missing from the citation registry so reuse survives the round trip.
-              const inlineQ = (c.getAttribute("data-quote") || "").trim();
-              if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
-                q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
-                if (!Object.keys(q).length) q = undefined;
-              }
-              toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
-            } else buf += plain(c);
+            const stance = stanceNorm(c.getAttribute("data-stance"));
+            // an OWNED claim — declared as the author's analysis/account/position
+            // (data-stance, never a source). It used to flatten to plain prose at
+            // publish; now it carries its stance into the body so the reader's
+            // transparency lens can show it's grounded by declaration, not a cite.
+            if (stance && !src.length) {
+              flush();
+              const owned = { c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
+              // an asserted absence carries the documented search it rests on (what
+              // the author looked through, and found nothing) — that note IS its
+              // grounding, so it rides the published token like a quote would.
+              const aNote = (c.getAttribute("data-note") || "").trim();
+              if (aNote) owned.note = aNote;
+              toks.push(owned);
+              return;
+            }
+            // a SOURCED span in the edit surface's round-trip shape (eo-claim).
+            if (isEo) {
+              flush();
+              if (src.length) {
+                let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
+                // single-source spans carry the quote inline on data-quote; multi-source
+                // spans carry the data-quotes map. Either way, backfill anything still
+                // missing from the citation registry so reuse survives the round trip.
+                const inlineQ = (c.getAttribute("data-quote") || "").trim();
+                if (!q && (inlineQ || c.hasAttribute("data-cite-id"))) {
+                  q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
+                  if (!Object.keys(q).length) q = undefined;
+                }
+                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
+              } else buf += plain(c);
+              return;
+            }
+            // a SOURCED .claim-src from the live editor is a transparent wrapper:
+            // recurse so its trailing <sup class="md-cite"> builds the citation
+            // token — the long-standing path, unchanged.
+            walk(c);
             return;
           }
           if (tag === "sup" && c.classList.contains("md-cite")) {
-            if (c.hasAttribute("data-fn")) { flush(); toks.push({ t: "sup", text: plain(c) }); return; } // manual footnote
+            // a manual footnote marker: its stable key rides on data-cite (the
+            // visible text is just the number), and it's numbered + paired with
+            // its "[^key]:" definition in the footnote pass below.
+            if (c.hasAttribute("data-fn")) { flush(); const fk = (c.getAttribute("data-cite") || plain(c) || "").trim(); toks.push({ t: "sup", key: fk, text: plain(c) }); return; }
             const key = c.getAttribute("data-cite"); if (!key) return;
             // the pinned source-span: the exact words in the source backing this claim
             const quote = (c.getAttribute("data-quote") || "").trim() || quoteFromCiteIds(c, key);
@@ -484,12 +618,23 @@
     const hasInk = (toks) => toks.some(t => typeof t === "string" ? t.trim() : true);
 
     const blocks = [];
+    const fnRegionDefs = {};   // key → note text, read from the structured "Footnotes" list
     let headline = "", dek = "";
     Array.from(root.childNodes).forEach(node => {
       if (node.nodeType === 3) { const t = node.nodeValue.trim(); if (t) blocks.push({ type: "p", tokens: [t] }); return; }
       if (node.nodeType !== 1) return;
       const tag = node.tagName.toLowerCase();
       const text = String(node.textContent || "").trim();
+      // the editor's structured footnotes list (Substack-style) — not prose. Pull
+      // each note off its <li data-fn-key> for the footnote pass to pair with the
+      // inline markers, and skip it from normal block parsing.
+      if ((tag === "ol" || tag === "ul") && node.classList && node.classList.contains("nr-fnotes")) {
+        node.querySelectorAll("li[data-fn-key]").forEach(li => {
+          const k = (li.getAttribute("data-fn-key") || "").trim();
+          if (k && fnRegionDefs[k] == null) fnRegionDefs[k] = String(li.textContent || "").trim();
+        });
+        return;
+      }
       if (tag === "h1") { if (!headline) headline = text; else blocks.push({ type: "h2", text }); return; }
       if (tag === "h2") { if (text) blocks.push({ type: "h2", text }); return; }
       if (tag === "h3") { if (text) blocks.push({ type: "h3", text }); return; }
@@ -513,8 +658,15 @@
         return;
       }
       if (tag === "figure") {
-        const cap = node.querySelector("figcaption");
+        // Two caption lines now: the caption (first figcaption) and the photo
+        // credit (.cmp-credit). Selecting :not(.cmp-credit) keeps the caption
+        // right whichever order they sit in, and old single-figcaption drafts
+        // still match. The credit is markdown ([label](url)) like a profile bio,
+        // rendered safely via npjRichText in the reader.
+        const cap = node.querySelector("figcaption:not(.cmp-credit)");
         const capText = cap ? cap.textContent.trim() : "";
+        const credEl = node.querySelector(".cmp-credit");
+        const creditText = credEl ? credEl.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
         const plainImg = node.querySelector("img");
         const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
@@ -530,7 +682,7 @@
         const caption = /^banner(\s*·|\s|$)/i.test(capText) ? "" : capText;
         if (node.hasAttribute("data-eo-img")) {
           const s = plainImg && plainImg.getAttribute("src");
-          if (s) { const block = { type: "img", src: s, caption }; if (isBanner) block.banner = true; blocks.push(block); }
+          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (isBanner) block.banner = true; blocks.push(block); }
         } else if (slot) {
           // a slot can carry two URLs (src + data-alt): the archive.org one is
           // the canonical `src`; the media-store one rides as `store` so the
@@ -545,6 +697,7 @@
           const src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
           if (src) {
             const block = { type: "img", src, caption };
+            if (creditText) block.credit = creditText;
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
             // fill mode + crop chosen on the slot ride along so the reader and
@@ -565,7 +718,41 @@
       const toks = inlineTokens(node);
       if (hasInk(toks)) blocks.push({ type: "p", tokens: toks });
     });
-    return { blocks, headline, dek };
+
+    /* ---- footnotes: pair inline markers with their notes ----
+       The composer drops a <sup data-fn> marker inline and keeps each note in a
+       structured "Footnotes" list at the foot of the page (read above into
+       fnRegionDefs). Here we number every marker by the order it's first
+       referenced (1, 2, 3…) and gather one { type:"footnotes", notes } block the
+       reader renders as linked endnotes. For back-compat we also lift any legacy
+       "[^key]: text" definition paragraph (older drafts wrote notes as prose). */
+    const FN_DEF = /^\s*\[\^([^\]\s]+)\]:\s*([\s\S]*)$/;
+    const fnDefs = Object.assign({}, fnRegionDefs);   // key → note text (region wins)
+    const defStripped = [];
+    blocks.forEach(b => {
+      if (b.type === "p") {
+        const m = (b.tokens || []).map(tokenText).join("").match(FN_DEF);
+        if (m) { const k = m[1].trim(); if (k && fnDefs[k] == null) fnDefs[k] = (m[2] || "").trim(); return; }
+      }
+      defStripped.push(b);
+    });
+    // a marker that landed alone in its own paragraph attaches to the text above
+    const kept = mergeStrandedFootnotes(defStripped);
+    const fnNum = {}; let fnSeq = 0;   // key → number, in first-reference order
+    const numberMarker = (t) => {
+      if (!t || t.t !== "sup") return;
+      const k = (t.key || t.text || "").trim(); if (!k) return;
+      if (!fnNum[k]) fnNum[k] = ++fnSeq;
+      t.key = k; t.num = fnNum[k];
+    };
+    kept.forEach(b => { (b.tokens || []).forEach(numberMarker); (b.items || []).forEach(it => it.forEach(numberMarker)); });
+    // A note is emitted for every REFERENCED key (a bare "[^key]:" with no marker
+    // is dropped, like standard markdown); a referenced key with no definition
+    // still gets a slot so its number and jump target exist.
+    const notes = Object.keys(fnNum).sort((a, b) => fnNum[a] - fnNum[b])
+      .map(k => ({ key: k, num: fnNum[k], text: fnDefs[k] || "" }));
+    if (notes.length) kept.push({ type: "footnotes", notes });
+    return { blocks: kept, headline, dek };
   }
 
   /* ---------------- body blocks → HTML (the post-publish edit surface) ---------------- */
@@ -573,14 +760,21 @@
   function tokensToHtml(tokens) {
     return (tokens || []).map(t => {
       if (typeof t === "string") return esc(t);
-      if (t.c != null) return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
+      if (t.c != null) {
+        // an owned claim round-trips with its stance (and no source) so the edit
+        // surface and the reader's transparency lens keep it; a sourced claim
+        // keeps its data-src + quotes exactly as before.
+        if (t.stance && (!t.src || !t.src.length))
+          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '"' + (t.note ? ' data-note="' + esc(t.note) + '"' : '') + ' data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+        return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
+      }
       if (t.t === "br") return "<br/>";
       if (t.t === "strong") return "<strong>" + esc(t.text) + "</strong>";
       if (t.t === "em") return "<em>" + esc(t.text) + "</em>";
       if (t.t === "s") return "<s>" + esc(t.text) + "</s>";
       if (t.t === "code") return "<code>" + esc(t.text) + "</code>";
       if (t.t === "a") return '<a href="' + esc(t.href) + '">' + esc(t.text) + "</a>";
-      if (t.t === "sup") return '<sup class="md-cite" data-fn="1" data-cite="' + esc(t.text) + '" contenteditable="false">' + esc(t.text) + "</sup>";
+      if (t.t === "sup") { const k = t.key || t.text || ""; const label = (t.num != null ? t.num : t.text); return '<sup class="md-cite" data-fn="1" data-cite="' + esc(k) + '" contenteditable="false">' + esc(label) + "</sup>"; }
       return esc(t.text || "");
     }).join("");
   }
@@ -593,6 +787,14 @@
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";
       if (b.type === "verse") return '<pre class="verse">' + esc(b.text) + "</pre>";
+      // footnotes round-trip back to the composer as the structured "Footnotes"
+      // list — one editable <li> per note, keyed so the inline markers (data-fn,
+      // data-cite=key) above re-pair with them and renumberFootnotes keeps order.
+      if (b.type === "footnotes") {
+        const items = (b.notes || []).map(n =>
+          '<li class="nr-fnote" data-fn-key="' + esc(n.key) + '" data-ph="Write the note…">' + esc(n.text || "") + "</li>").join("");
+        return items ? '<ol class="nr-fnotes" data-fnotes="1">' + items + "</ol>" : "";
+      }
       // editable image-slot (not a static <img>) so the edit surface can
       // replace it — a fresh drop uploads to the media store, then publish/save
       // moves it to archive.org. Primary src is the live media-store copy when
@@ -606,7 +808,17 @@
         const fitAttr = b.fit ? ' fit="' + esc(b.fit) + '"' : '';
         const cropAttr = (b.crop && b.crop.ar)
           ? ' data-crop="' + esc([b.crop.s, b.crop.x, b.crop.y, b.crop.ar].join(",")) + '"' : '';
-        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + (b.caption ? '<figcaption class="np-mono" style="font-size:11px;margin-top:4px">' + esc(b.caption) + "</figcaption>" : "") + "</figure>";
+        // every image box conforms to its image's shape in the editor — the
+        // whole image, exactly as the reader/published page shows it — rather
+        // than a fixed-height letterbox. The declared height below only acts as
+        // the drop target while the slot is empty.
+        const conformAttr = ' conform';
+        // caption + credit are editable islands inside the non-editable figure
+        // (the slot itself stays protected). The credit takes markdown links the
+        // same way a contributor bio does — name / [outlet](https://…).
+        const capHtml = '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(b.caption || "") + '</figcaption>';
+        const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
@@ -614,6 +826,20 @@
   }
 
   /* ---------------- publish + edit (through the same n8n webhook) ---------------- */
+  // The publication-safe projection of a source record before it enters the
+  // public, committed log. For an INTERVIEW (a conversation with a named or
+  // anonymous source) the reporter's raw notes (rec.text) are private — only the
+  // exact words PINNED as citations belong in the public record, and those ride
+  // on the body tokens, not here. So we strip the transcript. Every other source
+  // type passes through unchanged. Defensive: works even if NpjInterview is the
+  // single source of truth for the rule, with a local fallback if it's absent.
+  function publishableSource(rec) {
+    if (!rec) return rec;
+    if (window.NpjInterview && window.NpjInterview.redactForPublish) return window.NpjInterview.redactForPublish(rec);
+    if (rec.type === "interview") { const o = Object.assign({}, rec); o.text = ""; return o; }
+    return rec;
+  }
+
   // Build the genesis event from the composer's content. Sources: only the
   // records the body actually cites ride in the log — the log must stand alone.
   function genesisFromContent(content, opts) {
@@ -626,7 +852,7 @@
       (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
     });
     const sources = {};
-    Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = window.NPJ.SOURCES[k]; });
+    Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = publishableSource(window.NPJ.SOURCES[k]); });
     const actor = o.actor || null;
     const mxids = (arr) => (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
     // Byline: authors default to the publisher; "Unsigned" is an explicit override
@@ -648,6 +874,9 @@
       body: blocks,
       sources
     };
+    // composition provenance rides the genesis when the editor captured it
+    // (aggregate counts only — see app/composition.js); harmless when absent
+    if (o.composition && typeof o.composition === "object") operand.composition = o.composition;
     const line = genesisLine(operand, actor);
     const folded = foldLog(line);
     return { line, operand, article: folded.article };
@@ -744,13 +973,17 @@
     try { const all = JSON.parse(localStorage.getItem(RECEIPT_KEY) || "{}") || {}; return all[filename] || null; } catch (e) { return null; }
   }
 
-  window.NpjArticles = {
+  root.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
+    snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle,
     htmlToBlocks, blocksToHtml, tokensToHtml,
-    genesisLine, editLine, genesisFromContent, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
+    genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };
-})();
+  // node tests require() the pure fold/revert helpers; the browser path is
+  // unchanged (root === window). No DOM/network runs at load time.
+  if (typeof module !== "undefined" && module.exports) module.exports = root.NpjArticles;
+})(typeof window !== "undefined" ? window : globalThis);

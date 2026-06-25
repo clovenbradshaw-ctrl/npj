@@ -186,6 +186,104 @@
     catch (e) { _pdfText[key] = { state: 'error', error: (e && e.message) || 'extraction failed' }; throw e; }
   }
 
+  /* ---------------- OCR (lazy, from the CDN) ----------------
+     Screenshots and scans carry no machine-readable text. Tesseract.js (the
+     same script-tag, load-on-first-use style as pdf.js above) reads the words
+     off an image so an uploaded picture becomes CITABLE (its text flows into
+     the select-to-cite reader) and SCANNABLE (the PII review can see what's in
+     it). One shared worker is kept warm across images. Best-effort: a CDN miss
+     or a worker failure rejects with a friendly message — the caller degrades
+     to "transcribe it yourself", never throws on load. */
+  var TESS_VER = '5.1.1';
+  var TESS_SRC = 'https://unpkg.com/tesseract.js@' + TESS_VER + '/dist/tesseract.min.js';
+  var _tessPromise = null;
+  function ensureTesseract() {
+    if (root.Tesseract) return Promise.resolve(root.Tesseract);
+    if (_tessPromise) return _tessPromise;
+    _tessPromise = new Promise(function (resolve, reject) {
+      var s = doc.createElement('script');
+      s.src = TESS_SRC;
+      s.async = true;
+      s.onload = function () {
+        if (root.Tesseract) resolve(root.Tesseract);
+        else { _tessPromise = null; reject(new Error('The OCR engine failed to initialise.')); }
+      };
+      s.onerror = function () { _tessPromise = null; reject(new Error('Could not load the OCR engine (offline?).')); };
+      doc.head.appendChild(s);
+    });
+    return _tessPromise;
+  }
+
+  // One reusable English worker — created once, reused for every image so the
+  // ~few-MB core/lang download happens a single time.
+  var _tessWorker = null, _tessWorkerP = null;
+  async function tessWorker() {
+    if (_tessWorker) return _tessWorker;
+    if (!_tessWorkerP) {
+      _tessWorkerP = (async function () {
+        var T = await ensureTesseract();
+        return await T.createWorker('eng', 1);   // OEM 1 = LSTM
+      })();
+    }
+    try { _tessWorker = await _tessWorkerP; return _tessWorker; }
+    catch (e) { _tessWorkerP = null; throw e; }
+  }
+
+  // Tidy raw OCR output: drop carriage returns, turn page-breaks into blank
+  // lines, strip trailing spaces and runs of spaces, collapse blank-line runs.
+  // Pure — unit-tested in tests/source-view.test.js.
+  function cleanOcrText(s) {
+    return String(s == null ? '' : s)
+      .replace(/\r/g, '')
+      .replace(/[ \t]*\f[ \t]*/g, '\n\n')  // page break (+ its padding) → blank line
+      .replace(/\t/g, ' ')                 // stray tabs → space
+      .replace(/ +\n/g, '\n')              // trailing spaces
+      .replace(/ {2,}/g, ' ')              // runs of spaces
+      .replace(/\n{3,}/g, '\n\n')          // collapse blank-line runs
+      .trim();
+  }
+
+  // key -> { state:'extracting'|'done'|'error', text, error }
+  var _imgText = {};
+  function imageTextState(rec) { return _imgText[recKey(rec)] || { state: 'idle' }; }
+
+  // OCR an image source. Cached per source key; returns '' for an image with no
+  // legible text rather than failing. Does NOT mutate the record — the caller
+  // decides whether to seed rec.text (so persistence + PII scanning stay in the
+  // host's hands), exactly like extractPdfText.
+  async function extractImageText(rec) {
+    var key = recKey(rec);
+    var cached = _imgText[key];
+    if (cached && cached.state === 'done') return cached.text || '';
+    if (cached && cached.state === 'extracting' && cached._p) return cached._p;
+    var p = (async function () {
+      var w = await tessWorker();
+      var blob = await bytesFor(rec);
+      if (!blob) throw new Error('Could not read the image — sign in again, or re-upload it.');
+      var res = await w.recognize(blob);
+      var text = cleanOcrText(res && res.data && res.data.text);
+      _imgText[key] = { state: 'done', text: text };
+      return text;
+    })();
+    _imgText[key] = { state: 'extracting', text: '', _p: p };
+    try { return await p; }
+    catch (e) { _imgText[key] = { state: 'error', error: (e && e.message) || 'OCR failed' }; throw e; }
+  }
+
+  // OCR an arbitrary image — a dataURL string, a Blob, or an <canvas> — with the
+  // shared English worker. This is what makes a SCANNED document (no text layer
+  // to drag-select) citable: the author drags a box on the page, we crop that
+  // region to a canvas and read just those words here. Best-effort by contract —
+  // throws only if the engine can't load at all; an unreadable crop returns ''
+  // and the author transcribes it. Reuses the same worker as extractImageText,
+  // so the multi-MB core/lang download happens once for the whole session.
+  async function ocrImage(input) {
+    if (!input) return '';
+    var w = await tessWorker();
+    var res = await w.recognize(input);
+    return cleanOcrText(res && res.data && res.data.text);
+  }
+
   // Decode a blob as UTF-8 text (Blob.text where available, else FileReader).
   async function decodeText(blob) {
     if (!blob) return '';
@@ -210,6 +308,7 @@
     if (String(rec && rec.text || '').trim()) return rec.text;
     var k = kindOf(rec);
     if (k === 'pdf') return await extractPdfText(rec);
+    if (k === 'image') return await extractImageText(rec);
     if (k === 'text') {
       var key = recKey(rec);
       if (_txt[key] && _txt[key].state === 'done') return _txt[key].text;
@@ -249,6 +348,7 @@
     kindOf: kindOf, kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
+    ensureTesseract: ensureTesseract, extractImageText: extractImageText, imageTextState: imageTextState, cleanOcrText: cleanOcrText,
     ensureText: ensureText, decodeText: decodeText,
     humanSize: humanSize, download: download
   };
