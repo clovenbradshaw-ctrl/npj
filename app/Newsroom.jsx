@@ -1674,7 +1674,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       setRev(v => v + 1); scheduleSave(); renumberCites();
       if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate();
       return true;
-    }
+    },
+    // add net new sources from inside the grounding workspace's cite modal — the
+    // same URL-snapshot / file-upload ingest the Prose sources rail uses, so a
+    // claim missing its source can pull one in WITHOUT leaving the grounding flow.
+    // Each returns the new source keys (the modal opens its reader on the first).
+    // Uploads run quiet — the auto-opened PII review sits behind the cite modal,
+    // so it's skipped here; the rail still flags the source for review before it
+    // can be archived, nothing is lost.
+    addUrlSources: (raw) => ingestUrls(raw),
+    addFileSources: (fileList) => addFiles(fileList, { quiet: true }),
   };
   // armed + a fresh selection just landed → bind it to the armed source
   // (layout effect so it binds before the floating toolbar can paint)
@@ -1736,15 +1745,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // ---- sources ingestion ----
   const insertCite = (key) => bindSource(key);
   const spanCount = (key) => (ed.current ? ed.current.querySelectorAll('[data-src="' + key + '"]').length : 0);
-  const addUrl = () => {
-    const urls = urlInput.split(/[\s,]+/).map(u => u.trim()).filter(u => /^https?:\/\//.test(u));
-    if (!urls.length) return; setBusy(true);
+  // Mint web sources from a blob of pasted URLs, snapshot each in the background,
+  // and return the new source keys. Shared by the Prose rail's "Snapshot & store"
+  // and the grounding workspace's in-modal "add a source" — a missing source can
+  // be pulled in from either place with identical behaviour.
+  const ingestUrls = (raw) => {
+    const urls = String(raw || "").split(/[\s,]+/).map(u => u.trim()).filter(u => /^https?:\/\//.test(u));
+    if (!urls.length) return []; setBusy(true);
     const made = urls.map((u, i) => {
       const key = "web-" + Date.now().toString(36) + i;
       window.NPJ.SOURCES[key] = guessWebRec(u, key, "Web snapshot");
       return { key, archived: false, snapshotting: true, url: u };
     });
-    setSources(s => [...made, ...s]); setUrlInput("");
+    setSources(s => [...made, ...s]);
     // real snapshots: confirm an existing wayback capture, or request one and
     // wait for the availability API to verify it — "archived" is a fact here.
     // Each source is self-contained (try/catch) so one failure can't strand a
@@ -1761,7 +1774,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setSources(s => s.map(x => x.key === m.key ? { ...x, snapshotting: false } : x));
       }
     })).finally(() => setBusy(false));
+    return made.map(m => m.key);
   };
+  const addUrl = () => { if (ingestUrls(urlInput).length) setUrlInput(""); };
   // a conversation source (interview, named or anonymous) — built by the
   // composer, registered like any other source so the bind + pin flow works on
   // its notes. No URL to snapshot, so it never enters the archive/PII gate.
@@ -1805,8 +1820,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const redactNext = useRef(null);
   const tryArchive = (s) => { if (needsPiiReview(s.key)) { redactNext.current = s; setRedactTarget(s.key); } else setArchiveTarget(s); };
 
-  const addFiles = (fileList) => {
-    const files = Array.from(fileList || []); if (!files.length) return;
+  const addFiles = (fileList, opts) => {
+    const quiet = !!(opts && opts.quiet);   // skip the auto-opened PII review (it sits behind the cite modal)
+    const files = Array.from(fileList || []); if (!files.length) return [];
     const canUp = !!(window.NpjMedia && window.NpjMedia.canUpload && window.NpjMedia.canUpload());
     const made = files.map((f, i) => {
       const key = "doc-" + Date.now().toString(36) + i;
@@ -1843,7 +1859,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     }))).then(() => {
       made.forEach(m => scanSource(m.key));
       setSources(s => [...s]);
-      if (made[0]) setRedactTarget(made[0].key);
+      if (!quiet && made[0]) setRedactTarget(made[0].key);
       scheduleSave();
     });
     // Screenshots & scans carry no machine-readable text. OCR them (lazy
@@ -1865,6 +1881,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         });
       });
     }
+    return made.map(m => m.key);
   };
 
   // ---- Matrix: projects (shared rooms) + invites ----
