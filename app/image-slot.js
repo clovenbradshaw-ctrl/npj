@@ -81,9 +81,15 @@
 
 (() => {
   const STATE_FILE = '.image-slots.state.json';
-  // 2× a ~600px slot in a 1920-wide deck — retina-sharp without making the
-  // sidecar enormous. A 1200px WebP at q=0.85 is ~150-300KB.
-  const MAX_DIM = 1200;
+  // The LONGEST side a stored image may reach. Generous on purpose: the encode
+  // below retinas the slot's *width* and lets the height run up to this cap, so a
+  // TALL document — an emailed scan, a long screenshot — stays legible instead of
+  // being crushed. A normal photo is bounded by its slot width (2×), never this,
+  // so files stay light; only tall/large images approach the cap (a text WebP at
+  // q=0.9 is still well under ~1MB even at this size).
+  const MAX_DIM = 3000;
+  // A touch higher than a photo would need, so screenshot text keeps its edges.
+  const WEBP_Q = 0.9;
   // Raster formats only. SVG is excluded (can carry script; createImageBitmap
   // on SVG blobs is inconsistent). GIF is excluded because the canvas
   // re-encode keeps only the first frame, so an animated GIF would silently
@@ -170,24 +176,33 @@
   }
 
   // ── Image downscale ─────────────────────────────────────────────────────
-  // Encode through a canvas so the sidecar carries resized bytes, not the
-  // raw upload. Longest side is capped at 2× the slot's rendered width
-  // (retina) and at MAX_DIM. WebP keeps alpha and is ~10× smaller than PNG
-  // for photos, so there's no need for per-image format picking.
+  // Encode through a canvas so the sidecar carries resized bytes, not the raw
+  // upload. The scale is driven by the slot's rendered WIDTH (retina = 2×); only
+  // the LONGEST side is bounded, by MAX_DIM. Driving off width — not the longest
+  // side, as this once did — is what keeps a TALL document legible: a long email
+  // scan or screenshot is sized so its width is retina-sharp and its height is
+  // free to run to MAX_DIM, instead of the whole image being crushed into a
+  // width-sized box (which turned dense text to mush). Never upscales past the
+  // original. WebP keeps alpha and is ~10× smaller than PNG, so there's no need
+  // for per-image format picking.
+  function scaledCanvas(bitmap, targetW) {
+    const wantW = Math.max(1, Math.round(targetW * 2)) || MAX_DIM;   // retina the width
+    let scale = wantW / bitmap.width;
+    const longest = Math.max(bitmap.width, bitmap.height);
+    if (longest * scale > MAX_DIM) scale = MAX_DIM / longest;        // but cap the long side
+    scale = Math.min(1, scale);                                      // never upscale
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+    return canvas;
+  }
+
   async function toDataUrl(file, targetW) {
     const bitmap = await createImageBitmap(file);
-    try {
-      const cap = Math.min(MAX_DIM, Math.max(1, Math.round(targetW * 2)) || MAX_DIM);
-      const scale = Math.min(1, cap / Math.max(bitmap.width, bitmap.height));
-      const w = Math.max(1, Math.round(bitmap.width * scale));
-      const h = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
-      return canvas.toDataURL('image/webp', 0.85);
-    } finally {
-      bitmap.close && bitmap.close();
-    }
+    try { return scaledCanvas(bitmap, targetW).toDataURL('image/webp', WEBP_Q); }
+    finally { bitmap.close && bitmap.close(); }
   }
 
   // Same downscale as toDataUrl, but yields a Blob for upload to a media store —
@@ -195,18 +210,10 @@
   async function toBlob(file, targetW) {
     const bitmap = await createImageBitmap(file);
     try {
-      const cap = Math.min(MAX_DIM, Math.max(1, Math.round(targetW * 2)) || MAX_DIM);
-      const scale = Math.min(1, cap / Math.max(bitmap.width, bitmap.height));
-      const w = Math.max(1, Math.round(bitmap.width * scale));
-      const h = Math.max(1, Math.round(bitmap.height * scale));
-      const canvas = document.createElement('canvas');
-      canvas.width = w; canvas.height = h;
-      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      const canvas = scaledCanvas(bitmap, targetW);
       return await new Promise((res, rej) =>
-        canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/webp', 0.85));
-    } finally {
-      bitmap.close && bitmap.close();
-    }
+        canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/webp', WEBP_Q));
+    } finally { bitmap.close && bitmap.close(); }
   }
 
   // A pre-encoded blob (e.g. from the photo editor) → data URL, for the no-media

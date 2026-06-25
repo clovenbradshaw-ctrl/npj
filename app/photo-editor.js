@@ -30,11 +30,14 @@
 
   // Longest side of the saved image. A crop can only shrink the source, but a big
   // source cropped loosely could still be large — cap it so the archived WebP stays
-  // light (same spirit as image-slot's MAX_DIM, a touch larger for full frames).
-  const MAX_DIM = 1600;
+  // light. Matches image-slot's MAX_DIM so editing a dropped photo (crop / redact)
+  // never re-crushes a tall document — an emailed scan, a long screenshot — that
+  // the drop kept legible.
+  const MAX_DIM = 3000;
   // Ignore an accidental click-without-drag (natural px).
   const MIN_NAT = 6;
-  const WEBP_Q = 0.85;
+  // A touch high so screenshot text keeps its edges (matches image-slot).
+  const WEBP_Q = 0.9;
 
   const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
