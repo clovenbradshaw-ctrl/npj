@@ -237,6 +237,47 @@ a { color: inherit; }
 .fnmark { margin: 0 1px; }
 .fnmark a { cursor: pointer; }
 
+/* ---- source document, expanded full-screen ----
+   The thumbnail in a citation card (SourceFilePreview) is a button that opens
+   the real file at full size IN the app (SourceLightbox) — no new tab. A hover
+   badge says so; the scrim dims the story behind the sheet and is itself the
+   exit (so are the ✕ and Esc). */
+.srcfile-frame { cursor: zoom-in; transition: filter .12s ease; }
+.srcfile-frame:hover { filter: brightness(.96); }
+.srcfile-frame .srcfile-expand {
+  position: absolute; top: 8px; right: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9.5px; letter-spacing: .04em; line-height: 1;
+  padding: 4px 7px; color: var(--paper); background: rgba(16,14,10,.74);
+  border: 1px solid rgba(255,255,255,.25); opacity: 0;
+  transition: opacity .12s ease; pointer-events: none;
+}
+.srcfile-frame:hover .srcfile-expand,
+.srcfile-frame:focus-visible .srcfile-expand { opacity: 1; }
+
+.srclb-scrim {
+  position: fixed; inset: 0; z-index: 7000;
+  display: flex; align-items: center; justify-content: center;
+  padding: 22px; background: rgba(8,7,5,0.62);
+  -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
+}
+.srclb {
+  display: flex; flex-direction: column;
+  width: min(1100px, 100%); max-height: calc(100vh - 44px);
+  background: var(--paper); color: var(--ink);
+  border: 1.5px solid var(--ink); box-shadow: 10px 10px 0 rgba(22,20,13,0.22);
+  animation: pop .14s ease;
+}
+.srclb-head {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px; border-bottom: 1.5px solid var(--ink); background: var(--paper-2);
+}
+.srclb-body { flex: 1; min-height: 0; overflow: auto; padding: 14px; }
+@media (max-width: 760px) {
+  .srclb-scrim { padding: 0; }
+  .srclb { width: 100%; height: 100%; max-height: 100vh; border-width: 0; box-shadow: none; }
+}
+
 /* ---- status chips ---- */
 .chip {
   font-family: var(--cond);

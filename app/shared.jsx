@@ -25,6 +25,7 @@ const I = {
   check:   phIcon("check", "bold"),
   x:       phIcon("x", "bold"),
   ext:     phIcon("arrow-square-out"),
+  expand:  phIcon("arrows-out"),
   up:      phIcon("arrow-fat-up", "fill"),
   chat:    phIcon("chat-circle"),
   eye:     phIcon("eye"),
@@ -276,7 +277,7 @@ function SourceTag({ type }) {
    NpjSourceView.displayUrl; if the bytes can't render in an <img> (or all we
    have is a details page), it falls back to an "open it" link, never a broken
    frame. The point is the SOURCE, so we render the document, not just its name. */
-function SourceFilePreview({ rec }) {
+function SourceFilePreview({ rec, onExpand }) {
   const SV = window.NpjSourceView;
   const kind = SV ? SV.kindOf(rec) : "unknown";
   const [url, setUrl] = useState(null);
@@ -294,39 +295,65 @@ function SourceFilePreview({ rec }) {
 
   const archived = !!rec.archive_url;
   const mat = { background: "repeating-conic-gradient(#e9e4d6 0% 25%, #f3eee1 0% 50%) 50% / 18px 18px", border: "1px solid var(--rule)" };
-  // the access path, in words: once it's on archive.org the snapshot link is it;
-  // before that (this preview) opening the in-hand file is.
-  const note = archived
-    ? "The document itself — open the archive.org snapshot to read it full size."
-    : "The document itself — uploaded, and moved onto archive.org when this story publishes.";
-  const openLink = url ? (
+  // Clicking the document EXPANDS it to fill the screen IN the app (onExpand)
+  // instead of opening a new tab — so you read the receipt full size without
+  // losing your place in the story. Only when no expander is wired do we fall
+  // back to the old open-in-a-new-tab link.
+  const expandable = typeof onExpand === "function";
+  // the access path, in words: expand it in place when we can; otherwise once
+  // it's on archive.org the snapshot link is it, and before that the in-hand file.
+  const note = expandable
+    ? "The document itself — click it to read full size, right here."
+    : archived
+      ? "The document itself — open the archive.org snapshot to read it full size."
+      : "The document itself — uploaded, and moved onto archive.org when this story publishes.";
+  // the explicit action for a pdf/text (no inline thumbnail) or a broken image
+  const openAction = expandable ? (
+    <button type="button" onClick={onExpand} className="np-mono"
+      style={{ background: "none", border: 0, padding: 0, cursor: "pointer", font: "inherit",
+        fontSize: 10, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2,
+        display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5 }}>
+      <I.expand style={{ fontSize: 12 }} /> Expand to full screen
+    </button>
+  ) : url ? (
     <a href={url} target="_blank" rel="noopener" className="np-mono"
       style={{ fontSize: 10, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5 }}>
       <I.ext style={{ fontSize: 12 }} /> Open the document
     </a>
   ) : null;
   const showImg = kind === "image" && url && !broken;
+  const imgEl = (
+    <img src={url} alt={rec.title || "uploaded source"} onError={() => setBroken(true)}
+      style={{ display: "block", width: "100%", maxHeight: 168, objectFit: "contain", margin: "0 auto" }} />
+  );
 
   return (
     <div style={{ marginBottom: 10 }}>
       <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 4 }}>The source — the document itself</div>
       {showImg ? (
-        <a href={url} target="_blank" rel="noopener" title="Open the source document" style={{ display: "block", ...mat, padding: 6, lineHeight: 0 }}>
-          <img src={url} alt={rec.title || "uploaded source"} onError={() => setBroken(true)}
-            style={{ display: "block", width: "100%", maxHeight: 168, objectFit: "contain", margin: "0 auto" }} />
-        </a>
+        expandable ? (
+          <button type="button" onClick={onExpand} title="Expand to full screen" className="srcfile-frame"
+            style={{ ...mat, display: "block", width: "100%", padding: 6, lineHeight: 0, cursor: "zoom-in", position: "relative" }}>
+            {imgEl}
+            <span className="srcfile-expand np-mono"><I.expand style={{ fontSize: 11 }} /> Expand</span>
+          </button>
+        ) : (
+          <a href={url} target="_blank" rel="noopener" title="Open the source document" style={{ display: "block", ...mat, padding: 6, lineHeight: 0 }}>
+            {imgEl}
+          </a>
+        )
       ) : (kind === "image" && !done) ? (
         <div className="np-mono" style={{ ...mat, padding: "22px 12px", textAlign: "center", color: "var(--ink-soft)", fontSize: 10.5 }}>loading the document…</div>
       ) : null}
       <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: showImg ? 5 : 4, lineHeight: 1.45 }}>{note}</div>
-      {/* the image is itself the open link; for a pdf/text (or a broken image) make the open action explicit */}
-      {!showImg && openLink}
+      {/* the image is itself the trigger; for a pdf/text (or a broken image) make the action explicit */}
+      {!showImg && openAction}
     </div>
   );
 }
 
 /* ---------- the source hover/click card ---------- */
-function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
+function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
   const s = window.NPJ.SOURCES[srcKey];
   if (!s) return null;
   // the pinned source-span for THIS claim wins over the source's generic pull
@@ -347,7 +374,18 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
   // file, or a session blob) — never a web/data source that merely has a URL.
   const SV = window.NpjSourceView;
   const isUpload = /^doc-/.test(s.id || "") || !!s.file_url || !!(SV && SV.hasBlob && SV.hasBlob(SV.recKey(s)));
-  const showFile = !!preview && !iv && isUpload && !!(SV && SV.isViewable && SV.isViewable(s));
+  // A viewable uploaded document can be EXPANDED to fill the screen in-app —
+  // wired by the host through onExpand. In a draft preview we also show the file
+  // inline (showFile); in the live reader the inline preview stays off, but the
+  // "View document" action below still opens that same full-screen view.
+  const viewable = !iv && isUpload && !!(SV && SV.isViewable && SV.isViewable(s));
+  const canExpand = viewable && typeof onExpand === "function";
+  const expand = canExpand ? () => onExpand(srcKey) : undefined;
+  const showFile = !!preview && viewable;
+  // When the inline preview isn't shown (the live reader), surface an explicit
+  // action to open the document full screen — the inline thumbnail is the
+  // trigger when it IS shown, so we don't double it up.
+  const showViewBtn = canExpand && !showFile;
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -370,7 +408,7 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
         <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 4 }}>{s.id}</div>
         <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
         <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
-        {showFile && <SourceFilePreview rec={s} />}
+        {showFile && <SourceFilePreview rec={s} onExpand={expand} />}
         {cited ? (
           <div style={{ marginBottom: 10 }}>
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 9.5, marginBottom: 3 }}>The cited passage — in the source</div>
@@ -394,10 +432,15 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
               {talk.reporter ? <div>Spoke with {talk.reporter}</div> : null}
             </div>
           )
-        ) : (archived || s.original_url) ? (
-          <div style={{ display: "flex", gap: 6, marginTop: 9 }}>
+        ) : (showViewBtn || archived || s.original_url) ? (
+          <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap" }}>
+            {showViewBtn && (
+              <button onClick={expand} className="btn btn-primary btn-sm" style={{ flex: 1, minWidth: 132, textAlign: "center", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+                <I.expand style={{ fontSize: 13 }} /> View document
+              </button>
+            )}
             {archived && (
-              <a href={s.archive_url} target="_blank" rel="noopener" className="btn btn-primary btn-sm" style={{ flex: 1, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
+              <a href={s.archive_url} target="_blank" rel="noopener" className={"btn btn-sm " + (showViewBtn ? "btn-ghost" : "btn-primary")} style={{ flex: showViewBtn ? "0 1 auto" : 1, textAlign: "center", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}>
                 <I.archive style={{ fontSize: 13 }} /> Snapshot
               </a>
             )}
@@ -408,6 +451,63 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview }) {
             )}
           </div>
         ) : null}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- full-viewport source lightbox ----------
+   Click a source document in a citation card and it expands to fill the screen,
+   right here in the app — no new tab, no lost place in the story. The real file
+   renders through <SourceViewer> (an image you can zoom and pan, a PDF's pages
+   with their text layer, the words of a text file), so you read the receipt at
+   full size instead of squinting at a thumbnail. Every exit lands you back on
+   the article untouched: the ✕, the Esc key, or a click on the dimmed margin.
+
+   Self-contained: holds no app state beyond the source key it was opened with,
+   locks the page scroll while open, and restores it on close. SourceViewer lives
+   in the READ bundle (loaded before the reader renders), so by the time a reader
+   can open this it's present; a stub message covers the vanishingly-rare race. */
+function SourceLightbox({ srcKey, rec, onClose }) {
+  const s = rec || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || null;
+  const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800);
+  useEffect(() => {
+    // Esc closes (capture phase + stopPropagation so it beats the reader's own
+    // Escape handlers); the body scroll is frozen so the page behind can't drift.
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose && onClose(); } };
+    const onResize = () => setVh(window.innerHeight);
+    document.addEventListener("keydown", onKey, true);
+    window.addEventListener("resize", onResize);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("resize", onResize);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [onClose]);
+  if (!s) return null;
+  // the document fills the sheet; leave room for the header and a little air
+  const bodyH = Math.max(280, vh - 150);
+  return (
+    <div className="srclb-scrim fade-in" role="dialog" aria-modal="true"
+      aria-label={"Source — " + (s.title || s.id || "document")} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose && onClose(); }}>
+      <div className="srclb" onMouseDown={(e) => e.stopPropagation()}>
+        <header className="srclb-head">
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <SourceTag type={s.type} />
+            <div className="np-cond" style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.12, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || s.filename || "Document"}</div>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}{s.outlet ? " · " + s.outlet : ""}</div>
+          </div>
+          <button onClick={onClose} className="btn btn-sm" title="Back to the article (Esc)" style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <I.x /> Close
+          </button>
+        </header>
+        <div className="srclb-body np-scroll">
+          {window.SourceViewer
+            ? <window.SourceViewer key={srcKey || (s.id || s.key)} srcKey={srcKey} rec={s} height={bodyH} />
+            : <div className="np-mono" style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>Loading the document viewer…</div>}
+        </div>
       </div>
     </div>
   );
@@ -617,5 +717,5 @@ function MediaImg({ srcs, alt, style, fit, crop }) {
   return <img src={resolved} alt={alt || ""} loading="lazy" style={style} onError={onError} />;
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, SourceLightbox, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
   MediaImg, CropFrame, imageCandidates });

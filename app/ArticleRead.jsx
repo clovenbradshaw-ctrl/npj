@@ -111,7 +111,7 @@ function CitedSpanList({ claims, onJump, currentId }) {
 // no hover and no room to pin a card to a tapped word, so it opens instead as a
 // dismissible bottom sheet (tap the backdrop or ✕ to close) — thumb-reachable
 // and full-width, which is how a touch reader actually opens the receipts.
-function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview }) {
+function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
@@ -154,7 +154,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
           ))}
         </div>
       )}
-      <SourceCard srcKey={srcKeys[tab]} quote={claim.q && claim.q[srcKeys[tab]]} preview={preview} />
+      <SourceCard srcKey={srcKeys[tab]} quote={claim.q && claim.q[srcKeys[tab]]} preview={preview} onExpand={onExpand} />
       {spans.length > 1 && (
         <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: 124, overflowY: "auto" }} className="np-scroll">
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — {sheet ? "tap" : "click"} to jump</div>
@@ -293,6 +293,11 @@ function ArticleRead(props) {
   }, [A]);
   const [hover, setHover] = useState(null);
   const [activeSrc, setActiveSrc] = useState(null);
+  // a source document, expanded to fill the screen (in-app, never a new tab).
+  // Holds the source key being viewed; null when closed. Opening it also dismisses
+  // the floating hover card so there's nothing lingering behind the lightbox.
+  const [lightbox, setLightbox] = useState(null);
+  const openLightbox = useCallback((key) => { setLightbox(key); setHover(null); setActiveSrc(null); }, []);
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
   const [fnPop, setFnPop] = useState(null);
   const fnLeaveTimer = useRef(null);
@@ -794,9 +799,10 @@ function ArticleRead(props) {
            branch just renders this card off the same hover state. */}
         <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
           onClose={() => { setHover(null); setActiveSrc(null); }}
-          spansForSource={spansForSource} onJump={jumpToClaim} preview />
+          spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
           onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
+        {lightbox && <SourceLightbox srcKey={lightbox} onClose={() => setLightbox(null)} />}
       </div>
     );
   }
@@ -832,7 +838,7 @@ function ArticleRead(props) {
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
         onClose={() => { setHover(null); setActiveSrc(null); }}
-        suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} />
+        suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} />
 
       <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
         onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
@@ -863,6 +869,10 @@ function ArticleRead(props) {
           onClose={() => setEditing(false)}
           onSaved={(updated) => { setEditing(false); if (onEdited) onEdited(updated); }} />
       )}
+
+      {/* a source's document, expanded to fill the screen in-app — click a
+         document in any citation card to open it; ✕ / Esc / backdrop to exit */}
+      {lightbox && <SourceLightbox srcKey={lightbox} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
