@@ -163,7 +163,8 @@ function SourceExplorer({ items, initialKey, title, onClose, onRename, onCite, s
                 )}
 
                 {window.SourceViewer
-                  ? <window.SourceViewer key={selItem.key} srcKey={selItem.key} rec={selRec} height={460} onText={seedText} />
+                  ? <window.SourceViewer key={selItem.key} srcKey={selItem.key} rec={selRec} height={460} onText={seedText}
+                      onEditText={srcApi && srcApi.setSourceText ? (t => { srcApi.setSourceText(selItem.key, t); bump(v => v + 1); }) : undefined} />
                   : <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)" }}>Viewer unavailable.</div>}
 
                 {/* adapt the source: treat-as-image + OCR on/off/edit. Only when the

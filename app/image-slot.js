@@ -41,11 +41,12 @@
  *   conform      Boolean — once filled, size the box to the IMAGE's aspect ratio
  *                instead of the author-declared height, so the slot shows the
  *                whole image (matching what the reader publishes) rather than a
- *                fixed-height letterbox crop. A saved crop's aspect wins over the
- *                image's natural ratio. Empty slots keep the declared height as
- *                the drop target. Used by the NPJ banner and inline article
- *                images; reframe (cover) still zoom-crops within the image's
- *                own ratio.
+ *                fixed-height letterbox crop. Under fit=cover the saved crop's
+ *                aspect (the crop window) drives the box; under contain/fill the
+ *                box hugs the image's natural ratio, since the whole photo shows
+ *                there. Empty slots keep the declared height as the drop target.
+ *                Used by the NPJ banner and inline article images; reframe
+ *                (cover) still zoom-crops within the image's own ratio.
  *   placeholder  Empty-state caption.                      (default 'Drop an image')
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
@@ -877,19 +878,26 @@
     }
 
     // `conform` slots take the IMAGE's shape: once filled, the box's height is
-    // driven by an aspect ratio (the saved crop's, else the image's natural
-    // ratio) so the editor shows the whole image — what the reader publishes —
-    // instead of the fixed author-declared letterbox. Written as a shadow :host
-    // rule with !important (which outranks the host's non-important inline
-    // height) rather than mutating the host's inline style, so the light-DOM
-    // HTML the newsroom persists as a draft is never rewritten. An empty slot
-    // (no aspect known) falls back to the declared height as the drop target.
+    // driven by an aspect ratio so the editor shows the whole image — what the
+    // reader publishes — instead of the fixed author-declared letterbox. The
+    // ratio depends on the fill mode: a saved crop's `ar` is the COVER crop
+    // window, so it's the visible shape ONLY under fit=cover; for contain/fill
+    // the whole photo shows at its NATURAL ratio, so the box has to hug that.
+    // Using the cover-crop ar (or the declared height) for a contained photo
+    // strands it in the frame's grey with side margins — the bug the reader's
+    // CropFrame already sidesteps by hugging natural for contain. Written as a
+    // shadow :host rule with !important (which outranks the host's non-important
+    // inline height) rather than mutating the host's inline style, so the
+    // light-DOM HTML the newsroom persists as a draft is never rewritten. An
+    // empty slot (no aspect known) falls back to the declared height as the drop
+    // target.
     _applyConform() {
       if (!this._conformSheet) return;
       let ar = 0;
       if (this.hasAttribute('conform') && this.hasAttribute('data-filled')) {
+        const fit = (this.getAttribute('fit') || 'cover').toLowerCase();
         const crop = this._parseCrop(this.getAttribute('data-crop'));
-        if (crop && crop.ar) ar = crop.ar;
+        if (fit === 'cover' && crop && crop.ar) ar = crop.ar;
         else {
           const iw = this._img.naturalWidth, ih = this._img.naturalHeight;
           if (iw && ih) ar = iw / ih;

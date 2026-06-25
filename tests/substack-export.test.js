@@ -130,6 +130,31 @@ test("HTML output is paste-ready: real tags, image figure, sup links and a Sourc
   assert.match(h, /<h2>Sources<\/h2>\n<ol>/);
 });
 
+test("a photo's description becomes the image alt text; caption stays the visible figcaption", () => {
+  const a = {
+    headline: "T",
+    image: { src: "https://web.archive.org/web/2026/hall.jpg", banner: true,
+             caption: "City hall", credit: "Jane Doe", description: "A domed limestone building under a clear sky" },
+    body: [{ type: "img", src: "https://web.archive.org/web/2026/chart.png",
+             caption: "The chart", description: "A bar chart rising left to right" }]
+  };
+  const h = NS.toHtml(a, opts);
+  // hero: alt is the description, the figcaption is the caption (+ credit)
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/web\/2026\/hall\.jpg" alt="A domed limestone building under a clear sky">/);
+  assert.match(h, /<figcaption>City hall — Credit: Jane Doe<\/figcaption>/);
+  // inline: same — alt off the description, caption visible
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/web\/2026\/chart\.png" alt="A bar chart rising left to right">/);
+  // markdown alt is the description too; the caption is the italic line
+  const m = NS.toMarkdown(a, opts);
+  assert.match(m, /!\[A bar chart rising left to right\]\(https:\/\/web\.archive\.org\/web\/2026\/chart\.png\)/);
+  assert.match(m, /^\*The chart\*$/m);
+});
+
+test("with no description, the image alt falls back to the caption", () => {
+  const h = NS.toHtml({ headline: "T", body: [{ type: "img", src: "https://web.archive.org/c.png", caption: "Only a caption" }] }, opts);
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/c\.png" alt="Only a caption">/);
+});
+
 test("HTML escapes angle brackets and ampersands in text", () => {
   const a = { headline: "A & B <tag>", body: [{ type: "p", tokens: ["x < y & z"] }] };
   const h = NS.toHtml(a, opts);
@@ -244,6 +269,47 @@ test("mergeStrandedFootnotes leaves a well-formed body untouched", () => {
     { type: "footnotes", notes: [{ key: "fn1", num: 1, text: "n" }] }
   ];
   assert.deepEqual(NS.mergeStrandedFootnotes(body), body);
+});
+
+test("a stranded marker that DUPLICATES a real reference is dropped, not folded", () => {
+  // the editor can clone a trailing marker onto its own line; that stray points at
+  // the SAME note as the real one (a manual footnote key is unique per insertion).
+  // Folding it would footnote the sentence above with someone else's note — drop it,
+  // and leave the real reference exactly where it sits.
+  const body = [
+    { type: "p", tokens: ["Twenty-one benches stayed in place."] },
+    { type: "p", tokens: [{ t: "sup", key: "fn19", num: 19, text: "19" }] },   // stray clone, alone on a line
+    { type: "p", tokens: ["…supposed to have less red tape.", { t: "sup", key: "fn19", num: 19, text: "19" }] }, // real reference
+    { type: "footnotes", notes: [{ key: "fn19", num: 19, text: "Metro red-tape note." }] }
+  ];
+  const merged = NS.mergeStrandedFootnotes(body);
+  const benches = merged.find(b => b.type === "p" && b.tokens.some(t => typeof t === "string" && /Twenty-one/.test(t)));
+  assert.ok(!benches.tokens.some(t => t && t.t === "sup"), "the sentence above the stray is not footnoted");
+  const tape = merged.find(b => b.type === "p" && b.tokens.some(t => typeof t === "string" && /less red tape/.test(t)));
+  assert.ok(tape.tokens.some(t => t && t.t === "sup" && t.key === "fn19"), "the real reference stays put");
+  const marks = merged.flatMap(b => (b.tokens || []).filter(t => t && t.t === "sup" && t.key === "fn19"));
+  assert.equal(marks.length, 1, "exactly one fn19 marker survives");
+  // end to end: no lone-marker paragraph survives the export
+  const a = { headline: "T", body };
+  assert.ok(!/<p><sup>\d+<\/sup><\/p>/.test(NS.toHtml(a, opts)), "no lone-marker paragraph in the HTML");
+  assert.ok(!/^\[\^fn19\]$/m.test(NS.toMarkdown(a, opts)), "no lone reference in the markdown");
+});
+
+test("two stray clones of one unique key fold just once (never duplicated)", () => {
+  // a key never attached to text, cloned onto two lonely lines: keep a single
+  // reference (folded onto the text above), drop the rest — the note isn't lost
+  // and isn't doubled.
+  const body = [
+    { type: "p", tokens: ["A sentence that owns the note."] },
+    { type: "p", tokens: [{ t: "sup", key: "fnX", num: 3, text: "3" }] },
+    { type: "p", tokens: [{ t: "sup", key: "fnX", num: 3, text: "3" }] },
+    { type: "footnotes", notes: [{ key: "fnX", num: 3, text: "Only note." }] }
+  ];
+  const merged = NS.mergeStrandedFootnotes(body);
+  const marks = merged.flatMap(b => (b.tokens || []).filter(t => t && t.t === "sup" && t.key === "fnX"));
+  assert.equal(marks.length, 1, "the note keeps exactly one reference");
+  const owner = merged.find(b => b.type === "p" && b.tokens.some(t => typeof t === "string" && /owns the note/.test(t)));
+  assert.ok(owner.tokens.some(t => t && t.t === "sup" && t.key === "fnX"), "the surviving reference folded onto the text above");
 });
 
 /* ---- the evidence: sources as footnotes that open the snapshot on the cited

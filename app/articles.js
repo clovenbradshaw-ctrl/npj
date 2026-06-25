@@ -143,11 +143,22 @@
   // shared article body is never corrupted by a repeat call (read model + export).
   function mergeStrandedFootnotes(blocks) {
     const src = Array.isArray(blocks) ? blocks : [];
+    // Keys already carried by a marker that sits AGAINST TEXT — a real reference.
+    // A manual footnote key is unique per insertion (Newsroom insertFootnote), so a
+    // stranded marker repeating one is an editing artifact (an Enter/paste/drag
+    // cloned a trailing marker), not a second reference: DROP it rather than fold it
+    // onto the text above, which would footnote that sentence with someone else's note.
+    const attached = new Set();
+    src.forEach(b => { if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); }); });
+    // keep a stranded marker only while its key is still fresh; claiming the key as
+    // we go means two strays of one key fold just once, never twice.
+    const fresh = (t) => { if (!isFnMarker(t)) return false; if (t.key && attached.has(t.key)) return false; if (t.key) attached.add(t.key); return true; };
     const out = [];
     let carry = [];   // markers with no paragraph above them yet — attach to the next one
     src.forEach(b => {
       if (b && b.type === "p" && onlyFnMarkers(b.tokens)) {
-        const markers = b.tokens.filter(isFnMarker);
+        const markers = b.tokens.filter(fresh);
+        if (!markers.length) return;   // every marker here duplicates a real reference → drop the stranded paragraph
         const prev = out[out.length - 1];
         if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
         else carry = carry.concat(markers);
@@ -276,7 +287,7 @@
       status: state.status === "unpublished" ? "unpublished" : "published",
       image: bannerBlock ? {
         src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
-        credit: bannerBlock.credit || "",
+        credit: bannerBlock.credit || "", description: bannerBlock.description || "",
         banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
       } : null,
       // normalize on read too, so a draft already saved with a stranded marker
@@ -585,8 +596,20 @@
               toks.push(owned);
               return;
             }
-            // a SOURCED span in the edit surface's round-trip shape (eo-claim).
-            if (isEo) {
+            // a SOURCED claim span. Two shapes, one rule: the SPAN ITSELF is the
+            // claim boundary, so the WHOLE wrapped text becomes the claim token —
+            //   eo-claim   — the post-publish edit surface's round-trip shape.
+            //   .claim-src — the live editor's wrapper. bindRangeToSource wraps the
+            //     author's exact selection (which may be more than one sentence) and
+            //     drops the numbered <sup class="md-cite"> as the NEXT sibling.
+            // Honouring the span keeps the published/preview claim identical to what
+            // the editor and the grounding workspace highlight. (The old path recursed
+            // into .claim-src and let the trailing marker run splitClaim, which shrank
+            // a multi-sentence selection to just its last sentence — so the
+            // transparency lens grounded less than the prose editor showed.) The
+            // trailing marker(s) still merge their key + pinned quote onto this token
+            // via the md-cite branch below (buf is empty → it folds into prev).
+            if (isEo || src.length) {
               flush();
               if (src.length) {
                 let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
@@ -598,13 +621,13 @@
                   q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
                   if (!Object.keys(q).length) q = undefined;
                 }
-                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
+                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId(), q });
               } else buf += plain(c);
               return;
             }
-            // a SOURCED .claim-src from the live editor is a transparent wrapper:
-            // recurse so its trailing <sup class="md-cite"> builds the citation
-            // token — the long-standing path, unchanged.
+            // a .claim-src with no source of its own (a transient/owned-forming
+            // wrapper) is transparent: recurse so its contents — and any trailing
+            // <sup class="md-cite"> — fold the long-standing way.
             walk(c);
             return;
           }
@@ -684,15 +707,18 @@
         return;
       }
       if (tag === "figure") {
-        // Two caption lines now: the caption (first figcaption) and the photo
-        // credit (.cmp-credit). Selecting :not(.cmp-credit) keeps the caption
-        // right whichever order they sit in, and old single-figcaption drafts
-        // still match. The credit is markdown ([label](url)) like a profile bio,
-        // rendered safely via npjRichText in the reader.
-        const cap = node.querySelector("figcaption:not(.cmp-credit)");
+        // Three caption lines now: the caption (first figcaption), the photo
+        // credit (.cmp-credit) and the description (.cmp-desc, the alt text).
+        // Excluding both classes keeps the caption right whichever order they sit
+        // in, and old single-figcaption drafts still match. The credit is markdown
+        // ([label](url)) like a profile bio, rendered safely via npjRichText in
+        // the reader. The description rides as the image's real `alt`.
+        const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
         const capText = cap ? cap.textContent.trim() : "";
         const credEl = node.querySelector(".cmp-credit");
         const creditText = credEl ? credEl.textContent.trim() : "";
+        const descEl = node.querySelector(".cmp-desc");
+        const descText = descEl ? descEl.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
         const plainImg = node.querySelector("img");
         const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
@@ -708,7 +734,7 @@
         const caption = /^banner(\s*·|\s|$)/i.test(capText) ? "" : capText;
         if (node.hasAttribute("data-eo-img")) {
           const s = plainImg && plainImg.getAttribute("src");
-          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (isBanner) block.banner = true; blocks.push(block); }
+          if (s) { const block = { type: "img", src: s, caption }; if (creditText) block.credit = creditText; if (descText) block.description = descText; if (isBanner) block.banner = true; blocks.push(block); }
         } else if (slot) {
           // a slot can carry two URLs (src + data-alt): the archive.org one is
           // the canonical `src`; the media-store one rides as `store` so the
@@ -724,6 +750,7 @@
           if (src) {
             const block = { type: "img", src, caption };
             if (creditText) block.credit = creditText;
+            if (descText) block.description = descText;
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
             // fill mode + crop chosen on the slot ride along so the reader and
@@ -839,12 +866,15 @@
         // than a fixed-height letterbox. The declared height below only acts as
         // the drop target while the slot is empty.
         const conformAttr = ' conform';
-        // caption + credit are editable islands inside the non-editable figure
-        // (the slot itself stays protected). The credit takes markdown links the
-        // same way a contributor bio does — name / [outlet](https://…).
+        // caption + credit + description are editable islands inside the
+        // non-editable figure (the slot itself stays protected). The credit takes
+        // markdown links the same way a contributor bio does — name /
+        // [outlet](https://…). The description is the photo's alt text (screen
+        // readers + search), surfaced as a line here so it round-trips on re-edit.
         const capHtml = '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(b.caption || "") + '</figcaption>';
         const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
-        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + "</figure>";
+        const descHtml = '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px">' + esc(b.description || "") + '</figcaption>';
+        return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + descHtml + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
