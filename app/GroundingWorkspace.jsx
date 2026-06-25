@@ -32,49 +32,9 @@ const STANCE_OPTS = [["voice", "Argue — your voice ⊩"], ["testimony", "Asser
 const DOT = { grounded: "#1F9E76", multi: "#6ea8d8", owned: "#7C74DE", needs: "#D8632E", conflict: "#D8412C" };
 const CONTEXT_TEAL = "#2E8B86";
 
-// Edit or delete a source's recognized text — the OCR read off an uploaded photo,
-// mostly. Persists through the Newsroom (api.setSourceText → autosave). Warns when
-// citations rest on the source, since changing the words can unlink a pinned quote.
-function OcrEditor({ rec, api, NR, nCites }) {
-  const key = (rec && (rec.id || rec.key)) || "";
-  const cur = String((rec && rec.text) || "");
-  const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(cur);
-  const [confirmDel, setConfirmDel] = useState(false);
-  if (!api || !api.setSourceText) return null;
-  const begin = () => { setDraft(String((rec && rec.text) || "")); setConfirmDel(false); setOpen(true); };
-  const save = () => { api.setSourceText(key, draft); setOpen(false); setConfirmDel(false); };
-  const clear = () => { api.setSourceText(key, ""); setOpen(false); setConfirmDel(false); };
-  const field = { width: "100%", boxSizing: "border-box", minHeight: 120, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.55, padding: "9px 11px", outline: "none", resize: "vertical" };
-  const btn = (extra) => Object.assign({ border: "1px solid " + NR.line, background: "transparent", color: NR.text, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "4px 10px" }, extra || {});
-  return (
-    <div style={{ marginTop: 10, border: "1px solid " + NR.line, background: NR.panel, padding: "9px 11px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span className="np-mono" style={{ fontSize: 9.5, letterSpacing: ".06em", textTransform: "uppercase", color: NR.muted, fontWeight: 600 }}>Recognized text (OCR)</span>
-        <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>read from the image — edit if it’s wrong, or delete it</span>
-        <span style={{ flex: 1 }} />
-        {!open && <button onClick={begin} style={btn()}>{cur.trim() ? "✎ Edit text" : "✎ Add text"}</button>}
-        {!open && cur.trim() && (confirmDel
-          ? <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
-              <span className="np-mono" style={{ fontSize: 10, color: "#c2724a" }}>delete?</span>
-              <button onClick={clear} style={btn({ borderColor: "#c2724a", color: "#c2724a" })}>Yes</button>
-              <button onClick={() => setConfirmDel(false)} style={btn()}>No</button>
-            </span>
-          : <button onClick={() => setConfirmDel(true)} title="Delete the recognized text" style={btn({ color: "#c2724a" })}>✕ Delete</button>)}
-      </div>
-      {nCites > 0 && <div className="np-mono" style={{ fontSize: 9.5, color: "#c2724a", lineHeight: 1.5, marginTop: 6 }}>{nCites} citation{nCites === 1 ? "" : "s"} rest on this source — changing or deleting the words can unlink a pinned quote (the claim keeps its words; the highlight may stop showing).</div>}
-      {open && (
-        <div style={{ marginTop: 8 }}>
-          <textarea autoFocus value={draft} onChange={e => setDraft(e.target.value)} style={field} placeholder="The words read from this image. Fix anything OCR got wrong, or clear it and start over." />
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 7 }}>
-            <button onClick={() => { setOpen(false); setConfirmDel(false); }} style={btn()}>Cancel</button>
-            <button onClick={save} style={btn({ background: "var(--yellow)", color: "var(--ink)", borderColor: "var(--yellow)", fontWeight: 700 })}>Save text</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+// The source adapter (treat-as-image + OCR on/off/edit) lives in its own READ-tier
+// file, window.SourceAdapter (app/SourceAdapter.jsx), so the file explorer can use
+// it too. It supersedes the old in-file OcrEditor. Rendered under the reader below.
 
 // Status pill (solid backgrounds read in both newsroom themes).
 function pillFor(st) {
@@ -1265,7 +1225,12 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
           <div>
             {searchRow()}
             {readerBody(srcRefMain, false)}
-            {kindOf(api.sourceRec(selSrc)) === "image" && <OcrEditor rec={api.sourceRec(selSrc)} api={api} NR={NR} nCites={allC.filter(c => c.srcKey === selSrc).length} />}
+            {(() => {
+              const r = api.sourceRec(selSrc), SVa = window.NpjSourceView;
+              return (SVa && SVa.hasFile && SVa.hasFile(r) && window.SourceAdapter)
+                ? <window.SourceAdapter rec={r} api={api} NR={NR} nCites={allC.filter(c => c.srcKey === selSrc).length} />
+                : null;
+            })()}
             <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 8 }}>
               {allC.filter(c => c.srcKey === selSrc).length + " citation record" + (allC.filter(c => c.srcKey === selSrc).length === 1 ? "" : "s") + " minted from this source · highlighted spans are cited support · click one to select it"}
             </div>
