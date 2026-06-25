@@ -356,6 +356,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
   const [toc, setToc] = useState([]);
+  // the piece's glossary (term → definition); extracted by eoreader4, drawn from
+  // the collective published record (app/definitions.js), published like tags.
+  const [definitions, setDefinitions] = useState([]);
+  const [defsOpen, setDefsOpen] = useState(false);   // the Definitions panel overlay
+  const [defsBody, setDefsBody] = useState("");      // editor plain text, snapshotted when the panel opens
   // ---- editing-only post structure (app/structure.js) ----
   // the append-only event log is the source of truth; `structure` is its fold.
   // Stamped onto headings as data-sec (stable identity across renames/reorders),
@@ -402,9 +407,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
     const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
     const composition = window.NpjComposition ? window.NpjComposition.serialize(draftId) : undefined;
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, definitions, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
     saveTimer.current = null;
-  }, [draftId, title, fileSlug, tags, column, sources, room]);
+  }, [draftId, title, fileSlug, tags, column, definitions, sources, room]);
   const persistRef = useRef(persist);
   useEffect(() => { persistRef.current = persist; });
   const scheduleSave = useCallback(() => {
@@ -468,6 +473,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
         if (Array.isArray(d.tags)) setTags(d.tags);
+        if (Array.isArray(d.definitions)) setDefinitions(window.NpjDefinitions ? window.NpjDefinitions.normList(d.definitions) : d.definitions);
         if (d.column) setColumn(d.column);
         // Strip in-flight UI flags that may have been autosaved mid-operation:
         // after a restore nothing is driving that async work, so a persisted
@@ -2796,6 +2802,25 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
             </div>
           </div>
+          {/* definitions — the piece's glossary, opened as a panel. eoreader4
+              suggests the terms (sized to the article); each draws from the
+              collective set of published definitions across the site. */}
+          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
+            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
+              <span>Definitions{definitions.length ? " · " + definitions.length : ""}</span>
+            </div>
+            {definitions.length > 0 &&
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
+                {definitions.slice(0, 8).map(d => <span key={d.id} title={d.def || "no definition yet"} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: d.def ? NR.text : NR.muted, padding: "2px 6px" }}>{d.term}</span>)}
+                {definitions.length > 8 && <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted }}>+{definitions.length - 8}</span>}
+              </div>}
+            <button onClick={() => { setDefsBody(ed.current ? (ed.current.innerText || "") : ""); setDefsOpen(true); }}
+              className="np-cond" style={{ width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: NR.field, color: NR.text, cursor: "pointer", fontSize: 12, padding: "6px 8px" }}>
+              {definitions.length ? "Edit definitions →" : "Define key terms →"}
+            </button>
+            {definitions.length === 0 &&
+              <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5, marginTop: 6 }}>eoreader4 suggests the names &amp; terms a reader may need defined — about one per 130 words.</div>}
+          </div>
         </div>
 
         {/* editor — the draft renders as a bordered page on the canvas; the page
@@ -3223,6 +3248,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       ); })()}
 
+      {/* the definitions panel — the piece's glossary, extracted by eoreader4 and
+          drawn from the collective published record (app/DefinitionsRail.jsx) */}
+      {defsOpen && window.DefinitionsPanel &&
+        <window.DefinitionsPanel NR={NR} definitions={definitions} onChange={setDefinitions}
+          bodyText={defsBody} slug={fileSlug || (window.NpjArticles ? slugify(title) : "")} isMobile={isMobile}
+          actor={(window.MatrixAuth && window.MatrixAuth.current && window.MatrixAuth.current()) ? window.MatrixAuth.current().user_id : null}
+          onClose={() => setDefsOpen(false)} />}
+
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
         <div className="fade-in" onClick={() => setViewer(null)} style={{ position: "fixed", inset: 0, zIndex: 5600, background: "rgba(8,7,5,.93)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 26 }}>
@@ -3266,7 +3299,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
-        getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
+        getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, definitions, sources })} />}
       {previewDoc && window.ArticleRead && (
         <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
       )}
