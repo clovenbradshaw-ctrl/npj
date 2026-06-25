@@ -1083,6 +1083,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [menu, setMenu] = useState(null); // 'src' | 'link'
   const [srcQuery, setSrcQuery] = useState("");
   const [srcUrl, setSrcUrl] = useState("");
+  const [srcPreview, setSrcPreview] = useState(null); // bind menu: which source row is expanded to a full preview
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
@@ -1269,7 +1270,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const host = claimHostOf(r);
     if (host) {
       const cid = host.getAttribute("data-cid");
-      window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null);
+      window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setSrcPreview(null); setArmSrc(null);
       if (!sources.find(x => x.key === key)) setSources(s => [{ key, archived: !!(window.NPJ.SOURCES[key] && window.NPJ.SOURCES[key].archive_url) }, ...s]);
       openPin(cid, key, (host.textContent || "").trim());
       return;
@@ -1277,7 +1278,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!r) { setArmSrc(key); setMenu(null); return; }
     const claimText = String(r.toString() || "").trim();
     const cid = bindRangeToSource(r, key);
-    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setArmSrc(null); setRev(v => v + 1); scheduleSave(); renumberCites();
+    window.getSelection().removeAllRanges(); selRange.current = null; setSel(null); setMenu(null); setSrcUrl(""); setSrcPreview(null); setArmSrc(null); setRev(v => v + 1); scheduleSave(); renumberCites();
     // now make the author point at the words in the source — the citation isn't
     // done until that span is pinned
     openPin(cid, key, claimText);
@@ -2396,17 +2397,43 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             </div>
           )}
           {menu === "src" && (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 268, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8, maxHeight: 260, overflowY: "auto" }} className="np-scroll">
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 332, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8, maxHeight: 440, overflowY: "auto" }} className="np-scroll">
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.source style={{ fontSize: 13 }} /> Bind this span to a source</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "0 8px", marginBottom: 8 }}>
                 <I.search style={{ fontSize: 14, color: "var(--ink-soft)" }} />
                 <input autoFocus value={srcQuery} onChange={e => setSrcQuery(e.target.value)} onMouseDown={e => e.stopPropagation()} placeholder="Search sources…" style={{ flex: 1, border: 0, background: "transparent", padding: "7px 0", fontFamily: "var(--serif)", fontSize: 13, outline: "none" }} />
               </div>
-              {sources.filter(s => { const r = window.NPJ.SOURCES[s.key] || {}; const q = srcQuery.trim().toLowerCase(); return !q || ((r.title || "") + " " + (r.outlet || "") + " " + (r.id || s.key)).toLowerCase().includes(q); }).map(s => { const rec = window.NPJ.SOURCES[s.key] || { title: s.key, outlet: "" }; const n = citeNum(s.key); return (
-                <button key={s.key} onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} style={{ display: "flex", gap: 7, alignItems: "baseline", width: "100%", textAlign: "left", background: "transparent", border: 0, borderBottom: "1px solid var(--rule)", padding: "7px 4px", cursor: "pointer" }}>
-                  {n > 0 && <span className="claim-marker" style={{ verticalAlign: "baseline" }}>{n}</span>}
-                  <span><span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5 }}>{rec.title}</span><span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {rec.type === "interview" ? "" : (s.archived ? "· archived" : "· snapshot")}{n > 0 ? " · +span" : ""}</span></span>
-                </button>); })}
+              {sources.filter(s => { const r = window.NPJ.SOURCES[s.key] || {}; const q = srcQuery.trim().toLowerCase(); return !q || ((r.title || "") + " " + (r.outlet || "") + " " + (r.id || s.key)).toLowerCase().includes(q); }).map(s => {
+                const rec = window.NPJ.SOURCES[s.key] || { title: s.key, outlet: "" };
+                const n = citeNum(s.key);
+                const SVm = window.NpjSourceView;
+                const open = srcPreview === s.key;
+                const thumbUrl = (SVm && SVm.kindOf(rec) === "image") ? (SVm.blobUrl(SVm.recKey(rec) || s.key) || rec.file_url || rec.archive_url || rec.original_url || "") : "";
+                return (
+                <div key={s.key} style={{ borderBottom: "1px solid var(--rule)" }}>
+                  <div style={{ display: "flex", gap: 7, alignItems: "center", padding: "7px 2px" }}>
+                    {n > 0 && <span className="claim-marker" style={{ flex: "0 0 auto", verticalAlign: "baseline" }}>{n}</span>}
+                    {thumbUrl && <NrMediaImg url={thumbUrl} alt="" style={{ flex: "0 0 auto", width: 34, height: 34, objectFit: "cover", border: "1px solid var(--rule)" }} />}
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} title="Bind this span to this source" style={{ flex: 1, minWidth: 0, textAlign: "left", background: "transparent", border: 0, padding: 0, cursor: "pointer" }}>
+                      <span style={{ display: "block", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13.5, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title}</span>
+                      <span className="np-mono" style={{ display: "block", fontSize: 9.5, color: "var(--ink-soft)" }}>{rec.outlet} {rec.type === "interview" ? "" : (s.archived ? "· archived" : "· snapshot")}{n > 0 ? " · +span" : ""}</span>
+                    </button>
+                    <button onMouseDown={e => e.preventDefault()} onClick={() => setSrcPreview(p => p === s.key ? null : s.key)} title={open ? "Hide preview" : "Preview this source"} className="np-mono" style={{ flex: "0 0 auto", background: open ? "var(--ink)" : "transparent", color: open ? "var(--paper)" : "var(--ink-soft)", border: "1px solid " + (open ? "var(--ink)" : "var(--rule)"), padding: "3px 7px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, lineHeight: 1.4 }}>
+                      <I.eye style={{ fontSize: 12 }} /> {open ? "Hide" : "Preview"}
+                    </button>
+                  </div>
+                  {open && (
+                    <div onMouseDown={e => e.stopPropagation()} style={{ padding: "0 2px 10px" }}>
+                      {window.SourceViewer
+                        ? <window.SourceViewer key={s.key} srcKey={s.key} rec={rec} height={230} />
+                        : <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)" }}>Preview unavailable.</div>}
+                      <div style={{ display: "flex", gap: 8, marginTop: 7, alignItems: "center" }}>
+                        {window.SourceExplorer && <button onMouseDown={e => e.preventDefault()} onClick={() => setExplorer({ key: s.key, all: true, cite: true })} title="Open this source full-screen — read it and cite from there" className="np-mono" style={{ background: "transparent", border: "1px solid var(--rule)", color: "var(--data)", padding: "3px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10 }}><I.expand style={{ fontSize: 12 }} /> Open full preview</button>}
+                        <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} title="Bind this span to this source" className="np-mono" style={{ background: "var(--yellow)", border: "1px solid var(--ink)", color: "var(--ink)", fontWeight: 700, padding: "3px 8px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10 }}><I.source style={{ fontSize: 12 }} /> Cite this</button>
+                      </div>
+                    </div>
+                  )}
+                </div>); })}
               {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 8px" }}>Ingest a source first (left panel), or paste a URL:</div>}
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
             </div>
@@ -2546,14 +2573,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
-      {explorer && window.SourceExplorer && (
+      {explorer && window.SourceExplorer && (() => {
+        // opened from the bind menu (all+cite) → show EVERY source so any of them
+        // can be previewed and cited from one place; otherwise the file explorer
+        // keeps its uploaded-files-only scope.
+        const all = !!explorer.all;
+        const base = all ? sources : sources.filter(s => nrIsFileSrc(window.NPJ.SOURCES[s.key]));
+        return (
         <window.SourceExplorer
-          title="Source files — this article"
+          title={all ? "Preview sources — this article" : "Source files — this article"}
           initialKey={explorer.key}
-          items={sources.filter(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])).map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
+          items={base.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
           onRename={(key, t) => tableApi.renameSource(key, t)}
+          onCite={explorer.cite ? (key => { setExplorer(null); bindSource(key); }) : undefined}
           onClose={() => { setExplorer(null); setSources(x => [...x]); }} />
-      )}
+        );
+      })()}
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
       {redactTarget && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={redactTarget}
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}

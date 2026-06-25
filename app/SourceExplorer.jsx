@@ -14,7 +14,7 @@
 
    Publishes window.SourceExplorer.
    ============================================================ */
-function SourceExplorer({ items, initialKey, title, onClose, onRename }) {
+function SourceExplorer({ items, initialKey, title, onClose, onRename, onCite }) {
   const SV = window.NpjSourceView;
   const list = (items || []).filter(it => it && it.key);
   const [sel, setSel] = useState(initialKey || (list[0] && list[0].key) || null);
@@ -39,6 +39,8 @@ function SourceExplorer({ items, initialKey, title, onClose, onRename }) {
     if (k === "image") return <I.image style={{ fontSize: 14, color: "var(--data)" }} />;
     if (k === "pdf") return <I.doc style={{ fontSize: 14, color: "var(--reject)" }} />;
     if (k === "text") return <I.doc style={{ fontSize: 14, color: "var(--ink-soft)" }} />;
+    // a web snapshot (no viewable file, just a URL) reads as a link, not a doc
+    if ((rec.original_url || rec.archive_url) && !rec.file_url) return <I.link style={{ fontSize: 14, color: "var(--ink-soft)" }} />;
     return <I.doc style={{ fontSize: 14, color: "var(--ink-soft)" }} />;
   };
 
@@ -146,6 +148,15 @@ function SourceExplorer({ items, initialKey, title, onClose, onRename }) {
                   {selRec.size ? <span>{SV.humanSize(selRec.size)}</span> : null}
                   <span style={{ opacity: .7 }}>{selItem.key}</span>
                 </div>
+
+                {/* opened to bind a span → cite the source you're reading, right here */}
+                {onCite && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 12, padding: "8px 11px", border: "1.5px solid var(--ink)", background: "var(--yellow)" }}>
+                    <I.source style={{ fontSize: 15, flex: "0 0 auto" }} />
+                    <span className="np-mono" style={{ fontSize: 10.5, lineHeight: 1.45, flex: 1, minWidth: 0 }}>Bind your selected words to this source — then pin the exact passage.</span>
+                    <button onClick={() => onCite(selItem.key)} className="np-cond" style={{ flex: "0 0 auto", background: "var(--ink)", color: "var(--paper)", border: 0, padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", whiteSpace: "nowrap" }}>Cite this →</button>
+                  </div>
+                )}
 
                 {window.SourceViewer
                   ? <window.SourceViewer key={selItem.key} srcKey={selItem.key} rec={selRec} height={460} onText={seedText} />
