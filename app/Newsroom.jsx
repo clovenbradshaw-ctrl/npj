@@ -528,6 +528,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const isLeadBlock = (b) => !!(b && (b.tagName === "H1" || (b.classList && (b.classList.contains("nr-dek") || (b.tagName === "FIGURE" && b.classList.contains("nr-banner"))))));
   const isMovableBlock = (b) => !!(b && b.nodeType === 1 && b.tagName !== "BR" && !isLeadBlock(b));
   const isHeadingBlock = (b) => !!(b && /^H[2-3]$/.test(b.tagName || ""));
+  // an image / embed figure: a contenteditable=false block the caret can't enter,
+  // so it gets a click-to-delete × over its top-right corner (the gutter grip
+  // alone is easy to miss). The banner is a lead node — never offered the ×.
+  const isMediaBlock = (b) => !!(b && b.tagName === "FIGURE" && !isLeadBlock(b) && (b.querySelector("image-slot") || b.getAttribute("data-embed-url")));
   // walk up to the direct child of the editor root that holds this node
   const topBlockOf = (node) => {
     const root = ed.current; if (!root) return null;
@@ -551,7 +555,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const sRect = sc.getBoundingClientRect(), bRect = block.getBoundingClientRect();
       const top = bRect.top - sRect.top + sc.scrollTop;
       const left = bRect.left - sRect.left + sc.scrollLeft - 26;
-      setGrip(prev => (prev && prev.block === block && Math.abs(prev.top - top) < 0.5) ? prev : { top, left, isHeading: isHeadingBlock(block), block });
+      const right = bRect.right - sRect.left + sc.scrollLeft;
+      setGrip(prev => (prev && prev.block === block && Math.abs(prev.top - top) < 0.5) ? prev : { top, left, right, isHeading: isHeadingBlock(block), block });
     });
   };
   const clearGrip = () => { if (!dragging) setGrip(null); };
@@ -2301,6 +2306,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 </button>
               )}
             </div>
+          )}
+          {/* image / embed blocks are contentEditable=false — the caret can't
+              reach them to backspace, so float a click-to-delete × over the
+              figure's top-right corner. Editor chrome, OUTSIDE the editable, so
+              it never serializes into the saved/published HTML. */}
+          {!isMobile && grip && !dragging && isMediaBlock(grip.block) && (
+            <button type="button" className="nr-media-del"
+              style={{ top: grip.top + 8, left: grip.right - 36 }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={(e) => { e.preventDefault(); e.stopPropagation(); deleteBlock(grip.block); }}
+              title={blockDelLabel(grip.block)} aria-label={blockDelLabel(grip.block)}>
+              <I.trash style={{ fontSize: 14 }} />
+            </button>
           )}
           {!isMobile && dropAt && (
             <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
