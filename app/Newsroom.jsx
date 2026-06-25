@@ -25,12 +25,16 @@ function nrIsFileSrc(rec) {
 }
 
 const DEK_PH = "Subtitle — one line under the headline";
-// Editable caption + credit lines, shared by the banner and inline image figures.
-// The credit takes a markdown hyperlink like a contributor bio (name /
-// [outlet](https://…)), rendered safely via npjRichText in the reader.
+// Editable caption + credit + description lines, shared by the banner and inline
+// image figures. The credit takes a markdown hyperlink like a contributor bio
+// (name / [outlet](https://…)), rendered safely via npjRichText in the reader.
+// The description is the photo's alt text — read aloud by screen readers and
+// indexed by search engines; it rides as the image's real `alt`, not a visible
+// caption line.
 const FIG_CAPS =
   '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
-  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
+  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>' +
+  '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
@@ -178,6 +182,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const ed = useRef(null);
   const scroller = useRef(null);                     // the editor scroll container (the page scrolls inside it)
   const selRange = useRef(null);
+  const popoverFileRef = useRef(null);               // the source popover's hidden upload input
+  const bindAfterInterview = useRef(false);          // an interview minted from the popover binds to the saved span
 
   // let Citey drop suggested tags in (and read the columns for its column hint)
   useEffect(() => {
@@ -326,7 +332,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       const slot = f.querySelector("image-slot");
       const url = slot ? (slot.url || slot.getAttribute("src")) : null;
       const embed = f.getAttribute("data-embed-url");
-      const cap = f.querySelector("figcaption:not(.cmp-credit)");
+      const cap = f.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
       const caption = cap ? (cap.textContent || "").trim() : (f.classList.contains("nr-banner") ? "banner" : "");
       if (url) found.push({ kind: "image", url, mid: f.dataset.mid, caption });
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
@@ -753,6 +759,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // (Chromium); skips already-upgraded nodes, so it never re-runs a live slot.
   const upgradeCustomEls = () => { try { const r = ed.current; if (r && window.customElements && customElements.upgrade) customElements.upgrade(r); } catch (e) {} };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
+  // Select the whole draft body so an alignment (or any block command) applies to
+  // every paragraph at once — the "select all, then justify the lot" path. We seed
+  // selRange too, so the toolbar's exec()/restore() re-applies this full range
+  // instead of collapsing back to the last caret.
+  const selectAllBody = () => {
+    const root = ed.current; if (!root) return;
+    root.focus();
+    const r = document.createRange(); r.selectNodeContents(root);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    selRange.current = r.cloneRange();
+  };
   const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   // Block-level components (image, embed, verse, poll) can't be nested inside the
   // banner, headline or dek — put the caret in the body, then step past any such
@@ -1420,6 +1437,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // filename or a guess — fix it where you see it)
   const [renameSrcKey, setRenameSrcKey] = useState(null);
   const [renameSrcText, setRenameSrcText] = useState("");
+  const [confirmDelKey, setConfirmDelKey] = useState(null);   // a rail card armed for delete (unbinds its claims)
   const openPin = (cid, key, claimText) => {
     // re-opening an existing binding? read back this source's pinned quote (a span
     // can carry several, so read the one for THIS key, not just source #1)
@@ -1601,6 +1619,34 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     window.getSelection().removeAllRanges(); selRange.current = null;
     setSel(null); setMenu(null); setVoidSearch(""); setVoidKind(""); setRev(v => v + 1); scheduleSave(); renumberCites();
   };
+  // Self-assert: ground the selected words as an OWNED claim — the author's own
+  // analysis, account or stated voice — instead of binding a source. Mirrors
+  // markVoid (wrap-or-reuse the claim span, then own it through the same bridge);
+  // an owned claim needs no source and publishes as plain prose.
+  const markOwn = (stance) => {
+    const s = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : "analysis";
+    const r = spanRange(); if (!r) { setSel(null); setMenu(null); return; }
+    const span = claimHostOf(r) || wrapPlainClaim(r);
+    if (window.__npjGround && window.__npjGround.own) window.__npjGround.own(span, s);
+    if (window.__citey) { if (window.__citey.evaluateSpan) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    window.getSelection().removeAllRanges(); selRange.current = null;
+    setSel(null); setMenu(null); setRev(v => v + 1); scheduleSave(); renumberCites();
+  };
+  // the three OWNED stances offered in the source popover's "stand behind it
+  // yourself" row (glyphs + labels mirror citey-states.js / the grounding table)
+  const OWN_STANCES = [
+    ["analysis", "⊢", "My analysis", "Follows from grounded premises — your reasoning, not a source"],
+    ["testimony", "⊨", "My account", "You are the primary witness — you saw or heard it yourself"],
+    ["voice", "⊩", "My voice", "Your stated position — argument, not a claim of fact"],
+  ];
+  // Mint a brand-new source from the popover's hidden file input and bind the
+  // saved span to the first file (skip the auto PII review so the pin reader can
+  // open immediately; the rail still flags the review). The saved selection range
+  // survives the file dialog, so binding lands on the words the author picked.
+  const bindNewUpload = (fileList) => {
+    const keys = addFiles(fileList, { quiet: true });
+    if (keys && keys[0]) bindSource(keys[0]);
+  };
   // The claim span a table row acts on: reuse an existing one inside the sentence
   // (sub-sentence safe — never nest), else wrap the whole sentence.
   const rowSpanFor = (row, key, plain) => {
@@ -1631,10 +1677,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (cont) { const cr = cont.getBoundingClientRect(); cont.scrollTop += (rect.top - cr.top) - 80; }
       }, 30);
     },
-    // attach an existing reusable citation to this sentence (mints a span if needed)
-    attachExisting: (row, citeId) => {
+    // attach an existing reusable citation to this sentence (mints a span if
+    // needed), or to a SPECIFIC span when a target cid is given (per-span rows)
+    attachExisting: (row, citeId, targetCid) => {
       const c = window.NpjCitations && window.NpjCitations.get(citeId); if (!c) return;
-      const span = rowSpanFor(row, c.srcKey, false); if (!span) return;
+      const span = (targetCid && ed.current && ed.current.querySelector('.claim-src[data-cid="' + targetCid + '"]')) || rowSpanFor(row, c.srcKey, false); if (!span) return;
       window.__npjGround.attachCitation(span, citeId);
     },
     detach: (span, citeId) => window.__npjGround.detachCitation(span, citeId),
@@ -1651,6 +1698,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
+    // own a SPECIFIC existing span (per-span grounding rows). The row-level own()
+    // resolves to the sentence's first span; this targets the one you clicked on.
+    ownSpan: (span, stance, note, kind) => {
+      if (!span) return;
+      window.__npjGround.own(span, stance, note, kind);
+      if (window.__citey) { if (window.__citey.evaluateSpan) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
+    },
     // ---- context links: prior coverage a sentence builds on (context, not proof) ----
     // The source keys this sentence cites for context (across its claim spans).
     contextFor: (row) => {
@@ -1674,6 +1728,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     removeContext: (row, key) => {
       (row.claimSpans || []).forEach(s => window.__npjGround.removeContext(s, key));
     },
+    // the same context links, but scoped to ONE span — per-span grounding rows
+    // show (and edit) each span's own prior coverage, not the sentence aggregate.
+    contextForSpan: (span) => (span && window.NpjCitations) ? window.NpjCitations.contextKeys(span) : [],
+    addContextSpan: (span, key) => { if (span && key) window.__npjGround.addContext(span, key); },
+    removeContextSpan: (span, key) => { if (span && key) window.__npjGround.removeContext(span, key); },
     // sources in the order they appear in the document (the list tracks the prose)
     sources: () => {
       const ord = docOrderKeys();
@@ -1686,9 +1745,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // ---- the grounding workspace's direct-mint path (no popover): the author
     // grabbed the exact words in the source reader — mint the reusable record
     // (multi-part spans supported) and attach it to this sentence's claim span.
-    groundRow: (row, srcKey, quote, loc, spans) => {
+    groundRow: (row, srcKey, quote, loc, spans, targetCid) => {
       const q = String(quote || "").trim(); if (!q || !srcKey) return false;
-      const span = rowSpanFor(row, srcKey, false); if (!span) return false;
+      const span = (targetCid && ed.current && ed.current.querySelector('.claim-src[data-cid="' + targetCid + '"]')) || rowSpanFor(row, srcKey, false); if (!span) return false;
       if (window.NpjCitations) {
         const id = window.NpjCitations.mint({ srcKey, quote: q, loc: loc || null, spans: spans || null });
         window.NpjCitations.attach(span, id);
@@ -1938,6 +1997,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setSources(s => [{ key: rec.id, archived: false, snapshotting: false }, ...s]);
     setInterviewOpen(false);
     setRev(v => v + 1); scheduleSave();
+    // minted from the source popover → bind the saved span to it (the composer
+    // never touched the prose, so the saved selection range is still good)
+    if (bindAfterInterview.current) { bindAfterInterview.current = false; bindSource(rec.id); }
   };
   // the consented archive action (ArchiveModal) — request + verify for real;
   // a source with no original URL (an uploaded file) can't be auto-archived
@@ -2284,8 +2346,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <div style={{ position: "relative", display: "inline-block" }}>
           <TB onClick={() => setFmtMenu(fmtMenu === "align" ? null : "align")} title="Alignment"><I.alignLeft /> <I.caretDown style={{ fontSize: 9 }} /></TB>
           {fmtMenu === "align" && (
-            <div style={{ ...popStyle, width: 150 }}>
-              {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"]].map(([cmd, label]) => (
+            <div style={{ ...popStyle, width: 168 }}>
+              {/* select the whole draft first, then pick an alignment to set it across
+                  the entire document at once — the menu stays open after Select all */}
+              <button onMouseDown={e => e.preventDefault()} onClick={selectAllBody} style={popItem}>Select all text</button>
+              {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"], ["justifyFull", "Justify"]].map(([cmd, label]) => (
                 <button key={cmd} onMouseDown={e => e.preventDefault()} onClick={() => { exec(cmd); setFmtMenu(null); }} style={popItem}>{label}</button>
               ))}
             </div>
@@ -2546,12 +2611,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     </div>
                   );
                 })()}
-                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                   <button onMouseDown={e => e.preventDefault()} onClick={() => bindSource(s.key)} disabled={s.snapshotting}
                     title="Select the words this source backs, then click — or click first and grab the words next"
                     className="np-cond" style={{ flex: 1, background: armSrc === s.key ? "var(--yellow)" : "transparent", border: "1px solid " + (armSrc === s.key ? "var(--yellow)" : NR.line), color: armSrc === s.key ? "var(--ink)" : NR.text, padding: "4px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{armSrc === s.key ? "Grab the words…" : "Cite span"}</button>
                   {nrIsFileSrc(rec) && <button onClick={() => setExplorer({ key: s.key })} title="Open and read this file" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.eye style={{ fontSize: 12 }} /> View</button>}
                   {!iv && !s.archived && !s.snapshotting && <button onClick={() => tryArchive(s)} title={needsPiiReview(s.key) ? "Review this for PII first, then archive" : "Archive this source to archive.org"} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>{needsPiiReview(s.key) ? "Review & archive" : "Archive"}</button>}
+                  {confirmDelKey === s.key
+                    ? <span style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+                        <span className="np-mono" style={{ fontSize: 9.5, color: NR.warn }}>delete?</span>
+                        <button onClick={() => { tableApi.deleteSource(s.key); setConfirmDelKey(null); }} title="Delete this source and unbind its claims" className="np-cond" style={{ background: NR.warn, border: "1px solid " + NR.warn, color: "var(--paper)", padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 700, cursor: "pointer" }}>Yes</button>
+                        <button onClick={() => setConfirmDelKey(null)} className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.soft, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>No</button>
+                      </span>
+                    : <button onClick={() => setConfirmDelKey(s.key)} title="Delete this source — unbinds every claim that cites it (the words stay in the prose)" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.soft, padding: "4px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.trash style={{ fontSize: 12 }} /> Delete</button>}
                 </div>
               </div>
             );
@@ -2638,8 +2710,32 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     </div>
                   )}
                 </div>); })}
-              {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 8px" }}>Ingest a source first (left panel), or paste a URL:</div>}
-              <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
+              {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", padding: "4px 2px 6px", lineHeight: 1.5 }}>No sources yet — make one below, or stand behind the claim yourself.</div>}
+
+              {/* —— mint a NEW source and bind this span to it (URL · file · interview) —— */}
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "10px 0 5px", borderTop: "1px solid var(--rule)", paddingTop: 8, display: "flex", alignItems: "center", gap: 5 }}><I.plus style={{ fontSize: 12 }} /> New source</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="Paste a URL…" className="np-mono" style={{ flex: 1, minWidth: 0, boxSizing: "border-box", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
+                <button onMouseDown={e => e.preventDefault()} onClick={bindNewUrl} title="Snapshot this URL and bind the span to it" className="np-mono" style={{ flex: "0 0 auto", background: "var(--yellow)", border: "1.5px solid var(--ink)", color: "var(--ink)", fontWeight: 700, padding: "0 11px", cursor: "pointer", fontSize: 11 }}>Add</button>
+              </div>
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                <button onMouseDown={e => e.preventDefault()} onClick={() => popoverFileRef.current && popoverFileRef.current.click()} title="Upload a PDF, image or document and bind this span to it" className="np-mono" style={{ flex: 1, background: "transparent", border: "1px solid var(--ink)", color: "var(--ink)", padding: "6px 9px", cursor: "pointer", fontSize: 10.5, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}><I.folder style={{ fontSize: 13 }} /> Upload file</button>
+                {window.InterviewComposer && <button onMouseDown={e => e.preventDefault()} onClick={() => { bindAfterInterview.current = true; setMenu(null); setInterviewOpen(true); }} title="Log an interview (your own reporting) and bind this span to it" className="np-mono" style={{ flex: 1, background: "transparent", border: "1px solid var(--ink)", color: "var(--ink)", padding: "6px 9px", cursor: "pointer", fontSize: 10.5, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5 }}><I.mic style={{ fontSize: 13 }} /> Interview</button>}
+              </div>
+              <input ref={popoverFileRef} type="file" multiple style={{ display: "none" }} onChange={e => { bindNewUpload(e.target.files); e.target.value = ""; }} />
+
+              {/* —— or don't cite at all: OWN the claim, honestly labelled (self-assert) —— */}
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "10px 0 4px", borderTop: "1px solid var(--rule)", paddingTop: 8, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>⊢</span> Or stand behind it yourself</div>
+              <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", lineHeight: 1.5, marginBottom: 6 }}>No source — you own the claim, honestly labelled. It publishes as prose.</div>
+              <div style={{ display: "flex", gap: 5 }}>
+                {OWN_STANCES.map(([v, glyph, label, blurb]) => (
+                  <button key={v} onMouseDown={e => e.preventDefault()} onClick={() => markOwn(v)} title={blurb}
+                    style={{ flex: 1, border: "1.5px solid var(--rule)", background: "transparent", color: "var(--ink)", padding: "6px 4px", cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                    <span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>{glyph}</span>
+                    <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 11.5, whiteSpace: "nowrap" }}>{label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
           {menu === "void" && (() => {
@@ -2799,7 +2895,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
-      {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => setInterviewOpen(false)} />}
+      {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
@@ -3331,10 +3427,12 @@ function htmlToMarkdown(html) {
       lines.push("");
     }
     else if (tag === "figure") {
-      const cap = node.querySelector("figcaption:not(.cmp-credit)");
+      const cap = node.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc)");
       const capText = cap ? cap.textContent.trim() : "";
       const credEl = node.querySelector(".cmp-credit");
       const creditText = credEl ? credEl.textContent.trim() : "";
+      const descEl = node.querySelector(".cmp-desc");
+      const descText = descEl ? descEl.textContent.trim() : "";
       // an image slot that resolved an archive.org link carries it in `src` —
       // the published .md hotlinks the IA copy (archive.org is the media CDN);
       // local-only drops have no durable URL and stay out of the .md
@@ -3347,6 +3445,7 @@ function htmlToMarkdown(html) {
       const u = node.getAttribute("data-embed-url"); if (u) lines.push("<" + u + ">", "");
       if (capText) lines.push("*" + capText + "*", "");
       if (creditText) lines.push("*Credit: " + creditText.replace(/\n/g, " ") + "*", "");
+      if (descText) lines.push("*Alt: " + descText.replace(/\n/g, " ") + "*", "");
     }
     else { const t = inline(node).trim(); if (t) lines.push(t, ""); }
   });

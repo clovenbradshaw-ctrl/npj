@@ -451,6 +451,13 @@ a { color: inherit; }
 /* banner bleeds to the page border (kills the stray floating outline) */
 .md-preview figure.nr-banner { margin: 0 calc(-1 * var(--page-pad, 0px)) 26px; }
 .nr-page > figure.nr-banner:first-child { margin-top: calc(-1 * var(--page-pad-top)); }
+/* body prose is justified by default; per-block alignment from the toolbar's
+   align menu (incl. Select-all → Justify) sets an inline text-align that wins. */
+.nr-page p, .nr-page li { text-align: justify; }
+/* inline image figures run 15% wider than the text column, bleeding evenly into
+   the page margins. Embeds (video / audio / link cards) keep the text width, and
+   the full-bleed banner keeps its own bleed. */
+.nr-page figure.cmp-embed:has(image-slot) { width: 115%; margin-left: -7.5%; margin-right: -7.5%; }
 /* the dek — one subtitle line under the headline. The placeholder shows while
    it's empty (covering both a truly empty <p> and the <p><br></p> editors
    normalize it to). */
@@ -538,16 +545,23 @@ a { color: inherit; }
 .cmp-hr { border: 0; border-top: 2px solid var(--ink); width: 60px; margin: 26px 0; }
 .cmp-embed { margin: 18px 0; }
 .cmp-embed figcaption { font-size: 11px; color: var(--ink-soft); margin-top: 5px; }
-/* editable caption + photo credit lines under a figure. The credit takes a
-   markdown hyperlink ([label](url)) like a contributor bio; the placeholder is
-   shown via data-ph while the line is empty (or holds only a stray <br>). */
-.cmp-cap, .cmp-credit { outline: none; min-height: 1.2em; }
-.cmp-credit { color: var(--nr-muted, var(--ink-soft)); }
+/* editable caption + photo credit + description lines under a figure. The credit
+   takes a markdown hyperlink ([label](url)) like a contributor bio; the
+   description is the photo's alt text (screen readers + search), shown here only
+   so the author can write it — it never renders on the published page. The
+   placeholder is shown via data-ph while a line is empty (or holds a stray <br>). */
+.cmp-cap, .cmp-credit, .cmp-desc { outline: none; min-height: 1.2em; }
+.cmp-credit, .cmp-desc { color: var(--nr-muted, var(--ink-soft)); }
 .cmp-cap:empty::before, .cmp-cap:has(> br:only-child)::before,
-.cmp-credit:empty::before, .cmp-credit:has(> br:only-child)::before {
+.cmp-credit:empty::before, .cmp-credit:has(> br:only-child)::before,
+.cmp-desc:empty::before, .cmp-desc:has(> br:only-child)::before {
   content: attr(data-ph); color: var(--nr-muted, var(--ink-soft)); pointer-events: none; }
-.cmp-cap:focus, .cmp-credit:focus { box-shadow: inset 0 -1px 0 0 var(--yellow-deep); }
+.cmp-cap:focus, .cmp-credit:focus, .cmp-desc:focus { box-shadow: inset 0 -1px 0 0 var(--yellow-deep); }
 .cmp-credit a { text-decoration: underline; text-underline-offset: 2px; }
+/* the description line wears a small "alt" tag so it's never mistaken for a
+   second caption — it's metadata, not body copy. */
+.cmp-desc::after { content: "alt"; float: right; font-size: 8.5px; letter-spacing: .08em;
+  text-transform: uppercase; opacity: .55; margin-top: .15em; pointer-events: none; user-select: none; }
 .cmp-widget { border: 1.5px dashed var(--rule-strong); background: repeating-linear-gradient(135deg, transparent, transparent 9px, rgba(43,95,138,.06) 9px, rgba(43,95,138,.06) 10px), var(--card); padding: 14px 16px; }
 .cmp-widget-h { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .cmp-widget-h .np-mono { font-size: 12px; color: var(--data); }

@@ -130,6 +130,31 @@ test("HTML output is paste-ready: real tags, image figure, sup links and a Sourc
   assert.match(h, /<h2>Sources<\/h2>\n<ol>/);
 });
 
+test("a photo's description becomes the image alt text; caption stays the visible figcaption", () => {
+  const a = {
+    headline: "T",
+    image: { src: "https://web.archive.org/web/2026/hall.jpg", banner: true,
+             caption: "City hall", credit: "Jane Doe", description: "A domed limestone building under a clear sky" },
+    body: [{ type: "img", src: "https://web.archive.org/web/2026/chart.png",
+             caption: "The chart", description: "A bar chart rising left to right" }]
+  };
+  const h = NS.toHtml(a, opts);
+  // hero: alt is the description, the figcaption is the caption (+ credit)
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/web\/2026\/hall\.jpg" alt="A domed limestone building under a clear sky">/);
+  assert.match(h, /<figcaption>City hall — Credit: Jane Doe<\/figcaption>/);
+  // inline: same — alt off the description, caption visible
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/web\/2026\/chart\.png" alt="A bar chart rising left to right">/);
+  // markdown alt is the description too; the caption is the italic line
+  const m = NS.toMarkdown(a, opts);
+  assert.match(m, /!\[A bar chart rising left to right\]\(https:\/\/web\.archive\.org\/web\/2026\/chart\.png\)/);
+  assert.match(m, /^\*The chart\*$/m);
+});
+
+test("with no description, the image alt falls back to the caption", () => {
+  const h = NS.toHtml({ headline: "T", body: [{ type: "img", src: "https://web.archive.org/c.png", caption: "Only a caption" }] }, opts);
+  assert.match(h, /<img src="https:\/\/web\.archive\.org\/c\.png" alt="Only a caption">/);
+});
+
 test("HTML escapes angle brackets and ampersands in text", () => {
   const a = { headline: "A & B <tag>", body: [{ type: "p", tokens: ["x < y & z"] }] };
   const h = NS.toHtml(a, opts);
