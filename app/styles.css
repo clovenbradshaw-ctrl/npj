@@ -23,6 +23,7 @@
   --display: 'Anton', 'Arial Narrow', sans-serif;
   --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --quote: 'Spectral', Georgia, 'Times New Roman', serif;  /* pull-quotes: a light literary serif */
   --mono: 'Spline Sans Mono', ui-monospace, monospace;
   /* spacing measure */
   --measure: 64ch;
@@ -624,7 +625,7 @@ a { color: inherit; }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(127,216,166,.6); } 70% { box-shadow: 0 0 0 7px rgba(127,216,166,0); } 100% { box-shadow: 0 0 0 0 rgba(127,216,166,0); } }
 .cmp-body:empty::before, .cmp-body > p:only-child:empty::before { content: attr(data-ph); color: var(--ink-soft); font-style: italic; pointer-events: none; }
 .cmp-body h2 { font-family: var(--cond); font-weight: 700; font-size: 30px; line-height: 1.06; margin: 22px 0 6px; }
-.cmp-body blockquote { border-left: 4px solid var(--yellow-deep); margin: 18px 0; padding-left: 18px; font-family: var(--cond); font-weight: 500; font-size: 24px; line-height: 1.2; }
+.cmp-body blockquote { border-left: 3px solid var(--yellow-deep); margin: 22px 0; padding-left: 20px; font-family: var(--quote); font-weight: 300; font-size: 25px; line-height: 1.42; letter-spacing: -.01em; }
 .cmp-body p { margin: 0 0 14px; }
 .cmp-body a { text-decoration: underline; text-underline-offset: 2px; }
 .cmp-hr { border: 0; border-top: 2px solid var(--ink); width: 60px; margin: 26px 0; }
@@ -663,7 +664,7 @@ a { color: inherit; }
 .md-preview h2 { font-family: var(--cond); font-weight: 700; font-size: 23px; line-height: 1.08; margin: 22px 0 8px; }
 .md-preview h3 { font-family: var(--cond); font-weight: 700; font-size: 18px; margin: 18px 0 6px; }
 .md-preview p { margin: 0 0 13px; }
-.md-preview blockquote { border-left: 3px solid var(--yellow); margin: 16px 0; padding-left: 14px; font-family: var(--cond); font-weight: 500; font-size: 19px; line-height: 1.25; color: var(--nr-quote, #cfc8b6); }
+.md-preview blockquote { border-left: 3px solid var(--yellow); margin: 18px 0; padding-left: 18px; font-family: var(--quote); font-weight: 300; font-size: 21px; line-height: 1.45; color: var(--nr-quote, #cfc8b6); }
 .md-preview ul { margin: 0 0 13px; padding-left: 20px; }
 .md-preview li { margin: 0 0 5px; }
 .md-preview a { color: var(--nr-link, #9cc6e8); text-decoration: underline; text-underline-offset: 2px; }

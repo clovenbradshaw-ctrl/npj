@@ -800,8 +800,8 @@ function ArticleRead(props) {
           return <Tag key={i} id={artSlug(b.text)} style={{ fontFamily: "var(--display)", fontSize: b.type === "h2" ? 34 : 25, lineHeight: 1.04, margin: "32px 0 12px", scrollMarginTop: 90 }}>{b.text}</Tag>;
         }
         if (b.type === "pull") return (
-          <blockquote key={i} style={{ margin: "26px 0", paddingLeft: 20, borderLeft: "4px solid var(--yellow-deep)",
-            fontFamily: "var(--cond)", fontWeight: 500, fontSize: 27, lineHeight: 1.18 }}>
+          <blockquote key={i} style={{ margin: "30px 0", paddingLeft: 22, borderLeft: "3px solid var(--yellow-deep)",
+            fontFamily: "var(--quote)", fontWeight: 300, fontSize: 28, lineHeight: 1.42, letterSpacing: "-.01em" }}>
             {b.text}
             {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
             {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
