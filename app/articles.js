@@ -872,6 +872,14 @@
   //     redacted text plus a content-free audit stub (counts, not the offsets or
   //     identities behind them).
   //
+  //     EXCEPTION — a REDACTED PDF: when Citey built a real redacted copy (pages
+  //     rasterized with the boxes burned in, NpjSourceView.buildRedactedPdf, stored
+  //     as review.redactedFile), that copy carries nothing under its boxes to fetch
+  //     back. So instead of withholding the document, we SHIP the redacted copy:
+  //     file_url/mxc point at it, and only the pointers to the un-redacted ORIGINAL
+  //     (original_url / archive_url, and any original file_url) are dropped. The
+  //     reader shows the scrubbed document instead of "original withheld".
+  //
   // Every other source passes through unchanged. Non-mutating: an interview or
   // redacted projection is cloned, so the live working record (still openable in
   // the newsroom) is never altered.
@@ -885,10 +893,19 @@
     if (redactions.length) {
       const o = Object.assign({}, rec);
       if (W.NpjPII && W.NpjPII.redactText) o.text = W.NpjPII.redactText(o.text || "", redactions);
-      o.file_url = ""; o.mxc = ""; o.original_url = ""; o.archive_url = "";
-      o.redacted = true;
+      const rf = review && review.redactedFile;
+      if (rf && rf.url) {
+        // the produced redacted copy IS the document that ships — its bytes are
+        // already scrubbed, so it's safe to keep a live pointer to it
+        o.file_url = rf.url; o.mxc = rf.mxc || "";
+        o.original_url = ""; o.archive_url = "";   // …but never to the un-redacted original
+        o.redacted = true; o.redactedPdf = true;
+      } else {
+        o.file_url = ""; o.mxc = ""; o.original_url = ""; o.archive_url = "";
+        o.redacted = true;
+      }
       o.piiReview = { state: review.state || "reviewed", basis: review.basis || (W.NpjPII && W.NpjPII.BASIS) || "",
-        redactions: redactions.length, affirmations: ((review.affirmations) || []).length };
+        redactions: redactions.length, affirmations: ((review.affirmations) || []).length, redactedPdf: !!(rf && rf.url) };
       return o;
     }
     return rec;

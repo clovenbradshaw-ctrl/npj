@@ -59,6 +59,17 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
   const [showKept, setShowKept] = useState(false);
   const [, bump] = useState(0);
   const bodyRef = useRef(null);
+  const SVk = window.NpjSourceView;
+  const kind = (SVk && rec) ? SVk.kindOf(rec) : "unknown";
+  const isPdf = kind === "pdf";
+  // PDF layout (text + per-run geometry) so a text redaction can be burned onto
+  // the page as a box, and a box drawn on the page can scrub the words under it.
+  const [layout, setLayout] = useState(null);
+  // redaction boxes (normalized {page,x,y,w,h}) that will be burned into the
+  // archived PDF — re-hydrated from the record so deferring + reopening keeps them.
+  const [pdfBoxes, setPdfBoxes] = useState(() => (((rec && rec.piiReview && rec.piiReview.pdfBoxes) || []).slice()));
+  const [docLoad, setDocLoad] = useState(null);    // {state:'reading'|'fail', err?} while a binary's text/layout is read
+  const [building, setBuilding] = useState(null);  // {state:'building'|'done'|'nostore'|'fail', done, total, err}
 
   // OCR (or another async seed) can fill rec.text AFTER this modal opened on a
   // binary upload — e.g. a screenshot whose text is still being read. Sync it in
@@ -70,12 +81,44 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
     if (live && !text.trim()) setText(live);
   }, [rec && rec.text]); // eslint-disable-line
 
+  // PROCESS a binary source so Citey can actually scan it (and, for a PDF, redact
+  // ON it): pull a PDF's text + layout, OCR an image, or decode a text file. This
+  // is the fix that stops a PDF/scan from falling straight to "paste it yourself"
+  // — the browser can read it, so it should. Does the work once per open.
+  useEffect(() => {
+    if (!rec || !SVk) return;
+    let alive = true;
+    if (isPdf && SVk.extractPdfLayout) {
+      setDocLoad({ state: "reading" });
+      SVk.extractPdfLayout(rec).then(lay => {
+        if (!alive) return;
+        setLayout(lay);
+        if (lay && lay.text && !String(rec.text || "").trim()) { rec.text = lay.text; setText(lay.text); }
+        setDocLoad(null);
+      }).catch(e => { if (alive) setDocLoad({ state: "fail", err: (e && e.message) || "Couldn't read the PDF." }); });
+    } else if (!String(rec.text || "").trim() && SVk.ensureText && (kind === "image" || kind === "text") && !(kind === "image" && rec.ocrOff)) {
+      setDocLoad({ state: "reading" });
+      SVk.ensureText(rec).then(t => {
+        if (!alive) return;
+        if (t && t.trim()) { rec.text = t; if (kind === "image") rec.binary = false; setText(t); }
+        setDocLoad(null);
+      }).catch(() => { if (alive) setDocLoad(null); });
+    }
+    return () => { alive = false; };
+  }, [srcKey]); // eslint-disable-line
+
   if (!rec || !PII) return null;
 
   // Ensure the review envelope exists the moment Citey opens on a source.
   if (!rec.piiReview) rec.piiReview = { state: "pending", basis: PII.BASIS, scannedAt: rxNowIso(), redactions: [], affirmations: [] };
 
-  const opaque = rxIsOpaque(rec) && !text.trim();
+  const reading = !!(docLoad && docLoad.state === "reading");
+  const pdfReady = isPdf && !!layout && !!window.PdfRedactView;     // can render + redact on the page
+  const pdfFailed = isPdf && !!(docLoad && docLoad.state === "fail");
+  // "opaque" = nothing to scan AND nothing to render → the paste-or-affirm fallback.
+  // A PDF we could open is never opaque: even a scan (no text layer) gets the page
+  // redactor. Only a PDF we genuinely couldn't read falls back here.
+  const opaque = pdfFailed || (!isPdf && rxIsOpaque(rec) && !text.trim());
 
   // PENDING = every live finding not already kept-on-purpose. Recomputed from the
   // (possibly redacted/edited) text each render — a hard redaction is █, so it
@@ -90,15 +133,41 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
   // ---- the mutators: every one writes through to the live source record ----
   function persistReview() { setText(String(rec.text || "")); bump(v => v + 1); }
 
+  // Add boxes to the set burned into the archived PDF (deduped, written through).
+  function pushBoxes(newBoxes) {
+    if (!isPdf || !newBoxes || !newBoxes.length || !SVk) return;
+    const merged = (SVk.dedupeBoxes ? SVk.dedupeBoxes((rec.piiReview.pdfBoxes || []).concat(newBoxes)) : (rec.piiReview.pdfBoxes || []).concat(newBoxes));
+    rec.piiReview.pdfBoxes = merged;
+    setPdfBoxes(merged);
+  }
   function redactRange(start, end, type, basis) {
     if (!(end > start)) return;
     rec.text = PII.redactText(rec.text, [{ start, end }]);
     rec.piiReview.redactions.push({ type: type || "MANUAL", basis: basis || (PII.BASIS + ":manual"), start, end, length: end - start, at: rxNowIso(), by: rxMe() });
+    // a PDF text redaction also burns a black box over the run on the page
+    if (layout && SVk && SVk.rangesToBoxes) pushBoxes(SVk.rangesToBoxes(layout.items, [{ start, end }]));
     rec.piiReview.state = "pending";  // a fresh redaction re-opens the affirmation, by design
     setSel(null);
     persistReview();
   }
   function redactFinding(f) { redactRange(f.start, f.end, f.type, f.basis); }
+  // A box drawn on the page: burn it AND scrub the words under it out of the text
+  // shadow (so the gate, the count and the published text agree with the picture).
+  // A box over a picture/signature with no text under it logs as a content-free
+  // area redaction. Hard + permanent, like the rest of the review.
+  function redactBox(box) {
+    if (!box || !isPdf) return;
+    pushBoxes([box]);
+    let ranges = (layout && SVk && SVk.boxesToRanges) ? SVk.boxesToRanges(layout.items, [box]) : [];
+    if (ranges.length) {
+      rec.text = PII.redactText(rec.text, ranges);
+      ranges.forEach(r => rec.piiReview.redactions.push({ type: "AREA", basis: PII.BASIS + ":area", start: r.start, end: r.end, length: r.end - r.start, at: rxNowIso(), by: rxMe() }));
+    } else {
+      rec.piiReview.redactions.push({ type: "AREA", basis: PII.BASIS + ":area", area: true, at: rxNowIso(), by: rxMe() });
+    }
+    rec.piiReview.state = "pending";
+    persistReview();
+  }
   function keepFinding(f) {
     rec.piiReview.affirmations.push({ type: f.type, basis: f.basis, start: f.start, end: f.end, at: rxNowIso(), by: rxMe() });
     setKept(ks => [...ks, { start: f.start, end: f.end, type: f.type }]);
@@ -107,6 +176,7 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
     const hi = pending.filter(f => PII.band(f.score) === "high").sort((a, b) => b.start - a.start);
     if (!hi.length) return;
     hi.forEach(f => { rec.text = PII.redactText(rec.text, [{ start: f.start, end: f.end }]); rec.piiReview.redactions.push({ type: f.type, basis: f.basis, start: f.start, end: f.end, length: f.end - f.start, at: rxNowIso(), by: rxMe() }); });
+    if (layout && SVk && SVk.rangesToBoxes) pushBoxes(SVk.rangesToBoxes(layout.items, hi.map(f => ({ start: f.start, end: f.end }))));
     persistReview();
   }
   function keepAll() {
@@ -142,6 +212,41 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
   function affirmOpaque() {            // opaque file: no text to scan, human vouches
     rec.piiReview.opaqueAffirmed = true;
     markReviewed();
+  }
+
+  // Build the REDACTED PDF (boxes burned into rasterized pages) and store it on the
+  // record, so it ships to archive.org IN PLACE OF the un-redacted original. Best-
+  // effort: if it can't be built or durably stored (signed out / offline), we say
+  // so and fall back to withholding the original (publishableSource handles both).
+  async function buildRedactedArtifact() {
+    if (!SVk || !SVk.buildRedactedPdf) return false;
+    try {
+      setBuilding({ state: "building", done: 0, total: (layout && layout.pageCount) || 1 });
+      const blob = await SVk.buildRedactedPdf(rec, pdfBoxes, { onProgress: (d, t) => setBuilding({ state: "building", done: d, total: t }) });
+      const name = String(rec.filename || rec.title || "document").replace(/\.pdf$/i, "") + "-redacted.pdf";
+      let up = null;
+      const M = window.NpjMedia;
+      if (M && M.canUpload && M.canUpload()) {
+        const file = (typeof File !== "undefined") ? new File([blob], name, { type: "application/pdf" }) : blob;
+        try { up = await M.upload(file, name); } catch (e) { up = null; }
+      }
+      if (up && up.url) {
+        rec.piiReview.redactedFile = { url: up.url, mxc: up.mxc || "", name, at: rxNowIso(), by: rxMe(), boxes: pdfBoxes.length };
+        setBuilding({ state: "done" });
+        return true;
+      }
+      rec.piiReview.redactedFile = null;   // couldn't store it durably → withhold the original
+      setBuilding({ state: "nostore" });
+      return false;
+    } catch (e) {
+      rec.piiReview.redactedFile = null;
+      setBuilding({ state: "fail", err: (e && e.message) || "Couldn't build the redacted PDF." });
+      return false;
+    }
+  }
+  async function buildAndFinish() {
+    const ok = await buildRedactedArtifact();
+    if (ok) markReviewed();    // on failure, the footer shows Retry / Finish-anyway
   }
 
   // ---- drag-select in the rendered body → offsets into `text` (SourcePicker idiom) ----
@@ -218,12 +323,20 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
                 style={{ width: "100%", resize: "vertical", border: "1.5px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 10px", outline: "none", boxSizing: "border-box" }} />
               <button className="btn btn-sm btn-primary" onClick={seedText} disabled={!paste.trim()} style={{ marginTop: 8, opacity: paste.trim() ? 1 : .5 }}>Scan pasted text</button>
             </div>
+          ) : reading ? (
+            /* ---- processing a PDF / scan / text file so Citey can read it ---- */
+            <div className="np-mono" style={{ padding: "34px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>
+              <span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite", verticalAlign: "-2px", marginRight: 6 }} />
+              {isPdf ? "reading the document…" : "reading the file…"}
+            </div>
           ) : (
             <React.Fragment>
               {/* Citey's line + summary */}
               <div style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 10 }}>
                 <div style={{ fontFamily: "var(--serif)", fontSize: 14, lineHeight: 1.5, color: "var(--ink)", flex: 1 }}>
-                  {cleared ? (rec.piiReview.redactions.length || kept.length ? "all flagged spans handled. read it once more, then mark it reviewed." : RX_SAY.clean) : RX_SAY.some(pending.length)}
+                  {cleared
+                    ? (rec.piiReview.redactions.length || kept.length ? "all flagged spans handled. read it once more, then mark it reviewed." : (isPdf && !text.trim() ? "No text layer (a scan). Draw a box over anything that should be hidden, then mark it reviewed." : RX_SAY.clean))
+                    : RX_SAY.some(pending.length)}
                 </div>
               </div>
 
@@ -235,16 +348,26 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
                 </div>
               )}
 
-              {/* the document — drag-select to redact anything Citey missed */}
-              {!editing && (
+              {/* PDF: redact ON the real page — draw boxes that burn into the archived copy */}
+              {isPdf && pdfReady && (
+                <window.PdfRedactView rec={rec} boxes={pdfBoxes} onRedactBox={redactBox} height={300} />
+              )}
+              {isPdf && !pdfReady && (
+                <div className="np-mono" style={{ border: "1px solid var(--rule)", background: "var(--paper)", color: "var(--ink-soft)", padding: "12px 14px", fontSize: 11.5, lineHeight: 1.5 }}>
+                  Couldn’t render this PDF in the browser, so it can’t be redacted on the page here. Redact any flagged spans below, or open it to check it.
+                </div>
+              )}
+
+              {/* the document — drag-select to redact anything Citey missed (non-PDF) */}
+              {!isPdf && !editing && (
                 <div ref={bodyRef} onMouseUp={onBodyMouseUp} className="np-scroll"
                   style={{ maxHeight: 230, overflowY: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: "1px solid var(--rule)", padding: "10px 12px", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.6, userSelect: "text", cursor: "text" }}>
                   {text.trim() ? renderBody() : <span style={{ color: "var(--ink-soft)", fontStyle: "italic" }}>No text on record. Use “Edit document” to add it, or paste a passage.</span>}
                 </div>
               )}
 
-              {/* broad free-edit */}
-              {editing && (
+              {/* broad free-edit (non-PDF: editing PDF text would desync the page boxes) */}
+              {!isPdf && editing && (
                 <div>
                   <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 4 }}>Edit the document freely. Saving re-scans for PII; redactions you’ve already applied stay applied.</div>
                   <textarea value={draft} onChange={(e) => setDraft(e.target.value)} rows={12}
@@ -271,10 +394,10 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
                   {pending.some(f => PII.band(f.score) === "high") && <button className="btn btn-sm" onClick={redactAllHigh} style={{ borderColor: "var(--reject)", color: "var(--reject)" }}>■ Redact all high-confidence</button>}
                   <button className="btn btn-sm" onClick={keepAll}>Keep all public</button>
                   <span style={{ flex: 1 }} />
-                  <button className="btn btn-sm btn-ghost" onClick={openEdit}>✎ Edit document</button>
+                  {!isPdf && <button className="btn btn-sm btn-ghost" onClick={openEdit}>✎ Edit document</button>}
                 </div>
               )}
-              {!editing && pending.length === 0 && (
+              {!editing && !isPdf && pending.length === 0 && (
                 <div style={{ display: "flex", gap: 8, margin: "12px 0 6px" }}>
                   <span style={{ flex: 1 }} />
                   <button className="btn btn-sm btn-ghost" onClick={openEdit}>✎ Edit document</button>
@@ -316,6 +439,27 @@ function CiteyRedactModal({ srcKey, onClose, onDone }) {
             <React.Fragment>
               <button className="btn btn-sm" onClick={onClose}>Later</button>
               <button className="btn btn-sm btn-primary" onClick={affirmOpaque} title="Vouch that you’ve checked this file and it carries no PII">I’ve checked it — no PII</button>
+            </React.Fragment>
+          ) : building && building.state === "building" ? (
+            <button className="btn btn-sm btn-primary" disabled style={{ opacity: .7, cursor: "wait" }}>
+              Building redacted PDF… {building.total ? building.done + "/" + building.total : ""}
+            </button>
+          ) : building && (building.state === "fail" || building.state === "nostore") ? (
+            <React.Fragment>
+              <span className="np-mono" style={{ fontSize: 9.5, color: "var(--reject)", flex: 1, minWidth: 0, lineHeight: 1.35 }}>
+                {building.state === "fail"
+                  ? ((building.err || "Couldn't build the redacted PDF.") + " You can retry, or finish — the original is withheld and only scrubbed text is archived.")
+                  : "Sign in to store the redacted PDF. Finish now and the original is withheld; only scrubbed text is archived."}
+              </span>
+              <button className="btn btn-sm" onClick={buildAndFinish}>Retry</button>
+              <button className="btn btn-sm btn-primary" onClick={markReviewed} title="Finish — the un-redacted original is withheld from the archive">Finish anyway</button>
+            </React.Fragment>
+          ) : isPdf && pdfBoxes.length ? (
+            <React.Fragment>
+              <button className="btn btn-sm" onClick={onClose} title="Defer — you can review before you archive">Later</button>
+              <button className="btn btn-sm btn-primary" onClick={buildAndFinish} disabled={!cleared} title={cleared ? "Burn the redactions into a PDF and clear the gate" : "Redact or keep every flagged span first"} style={{ opacity: cleared ? 1 : .5, cursor: cleared ? "pointer" : "not-allowed" }}>
+                {cleared ? "✓ Build redacted PDF & finish" : pending.length + " left to decide"}
+              </button>
             </React.Fragment>
           ) : (
             <React.Fragment>

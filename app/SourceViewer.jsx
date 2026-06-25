@@ -190,6 +190,15 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     </div>
   ) : null;
 
+  // A source that shipped as a REDACTED copy (a PDF with the boxes burned in) is
+  // the real document, scrubbed — say so, so the black bars read as deliberate
+  // withholding, not a rendering glitch.
+  const redactedNote = rec.redacted ? (
+    <div className="np-mono" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--review)", border: "1px solid color-mix(in srgb, var(--review) 40%, transparent)", background: "color-mix(in srgb, var(--review) 10%, transparent)", padding: "6px 9px", marginBottom: 6, lineHeight: 1.4 }}>
+      <I.shield style={{ fontSize: 14, flex: "0 0 auto" }} /> Redacted copy — the blacked-out spans were destroyed before archiving; the un-redacted original is withheld.
+    </div>
+  ) : null;
+
   // no bytes on record (e.g. a web source with no upload, or a pre-upload
   // draft) — though a text source we already read words out of still renders
   const textOnly = kind === "text" && String(rec.text || "").trim();
@@ -222,6 +231,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
   if (kind === "pdf" && window.PdfView) {
     return (
       <div>
+        {redactedNote}
         <window.PdfView rec={rec} height={H} onSelectText={onSelectText} />
         {url && linkRow}
       </div>
@@ -258,6 +268,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     if (!url) return <div className="np-mono" style={{ padding: "26px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 11.5 }}><Spin /> loading the document…</div>;
     return (
       <div>
+        {redactedNote}
         <iframe src={url} title={rec.title || "PDF source"} style={{ width: "100%", height: H, border: frameless ? 0 : "1px solid var(--rule)", background: "var(--paper)" }} />
         {linkRow}
       </div>
