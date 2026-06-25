@@ -738,6 +738,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // (Chromium); skips already-upgraded nodes, so it never re-runs a live slot.
   const upgradeCustomEls = () => { try { const r = ed.current; if (r && window.customElements && customElements.upgrade) customElements.upgrade(r); } catch (e) {} };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
+  // Select the whole draft body so an alignment (or any block command) applies to
+  // every paragraph at once — the "select all, then justify the lot" path. We seed
+  // selRange too, so the toolbar's exec()/restore() re-applies this full range
+  // instead of collapsing back to the last caret.
+  const selectAllBody = () => {
+    const root = ed.current; if (!root) return;
+    root.focus();
+    const r = document.createRange(); r.selectNodeContents(root);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+    selRange.current = r.cloneRange();
+  };
   const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   // Block-level components (image, embed, verse, poll) can't be nested inside the
   // banner, headline or dek — put the caret in the body, then step past any such
@@ -2203,8 +2214,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <div style={{ position: "relative", display: "inline-block" }}>
           <TB onClick={() => setFmtMenu(fmtMenu === "align" ? null : "align")} title="Alignment"><I.alignLeft /> <I.caretDown style={{ fontSize: 9 }} /></TB>
           {fmtMenu === "align" && (
-            <div style={{ ...popStyle, width: 150 }}>
-              {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"]].map(([cmd, label]) => (
+            <div style={{ ...popStyle, width: 168 }}>
+              {/* select the whole draft first, then pick an alignment to set it across
+                  the entire document at once — the menu stays open after Select all */}
+              <button onMouseDown={e => e.preventDefault()} onClick={selectAllBody} style={popItem}>Select all text</button>
+              {[["justifyLeft", "Align left"], ["justifyCenter", "Center"], ["justifyRight", "Align right"], ["justifyFull", "Justify"]].map(([cmd, label]) => (
                 <button key={cmd} onMouseDown={e => e.preventDefault()} onClick={() => { exec(cmd); setFmtMenu(null); }} style={popItem}>{label}</button>
               ))}
             </div>

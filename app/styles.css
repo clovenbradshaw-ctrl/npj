@@ -451,6 +451,13 @@ a { color: inherit; }
 /* banner bleeds to the page border (kills the stray floating outline) */
 .md-preview figure.nr-banner { margin: 0 calc(-1 * var(--page-pad, 0px)) 26px; }
 .nr-page > figure.nr-banner:first-child { margin-top: calc(-1 * var(--page-pad-top)); }
+/* body prose is justified by default; per-block alignment from the toolbar's
+   align menu (incl. Select-all → Justify) sets an inline text-align that wins. */
+.nr-page p, .nr-page li { text-align: justify; }
+/* inline image figures run 15% wider than the text column, bleeding evenly into
+   the page margins. Embeds (video / audio / link cards) keep the text width, and
+   the full-bleed banner keeps its own bleed. */
+.nr-page figure.cmp-embed:has(image-slot) { width: 115%; margin-left: -7.5%; margin-right: -7.5%; }
 /* the dek — one subtitle line under the headline. The placeholder shows while
    it's empty (covering both a truly empty <p> and the <p><br></p> editors
    normalize it to). */
