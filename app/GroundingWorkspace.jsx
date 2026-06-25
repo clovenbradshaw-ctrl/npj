@@ -38,7 +38,7 @@ function pillFor(st) {
   if (st.key === "multi") return { glyph: "⊨", label: st.nSrc + " sources", fg: "#3a63c4", bg: "#e8eefb" };
   if (st.key === "grounded") return { glyph: "⊤", label: "Grounded", fg: "#1f8a55", bg: "#e7f4ec" };
   if (st.key === "owned" && st.stance === "context") return { glyph: "⊪", label: "In context", fg: "#1f7d78", bg: "#e6f4f3" };
-  if (st.key === "owned" && st.stance === "absence") return { glyph: "∅", label: "A documented void", fg: "#8a6a1f", bg: "#f3ecda" };
+  if (st.key === "owned" && st.stance === "absence") { const VK = window.NpjVoidKinds; const vk = VK ? VK.norm(st.vkind) : null; return { glyph: vk ? VK.glyph(vk) : "∅", label: vk ? VK.label(vk) + " void" : "A documented void", fg: "#8a6a1f", bg: "#f3ecda" }; }
   if (st.key === "owned") return { glyph: STANCE_GLYPH[st.stance] || "⊩", label: STANCE_LABEL[st.stance] || "Your voice", fg: "#6b5bd6", bg: "#efeafc" };
   return { glyph: "⊥", label: "Needs source", fg: "#b5701b", bg: "#fbf1e3" };
 }
@@ -48,12 +48,12 @@ function pillFor(st) {
 function statusOf(row) {
   const Brain = window.CiteyBrain;
   const spans = row.claimSpans || [];
-  let stance = null, conflict = false, needs = false; const keys = {}; const ctx = {};
+  let stance = null, conflict = false, needs = false, vkind = null; const keys = {}; const ctx = {};
   spans.forEach(s => {
     (window.NpjCitations ? window.NpjCitations.contextKeys(s) : []).forEach(k => { ctx[k] = 1; });
     let v = { state: "falsum" };
     try { v = Brain.citeyStateForSpan({ el: s }); } catch (e) {}
-    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context" || v.state === "absence") stance = s.getAttribute("data-stance") || "analysis";
+    if (v.state === "asserted" || v.state === "testimony" || v.state === "voice" || v.state === "context" || v.state === "absence") { stance = s.getAttribute("data-stance") || "analysis"; if (v.state === "absence") vkind = s.getAttribute("data-void-kind") || vkind; }
     else if (v.state === "verum" || v.state === "entails") String(v.srcKey || s.getAttribute("data-src") || "").split(/\s+/).filter(Boolean).forEach(k => { keys[k] = 1; });
     else if (v.state === "negation") conflict = true;
     else needs = true;
@@ -62,7 +62,7 @@ function statusOf(row) {
   const context = Object.keys(ctx);
   let out;
   if (conflict) out = { key: "conflict", spans };
-  else if (stance && !n && !needs) out = { key: "owned", stance, spans };
+  else if (stance && !n && !needs) out = { key: "owned", stance, spans, vkind };
   else if (n && !needs) out = { key: n > 1 ? "multi" : "grounded", nSrc: n, spans };
   else out = { key: "needs", spans };
   out.context = context;
@@ -325,15 +325,16 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     afterResolve(row.sid); bump();
   };
   const detach = (span, citeId) => { api.detach(span, citeId); bump(); };
-  const setStance = (row, st, stance, note) => {
+  const setStance = (row, st, stance, note, kind) => {
     if (!stance) { (st.spans || []).filter(s => s.getAttribute("data-stance")).forEach(s => api.unown(s)); }
-    else { api.own(row, stance, note); afterResolve(row.sid); }
+    else { api.own(row, stance, note, kind); afterResolve(row.sid); }
     bump();
   };
 
   // ---- the cite modal: the claim + the document, hero ----
   const [citeMode, setCiteMode] = useState("source"); // source | own | void — the three ways to ground a claim
-  const [voidNote, setVoidNote] = useState("");        // the documented search behind an asserted absence
+  const [voidNote, setVoidNote] = useState("");        // the documented search/evidence behind an asserted absence
+  const [voidKind, setVoidKind] = useState("");        // which of the six kinds of void (see app/void-kinds.js)
   const [reuseOpen, setReuseOpen] = useState(false);   // the "reuse a pinned quote" drawer (collapsed by default)
   const srcText = (key) => String((api.sourceRec(key) || {}).text || "");
   const openCite = (sid, srcKey) => {
@@ -351,7 +352,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     }
     setModal({ sid }); setSelSid(sid);
     if (best) setSelSrc(best);
-    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery(""); setCiteMode("source"); setReuseOpen(false); setVoidNote("");
+    setPending(null); setArmIdx(0); setSrcQuery(""); setSrcFindIdx(0); setBrowseQuery(""); setCiteMode("source"); setReuseOpen(false); setVoidNote(""); setVoidKind("");
   };
   const closeCite = () => { setModal(null); setPending(null); setArmIdx(0); setBrowseQuery(""); };
 
@@ -983,6 +984,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <span style={{ color: "#b5701b", fontWeight: 700 }}>⊥ Needs source</span> — nothing pinned yet; blocks the gate &nbsp;·&nbsp;
         <span style={{ color: "#6b5bd6", fontWeight: 700 }}>⊩ Yours</span> — argued, witnessed, or inferred; honestly labelled &nbsp;·&nbsp;
         <span style={{ color: CONTEXT_TEAL, fontWeight: 700 }}>⊪ In context</span> — continuing coverage: the article proves it, set against prior reporting &nbsp;·&nbsp;
+        <span style={{ color: "#8a6a1f", fontWeight: 700 }}>∅ A void</span> — an asserted absence, in one of six kinds (removed, withheld, silent, inaccessible, unrecorded, ambient) by how hard it is to stand behind &nbsp;·&nbsp;
         <span style={{ color: "#b3261e", fontWeight: 700 }}>¬ Sources disagree</span> — two pinned quotes conflict; unlink one
       </div>
     </section>
@@ -1164,14 +1166,18 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const proseShade = (key, stance) => {
     if (key === "conflict") return { background: "rgba(216,65,44,.16)", borderBottom: "1.5px solid #D8412C" };
     if (key === "owned" && stance === "context") return { background: "rgba(46,139,134,.14)", borderBottom: "1.5px solid " + CONTEXT_TEAL };
+    if (key === "owned" && stance === "absence") return { background: "rgba(77,126,168,.14)", borderBottom: "1.5px solid #4D7EA8" };
     if (key === "owned") return { background: "rgba(124,116,222,.14)", borderBottom: "1.5px solid #7C74DE" };
     if (key === "needs") return { background: "rgba(216,99,46,.15)", borderBottom: "1.5px dashed #D8632E" };
     return { background: "rgba(255,236,1,.13)", borderBottom: "1.5px solid #d8c520" };
   };
   const proseSup = (st) => {
     const map = { conflict: ["¬", "#b3261e"], needs: ["⚑", "#b5701b"], grounded: ["⊤", "#9a8500"], multi: ["⊨", "#9a8500"] };
+    const VK = window.NpjVoidKinds;
     const pair = st.key === "owned"
-      ? (st.stance === "context" ? ["⊪", CONTEXT_TEAL] : [STANCE_GLYPH[st.stance] || "⊩", "#6b5bd6"])
+      ? (st.stance === "context" ? ["⊪", CONTEXT_TEAL]
+         : st.stance === "absence" ? [(VK && VK.norm(st.vkind) ? VK.glyph(st.vkind) : "∅"), "#8a6a1f"]
+         : [STANCE_GLYPH[st.stance] || "⊩", "#6b5bd6"])
       : map[st.key];
     const ctxMark = (st.context && st.context.length && !(st.key === "owned" && st.stance === "context"))
       ? <sup title="set in context of prior coverage" style={{ fontFamily: "var(--mono)", fontSize: 8.5, color: CONTEXT_TEAL, marginLeft: 1, lineHeight: 0, opacity: .8 }}>⊪</sup>
@@ -1471,23 +1477,53 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
             ))}
           </React.Fragment>)}
 
-          {citeMode === "void" && (<React.Fragment>
+          {citeMode === "void" && (() => {
+            const VK = window.NpjVoidKinds;
+            const k = VK ? VK.norm(voidKind) : null;
+            const def = k && VK ? VK.get(k) : null;
+            const ready = !!voidNote.trim() || k === "ambient";
+            return (<React.Fragment>
             <div style={{ display: "flex", gap: 11, alignItems: "flex-start", marginBottom: 12 }}>
               <span style={{ fontFamily: "var(--mono)", fontSize: 30, color: "#8a6a1f", lineHeight: 1, flex: "0 0 auto" }}>∅</span>
               <div className="np-mono" style={{ fontSize: 11, color: NR.soft, lineHeight: 1.6 }}>
-                Some claims rest on an <strong style={{ color: NR.text }}>absence</strong> — “no permit was ever filed,” “the city never responded,” “it appears nowhere else.” There’s no source to pin, so instead you <strong style={{ color: NR.text }}>document the search</strong>: where you looked, and that it came up empty. That note publishes with the claim as its grounding.
+                Some claims rest on an <strong style={{ color: NR.text }}>absence</strong> — something that isn’t in the record. There’s no source to pin, so you ground it by saying which <strong style={{ color: NR.text }}>kind</strong> of void it is and documenting it. The kind tells a reader whether you’re showing an absence or inferring one — it publishes with the claim.
               </div>
             </div>
-            <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Where did you look, and what wasn’t there?</div>
-            <textarea value={voidNote} onChange={e => setVoidNote(e.target.value)} autoFocus
-              placeholder="e.g. Searched Metro public records, the Banner and the Tennessean (2024–2026) — found no permit, filing or notice for the removal."
-              style={{ width: "100%", boxSizing: "border-box", minHeight: 96, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
-            <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 5 }}>Be specific — naming where you searched is what makes a documented absence trustworthy. It reads in the published piece; the words of the claim stay exactly as written.</div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
-              <button onClick={() => { const n = voidNote.trim(); if (!n) return; setStance(armedRow, statusOf(armedRow), "absence", n); closeCite(); }} disabled={!voidNote.trim()} className="np-cond"
-                style={{ border: "1.5px solid var(--ink)", background: voidNote.trim() ? "var(--yellow)" : "transparent", color: voidNote.trim() ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: voidNote.trim() ? "pointer" : "not-allowed", opacity: voidNote.trim() ? 1 : .55 }}>∅ Cite this void</button>
-            </div>
-          </React.Fragment>)}
+            {VK ? (<React.Fragment>
+              {VK.GROUPS.map(g => (
+                <div key={g.key} style={{ marginBottom: 9 }}>
+                  <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>{g.verb} <span style={{ fontWeight: 400, textTransform: "none", letterSpacing: 0, color: NR.muted }}>· {g.gloss}</span></div>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {VK.kindsIn(g.key).map(kk => { const on = k === kk; const d = VK.get(kk); return (
+                      <button key={kk} onClick={() => setVoidKind(kk)} title={d.blurb} className="np-cond"
+                        style={{ border: "1.5px solid " + (on ? "var(--ink)" : NR.line), background: on ? "var(--yellow)" : NR.field, color: on ? "var(--ink)" : NR.text, padding: "6px 11px", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>{d.glyph}</span> {d.label}</button>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+              {def && (<React.Fragment>
+                <div className="np-mono" style={{ fontSize: 11, color: NR.soft, lineHeight: 1.6, margin: "10px 0 6px", borderTop: "1px solid " + NR.line, paddingTop: 10 }}>{def.blurb}</div>
+                <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>{def.prompt}</div>
+                <textarea value={voidNote} onChange={e => setVoidNote(e.target.value)} autoFocus placeholder={def.prompt}
+                  style={{ width: "100%", boxSizing: "border-box", minHeight: 88, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
+                <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, lineHeight: 1.5, marginTop: 5 }}>{k === "ambient" ? "Ambient is context, not a finding — optional, and the faintest void in the lens." : "Be specific — what you document is what makes the absence trustworthy. It reads in the published piece; the words of the claim stay exactly as written."}</div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                  <button onClick={() => { if (!ready) return; setStance(armedRow, statusOf(armedRow), "absence", voidNote.trim(), k); closeCite(); }} disabled={!ready} className="np-cond"
+                    style={{ border: "1.5px solid var(--ink)", background: ready ? "var(--yellow)" : "transparent", color: ready ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: ready ? "pointer" : "not-allowed", opacity: ready ? 1 : .55 }}>{def.glyph} Cite this void</button>
+                </div>
+              </React.Fragment>)}
+            </React.Fragment>) : (<React.Fragment>
+              <div style={Object.assign({}, eyebrow, { marginBottom: 5 })}>Where did you look, and what wasn’t there?</div>
+              <textarea value={voidNote} onChange={e => setVoidNote(e.target.value)} autoFocus
+                style={{ width: "100%", boxSizing: "border-box", minHeight: 96, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.5, padding: "9px 11px", outline: "none", resize: "vertical" }} />
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                <button onClick={() => { const n = voidNote.trim(); if (!n) return; setStance(armedRow, statusOf(armedRow), "absence", n); closeCite(); }} disabled={!voidNote.trim()} className="np-cond"
+                  style={{ border: "1.5px solid var(--ink)", background: voidNote.trim() ? "var(--yellow)" : "transparent", color: voidNote.trim() ? "var(--ink)" : NR.muted, padding: "7px 15px", fontSize: 13, fontWeight: 700, cursor: voidNote.trim() ? "pointer" : "not-allowed", opacity: voidNote.trim() ? 1 : .55 }}>∅ Cite this void</button>
+              </div>
+            </React.Fragment>)}
+            </React.Fragment>);
+          })()}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderTop: "1px solid " + NR.line }}>
           <span className="np-mono" style={{ flex: 1, fontSize: 9.5, color: NR.muted, lineHeight: 1.4 }}>

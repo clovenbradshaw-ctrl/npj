@@ -96,6 +96,13 @@
     // by a documented search that found nothing (its `note` records what/where).
     return (s === "analysis" || s === "testimony" || s === "voice" || s === "absence") ? s : null;
   }
+  // The six kinds of void (an asserted absence), strongest → weakest. Kept in
+  // sync with app/void-kinds.js (the shared taxonomy the editor + reader use);
+  // duplicated here so the publish fold validates a kind without depending on the
+  // browser-only module. A void carries WHICH kind it is so the reader knows
+  // whether the absence is shown, located, or only inferred.
+  const VOID_KINDS = ["removed", "withheld", "silent", "inaccessible", "unrecorded", "ambient"];
+  function vkindNorm(k) { k = String(k || "").trim().toLowerCase(); return VOID_KINDS.indexOf(k) >= 0 ? k : null; }
   function plainText(body) {
     if (!Array.isArray(body)) return "";
     return body.map(b => {
@@ -556,6 +563,10 @@
               // grounding, so it rides the published token like a quote would.
               const aNote = (c.getAttribute("data-note") || "").trim();
               if (aNote) owned.note = aNote;
+              // a void also carries WHICH kind of absence it is (removed / withheld /
+              // silent / inaccessible / unrecorded / ambient) — that's what tells the
+              // reader whether the absence is shown, located, or only inferred.
+              if (stance === "absence") { const vk = vkindNorm(c.getAttribute("data-void-kind")); if (vk) owned.vkind = vk; }
               toks.push(owned);
               return;
             }
@@ -765,7 +776,7 @@
         // surface and the reader's transparency lens keep it; a sourced claim
         // keeps its data-src + quotes exactly as before.
         if (t.stance && (!t.src || !t.src.length))
-          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '"' + (t.note ? ' data-note="' + esc(t.note) + '"' : '') + ' data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
+          return '<span class="eo-claim" data-stance="' + esc(t.stance) + '"' + (t.note ? ' data-note="' + esc(t.note) + '"' : '') + (t.vkind && vkindNorm(t.vkind) ? ' data-void-kind="' + esc(t.vkind) + '"' : '') + ' data-id="' + esc(t.id || "") + '">' + esc(t.c) + "</span>";
         return '<span class="eo-claim" data-src="' + esc((t.src || []).join(" ")) + '" data-id="' + esc(t.id || "") + '"' + (t.q && Object.keys(t.q).length ? ' data-quotes="' + esc(JSON.stringify(t.q)) + '"' : "") + ">" + esc(t.c) + "</span>";
       }
       if (t.t === "br") return "<br/>";
