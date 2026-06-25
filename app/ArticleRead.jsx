@@ -357,6 +357,11 @@ function ArticleRead(props) {
   const leaveTimer = useRef(null);
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
+  // the Sources footer is a section too — list it at the foot of Contents so a
+  // reader can jump straight to the receipts (#article-sources anchors the footer).
+  const tocItems = sourceList.length
+    ? [...headings, { id: "article-sources", text: "Sources", level: 2 }]
+    : headings;
   // scrollIntoView walks to the element's actual scroll container — the window
   // in the live read, but the fixed overlay in Preview — so it moves the page
   // the reader is looking at, not whatever's behind it. The headings carry
@@ -678,15 +683,25 @@ function ArticleRead(props) {
   });
 
   // Images run wider than the text column — a 15% even bleed into the margins on
-  // either side, the same treatment the Newsroom canvas previews (styles.css
-  // `.nr-page figure.cmp-embed`) — so a photo carries more presence than the
-  // prose measure and the published page matches what the editor saw. Held to the
-  // column on a phone (no room to bleed) and in audit mode (the source rails claim
-  // those margins). Embeds (video / link cards) keep the text width.
+  // either side — so a photo carries more presence than the prose measure. This is
+  // a READER treatment only: the prose editor keeps images at the column width
+  // (styles.css drops the old `.nr-page` bleed). Held to the column on a phone (no
+  // room to bleed) and in audit mode (the source rails claim those margins).
+  // Embeds (video / link cards) keep the text width.
   const wideMedia = !audit && !isPhone;
   const wideFig = (top, bottom) => wideMedia
     ? { marginTop: top, marginBottom: bottom, marginLeft: "-7.5%", marginRight: "-7.5%", width: "115%" }
     : { marginTop: top, marginBottom: bottom };
+  // The topmost image is the WIDEST — a bigger bleed than the inline 15%, centered
+  // on the column (margin-left 50% + translateX) and clamped between the inline
+  // width and a viewport-bounded max, so it always reads widest yet never spills
+  // past the screen edge. With a banner that's the hero (lifted above); without one
+  // it's the first inline image (topInlineImgIdx).
+  const heroFig = (top, bottom) => wideMedia
+    ? { marginTop: top, marginBottom: bottom, width: "min(132%, max(115%, calc(100vw - 24px)))", marginLeft: "50%", transform: "translateX(-50%)" }
+    : { marginTop: top, marginBottom: bottom };
+  const hasHero = !!((A.image && A.image.src && A.image.banner) || (A.body || []).some(b => b.type === "img" && b.banner));
+  const topInlineImgIdx = hasHero ? -1 : (A.body || []).findIndex(b => b.type === "img");
 
   const Body = (
     <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
@@ -700,13 +715,14 @@ function ArticleRead(props) {
           <blockquote key={i} style={{ margin: "26px 0", paddingLeft: 20, borderLeft: "4px solid var(--yellow-deep)",
             fontFamily: "var(--cond)", fontWeight: 500, fontSize: 27, lineHeight: 1.18 }}>
             {b.text}
+            {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
             {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
           </blockquote>
         );
         if (b.type === "img") {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (
-            <figure key={i} style={wideFig(26, 26)}>
+            <figure key={i} style={(!b.banner && i === topInlineImgIdx) ? heroFig(26, 26) : wideFig(26, 26)}>
               <ZoomImg image={b} alt={b.description || b.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
               {b.local ? <NotUploadedNote /> : null}
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
@@ -776,7 +792,7 @@ function ArticleRead(props) {
     ? A.image
     : ((A.body || []).find(b => b.type === "img" && b.banner) || null);
   const Hero = (heroImg && heroImg.src) ? (
-    <figure style={wideFig(4, 24)}>
+    <figure style={heroFig(4, 24)}>
       <ZoomImg image={heroImg} alt={heroImg.description || heroImg.caption || A.headline || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
       {heroImg.local ? <NotUploadedNote /> : null}
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
@@ -810,11 +826,11 @@ function ArticleRead(props) {
               background: "none", border: 0, cursor: "pointer", padding: "12px 14px" }}>
             <span aria-hidden="true" style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)" }}>{tocOpen ? "▾" : "▸"}</span>
             <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Contents</span>
-            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{headings.length}</span>
+            <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{tocItems.length}</span>
           </button>
           {tocOpen && (
             <div id="article-toc-list" style={{ display: "flex", flexDirection: "column", gap: 4, padding: "0 14px 12px" }}>
-              {headings.map(h => <button key={h.id} onClick={() => { jump(h.id); setTocOpen(false); }} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
+              {tocItems.map(h => <button key={h.id} onClick={() => { jump(h.id); setTocOpen(false); }} className="headline-link" style={{ textAlign: "left", background: "none", border: 0, cursor: "pointer", fontFamily: "var(--cond)", fontWeight: h.level === 2 ? 600 : 500, fontSize: h.level === 2 ? 16 : 14, paddingLeft: (h.level - 2) * 14, color: "var(--ink)" }}>{h.text}</button>)}
             </div>
           )}
         </nav>
@@ -1176,7 +1192,7 @@ function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {
   const summary = cats.map(k => counts[k] + " " + CAT_LABEL[k].toLowerCase()).join(" · ");
 
   return (
-    <footer style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18 }}>
+    <footer id="article-sources" style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18, scrollMarginTop: 90 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>SOURCES</h3>
         <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{total} · {summary}</span>

@@ -24,7 +24,7 @@
   // ---- The lead article — null until something is published.
   //      Shape, for reference: { slug, kicker, headline, dek, byline, authors[],
   //      published, base_sha, readMins, body[] } where each body block is
-  //      { type:'p', tokens:[ "text" | {c,src[],id} ] } or { type:'pull', text, attribution }.
+  //      { type:'p', tokens:[ "text" | {c,src[],id} ] } or { type:'pull', text, attribution, marks?:[sup] }.
   const ARTICLE = null;
 
   // ---- Suggestions (EVA deposits against claims) — empty until readers act.

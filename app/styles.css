@@ -539,10 +539,10 @@ a { color: inherit; }
 /* body prose is justified by default; per-block alignment from the toolbar's
    align menu (incl. Select-all → Justify) sets an inline text-align that wins. */
 .nr-page p, .nr-page li { text-align: justify; }
-/* inline image figures run 15% wider than the text column, bleeding evenly into
-   the page margins. Embeds (video / audio / link cards) keep the text width, and
-   the full-bleed banner keeps its own bleed. */
-.nr-page figure.cmp-embed:has(image-slot) { width: 115%; margin-left: -7.5%; margin-right: -7.5%; }
+/* The prose editor keeps inline images at the text-column width — a calm WYSIWYG
+   measure to write against. The wider-than-column bleed is a reader treatment
+   (ArticleRead's wideFig/heroFig), applied in the published article and its
+   Preview, not while editing. The full-bleed banner keeps its own bleed (above). */
 /* the dek — one subtitle line under the headline. The placeholder shows while
    it's empty (covering both a truly empty <p> and the <p><br></p> editors
    normalize it to). */
