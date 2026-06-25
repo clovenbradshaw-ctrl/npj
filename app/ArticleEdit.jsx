@@ -57,6 +57,13 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     (banner ? "Banner — drop a photo or an archive.org link" : "Drop a photo or an archive.org link") +
     '" style="width:100%;height:' + (banner ? 300 : 260) + 'px;display:block"></image-slot>' +
     figCaps + '</figure><p><br/></p>';
+  // WebKit doesn't upgrade custom elements inserted through execCommand /
+  // insertAdjacentHTML: a freshly-inserted <image-slot> never runs its
+  // connectedCallback, so its drag/drop + paste listeners stay unbound and a
+  // photo dropped onto it does nothing until a reload re-parses the HTML. Force
+  // the upgrade so the slot is live at once (no-op where the engine already
+  // upgrades, and skips already-upgraded nodes).
+  const upgradeSlots = () => { try { const r = bodyRef.current; if (r && window.customElements && customElements.upgrade) customElements.upgrade(r); } catch (e) {} };
   // Insert an inline image at the caret. When focus was last in the Headline /
   // Subtitle field (or nowhere), the body has no live caret and execCommand would
   // drop the figure at offset 0, above the existing copy — so fall back to the end
@@ -69,8 +76,9 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     root.focus();
     if (!inBody && s) { const r = document.createRange(); r.selectNodeContents(root); r.collapse(false); s.removeAllRanges(); s.addRange(r); }
     document.execCommand("insertHTML", false, imageFigure("eo-img-" + Date.now().toString(36), false));
+    upgradeSlots();
   };
-  const addBanner = () => { if (bodyRef.current) bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); };
+  const addBanner = () => { if (bodyRef.current) { bodyRef.current.insertAdjacentHTML("afterbegin", imageFigure("eo-banner-" + Date.now().toString(36), true)); upgradeSlots(); } };
 
   // ---- sourcing: bind the selected words to a (new) source, like the newsroom ----
   const bindSourceUrl = () => {

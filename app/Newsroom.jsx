@@ -521,6 +521,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const dropPlan = useRef(null);     // { refEl|null, indicator } recomputed on each dragover
   const gripRaf = useRef(0);
   const [grip, setGrip] = useState(null);      // { top, left, isHeading, block } — the hover handle
+  const [gripHover, setGripHover] = useState(false); // pointer is over the grip → reveal its delete button
   const [dropAt, setDropAt] = useState(null);  // { top, left, width } — the insertion line
   const [dragging, setDragging] = useState(false);
 
@@ -649,6 +650,35 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     endBlockDrag();
   };
 
+  // ---- delete a block from the grip ----------------------------------------
+  // The only way to remove a non-editable figure (image / embed): the caret
+  // can't enter a contenteditable=false block to backspace it away. Works for
+  // any movable block the grip offers. A removed heading drops its section
+  // annotation on the next reconcile (its prose stays put — I3, structure-dom
+  // test). Lead nodes (banner / title / dek) are never offered a grip; guard
+  // anyway so this can't strand the headline or subtitle.
+  const blockDelLabel = (block) => {
+    if (!block) return "Delete this block";
+    if (block.tagName === "FIGURE")
+      return block.querySelector("image-slot") ? "Delete this image"
+        : (block.getAttribute("data-embed-url") ? "Delete this embed" : "Delete this block");
+    if (isHeadingBlock(block)) return "Delete this heading";
+    return "Delete this block";
+  };
+  const deleteBlock = (block) => {
+    const root = ed.current;
+    if (!block || !root || !root.contains(block) || isLeadBlock(block)) return;
+    const wasHeading = isHeadingBlock(block);
+    try { block.remove(); } catch (x) { return; }
+    // never leave the body with no editable line for the caret to land in
+    if (!root.querySelector("p, h1, h2, h3, li, blockquote, figcaption")) {
+      const p = document.createElement("p"); p.appendChild(document.createElement("br")); root.appendChild(p);
+    }
+    setGrip(null); setGripHover(false);
+    if (wasHeading) { try { reconcileStructure(); } catch (x) {} } // drop the section now, not on the debounce
+    scanHeadings(); scheduleSave();
+  };
+
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
     if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); return; }
@@ -694,13 +724,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!r) { r = document.createRange(); r.selectNodeContents(root); r.collapse(false); }
     s.removeAllRanges(); s.addRange(r);
   };
+  // WebKit doesn't upgrade custom elements inserted through
+  // execCommand("insertHTML"): a freshly-dropped-in <image-slot> never runs its
+  // connectedCallback, so the slot's drag/drop + paste listeners never attach —
+  // dropping a photo onto it does nothing until a reload re-parses the HTML
+  // ("had to refresh before the photo drop zone worked"). Force the upgrade so
+  // an inserted slot is live at once. No-op where the engine already upgrades
+  // (Chromium); skips already-upgraded nodes, so it never re-runs a live slot.
+  const upgradeCustomEls = () => { try { const r = ed.current; if (r && window.customElements && customElements.upgrade) customElements.upgrade(r); } catch (e) {} };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   // Block-level components (image, embed, verse, poll) can't be nested inside the
   // banner, headline or dek — put the caret in the body, then step past any such
   // block, so the new block always lands in the prose flow rather than splitting a
   // heading or vanishing into the non-editable banner figure.
-  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); upgradeCustomEls(); scanHeadings(); scheduleSave(); };
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
@@ -2247,11 +2285,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
           {!isMobile && grip && (
-            <div className={"nr-grip" + (dragging ? "" : " show")} draggable
-              onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
-              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } }}
-              title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}
-              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>⠿</div>
+            <div className="nr-grip-group"
+              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } setGripHover(true); }}
+              onMouseLeave={() => setGripHover(false)}
+              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>
+              <div className={"nr-grip" + (dragging ? "" : " show")} draggable
+                onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
+                title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}>⠿</div>
+              {gripHover && !dragging && (
+                <button type="button" className="nr-grip-del"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => deleteBlock(grip.block)}
+                  title={blockDelLabel(grip.block)} aria-label={blockDelLabel(grip.block)}>
+                  <I.trash style={{ fontSize: 13 }} />
+                </button>
+              )}
+            </div>
           )}
           {!isMobile && dropAt && (
             <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
