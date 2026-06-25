@@ -168,6 +168,14 @@ a { color: inherit; }
 .ground-lens .gowned[data-ground="own-analysis"],
 .ground-lens .gowned[data-ground="own-account"],
 .ground-lens .gowned[data-ground="own-position"] { background: rgba(124,116,222,.18); border-bottom: 1.5px solid #7C74DE; }
+/* a void (asserted absence) — a blue family, shaded by how the absence stands:
+   shown (point to it) reads solid + strong; located is dashed; inferred (the
+   weakest — unrecorded / ambient) is dotted + faint. So the lens shows at a
+   glance whether the reader is being shown an absence or told to infer one. */
+.ground-lens .gowned[data-ground="absence"] { background: rgba(77,126,168,.14); border-bottom: 1.5px solid #4D7EA8; }
+.ground-lens .gowned[data-ground="absence"][data-void="shown"] { background: rgba(47,102,144,.18); border-bottom: 1.5px solid #2F6690; }
+.ground-lens .gowned[data-ground="absence"][data-void="located"] { background: rgba(77,126,168,.14); border-bottom: 1.5px dashed #4D7EA8; }
+.ground-lens .gowned[data-ground="absence"][data-void="inferred"] { background: rgba(122,147,168,.11); border-bottom: 1.5px dotted #7A93A8; }
 /* needs a source — orange, dashed */
 .ground-lens .claim[data-ground="needs"] { background: rgba(216,99,46,.18); border-bottom: 1.5px dashed #D8632E; }
 /* sources disagree — red */

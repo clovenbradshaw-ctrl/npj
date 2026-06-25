@@ -1060,7 +1060,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [linkUrl, setLinkUrl] = useState("");
   const [fmtMenu, setFmtMenu] = useState(null); // 'color' | 'align' | 'embed' | 'more'
   const [embedUrl, setEmbedUrl] = useState("");
-  const [voidSearch, setVoidSearch] = useState(""); // the documented search behind a prose "cite a void"
+  const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
+  const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
   useEffect(() => {
     const onUp = (e) => {
       if (e && e.target && e.target.closest && e.target.closest(".sel-tb")) return;
@@ -1374,21 +1375,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     window.__npjGround = {
       focused: () => window.__citey && window.__citey.focused ? window.__citey.focused() : null,
       pin: (el) => { if (!el) return; const cid = el.getAttribute("data-cid"); if (!cid) return; openPin(cid, el.getAttribute("data-src") || el.getAttribute("data-cite"), (el.textContent || "").trim()); },
-      own: (el, stance, note) => {
+      own: (el, stance, note, kind) => {
         if (!el) return; const cid = el.getAttribute("data-cid");
         if (cid && ed.current) ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]').forEach(s => s.remove());
         el.removeAttribute("data-src"); el.removeAttribute("data-cid"); el.removeAttribute("data-quote");
         el.classList.remove("needs-quote");
         const norm = stance === "testimony" ? "testimony" : stance === "voice" ? "voice" : stance === "context" ? "context" : stance === "absence" ? "absence" : "analysis";
         el.setAttribute("data-stance", norm);
-        // an asserted absence records the documented search it rests on (what the
-        // author looked through, found nothing) on the span, so it publishes + reads
-        if (norm === "absence") { if (note != null) el.setAttribute("data-note", String(note)); else el.removeAttribute("data-note"); }
-        else el.removeAttribute("data-note");
+        // an asserted absence (a "void") records the documented search/evidence it
+        // rests on AND which of the six kinds it is — removed / withheld / silent /
+        // inaccessible / unrecorded / ambient — so the reader knows whether the
+        // absence is shown, located, or only inferred (see app/void-kinds.js).
+        const VK = window.NpjVoidKinds;
+        const vk = norm === "absence" && VK ? VK.norm(kind) : null;
+        if (norm === "absence") {
+          if (note != null) el.setAttribute("data-note", String(note)); else el.removeAttribute("data-note");
+          if (vk) el.setAttribute("data-void-kind", vk); else el.removeAttribute("data-void-kind");
+        } else { el.removeAttribute("data-note"); el.removeAttribute("data-void-kind"); }
         el.setAttribute("title", norm === "context"
           ? "Continuing coverage — the article substantiates this, set against prior reporting"
           : norm === "absence"
-            ? "Asserted absence — a documented search did not find this" + (note ? ". Searched: " + note : "")
+            ? ((vk && VK ? VK.label(vk) + " void (you can " + ({ shown: "point to it", located: "locate it", inferred: "only assert it" }[VK.reader(vk)]) + ")" : "A documented void — an asserted absence") + (note ? " — " + note : ""))
             : "Owned by the author — " + ({ analysis: "their analysis", testimony: "their account", voice: "their stated position" }[norm]));
         setRev(v => v + 1); scheduleSave(); renumberCites();
       },
@@ -1428,16 +1435,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return span;
   };
   // Cite a VOID straight from the prose: wrap the highlighted words in a claim
-  // span (or reuse the one they sit in) and OWN it as an asserted absence — the
-  // claim is grounded not by a source but by the documented search in `note`.
-  const markVoid = (note) => {
-    const n = String(note || "").trim(); if (!n) return;
-    const r = spanRange(); if (!r) { setSel(null); setMenu(null); return; }
+  // span (or reuse the one they sit in) and OWN it as an asserted absence of a
+  // given KIND — grounded not by a source but by the documented search/evidence
+  // in `note`. Every kind but `ambient` (the unwritten normal) must say where it
+  // looked; ambient is context, so its note is optional.
+  const markVoid = (kind, note) => {
+    const k = window.NpjVoidKinds ? window.NpjVoidKinds.norm(kind) : null; if (!k) return;
+    const n = String(note || "").trim();
+    if (!n && k !== "ambient") return;
+    const r = spanRange(); if (!r) { setSel(null); setMenu(null); setVoidKind(""); return; }
     const span = claimHostOf(r) || wrapPlainClaim(r);
-    if (window.__npjGround && window.__npjGround.own) window.__npjGround.own(span, "absence", n);
+    if (window.__npjGround && window.__npjGround.own) window.__npjGround.own(span, "absence", n, k);
     if (window.__citey) { if (window.__citey.evaluateSpan) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     window.getSelection().removeAllRanges(); selRange.current = null;
-    setSel(null); setMenu(null); setVoidSearch(""); setRev(v => v + 1); scheduleSave(); renumberCites();
+    setSel(null); setMenu(null); setVoidSearch(""); setVoidKind(""); setRev(v => v + 1); scheduleSave(); renumberCites();
   };
   // The claim span a table row acts on: reuse an existing one inside the sentence
   // (sub-sentence safe — never nest), else wrap the whole sentence.
@@ -1483,9 +1494,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     },
     // re-open the picker for an already-bound span
     repin: (span) => { if (span) openPin(span.getAttribute("data-cid"), (span.getAttribute("data-src") || "").split(/\s+/)[0], (span.textContent || "").trim()); },
-    own: (row, stance, note) => {
+    own: (row, stance, note, kind) => {
       const span = rowSpanFor(row, null, true); if (!span) return;
-      window.__npjGround.own(span, stance, note);
+      window.__npjGround.own(span, stance, note, kind);
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     },
     unown: (span) => { window.__npjGround.unown(span); if (window.__citey && window.__citey.refreshGate) window.__citey.refreshGate(); },
@@ -2366,21 +2377,42 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && bindNewUrl()} placeholder="or paste a URL…" className="np-mono" style={{ width: "100%", marginTop: 8, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
             </div>
           )}
-          {menu === "void" && (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 300, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10 }}>
-              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>∅</span> Cite a void</div>
-              <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.55, marginBottom: 8 }}>
-                For a claim that rests on an <b style={{ color: "var(--ink)" }}>absence</b> — “no record exists,” “the city never responded,” “it appears nowhere else.” There’s nothing to link, so document the search instead: where you looked, and that it came up empty. It publishes with the claim.
-              </div>
-              <textarea autoFocus value={voidSearch} onChange={e => setVoidSearch(e.target.value)} onMouseDown={e => e.stopPropagation()}
-                placeholder="Where you looked, and found nothing — e.g. Searched Metro records, the Banner & the Tennessean (2024–2026); no permit or filing."
-                style={{ width: "100%", boxSizing: "border-box", minHeight: 72, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12.5, lineHeight: 1.5, outline: "none", resize: "vertical", fontFamily: "var(--serif)" }} />
-              <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
-                <button className="btn btn-sm btn-ghost" onMouseDown={e => e.preventDefault()} onClick={() => setMenu(null)}>Cancel</button>
-                <button className="btn btn-sm btn-primary" onMouseDown={e => e.preventDefault()} disabled={!voidSearch.trim()} onClick={() => markVoid(voidSearch)} style={{ opacity: voidSearch.trim() ? 1 : .55 }}>∅ Cite this void</button>
-              </div>
+          {menu === "void" && (() => {
+            const VK = window.NpjVoidKinds; if (!VK) return null;
+            const k = VK.norm(voidKind); const def = k ? VK.get(k) : null;
+            const ready = !!voidSearch.trim() || k === "ambient";
+            return (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 322, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10, maxHeight: 392, overflowY: "auto" }} className="np-scroll">
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>∅</span> Cite a void — which kind?</div>
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, marginBottom: 8 }}>The claim rests on something that <b style={{ color: "var(--ink)" }}>isn’t there</b>. Pick how hard the absence is to stand behind — the reader sees which.</div>
+              {VK.GROUPS.map(g => (
+                <div key={g.key} style={{ marginBottom: 7 }}>
+                  <div className="np-mono" style={{ fontSize: 8.5, textTransform: "uppercase", letterSpacing: ".07em", color: "var(--ink-soft)", marginBottom: 3 }}>{g.verb} <span style={{ opacity: .7, textTransform: "none", letterSpacing: 0 }}>· {g.gloss}</span></div>
+                  <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+                    {VK.kindsIn(g.key).map(kk => { const on = k === kk; const d = VK.get(kk); return (
+                      <button key={kk} onMouseDown={e => e.preventDefault()} onClick={() => setVoidKind(kk)} title={d.blurb}
+                        style={{ border: "1.5px solid " + (on ? "var(--ink)" : "var(--rule)"), background: on ? "var(--yellow)" : "transparent", color: "var(--ink)", padding: "4px 9px", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontFamily: "var(--mono)", fontSize: 11 }}>{d.glyph}</span> {d.label}</button>
+                    ); })}
+                  </div>
+                </div>
+              ))}
+              {def && (
+                <React.Fragment>
+                  <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", lineHeight: 1.55, margin: "8px 0 6px", borderTop: "1px solid var(--rule)", paddingTop: 8 }}>{def.blurb}</div>
+                  <textarea autoFocus value={voidSearch} onChange={e => setVoidSearch(e.target.value)} onMouseDown={e => e.stopPropagation()}
+                    placeholder={def.prompt}
+                    style={{ width: "100%", boxSizing: "border-box", minHeight: 62, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12.5, lineHeight: 1.5, outline: "none", resize: "vertical", fontFamily: "var(--serif)" }} />
+                  {k === "ambient" && <div className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", marginTop: 4 }}>Ambient is context, not a finding — optional, and it reads as the faintest void.</div>}
+                  <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                    <button className="btn btn-sm btn-ghost" onMouseDown={e => e.preventDefault()} onClick={() => { setMenu(null); setVoidKind(""); }}>Cancel</button>
+                    <button className="btn btn-sm btn-primary" onMouseDown={e => e.preventDefault()} disabled={!ready} onClick={() => markVoid(k, voidSearch)} style={{ opacity: ready ? 1 : .55 }}>{def.glyph} Cite this void</button>
+                  </div>
+                </React.Fragment>
+              )}
             </div>
-          )}
+            );
+          })()}
         </div>
       )}
 
