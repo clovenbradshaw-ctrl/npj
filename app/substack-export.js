@@ -118,11 +118,22 @@
   // toMarkdown on the same article).
   function mergeStrandedFootnotes(blocks) {
     const src = Array.isArray(blocks) ? blocks : [];
+    // Keys already carried by a marker that sits AGAINST TEXT — a real reference.
+    // A manual footnote key is unique per insertion (Newsroom insertFootnote), so a
+    // stranded marker repeating one is an editing artifact (an Enter/paste/drag
+    // cloned a trailing marker), not a second reference: DROP it rather than fold it
+    // onto the text above, which would footnote that sentence with someone else's note.
+    const attached = new Set();
+    src.forEach(b => { if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); }); });
+    // keep a stranded marker only while its key is still fresh; claiming the key as
+    // we go means two strays of one key fold just once, never twice.
+    const fresh = (t) => { if (!isFnMarker(t)) return false; if (t.key && attached.has(t.key)) return false; if (t.key) attached.add(t.key); return true; };
     const out = [];
     let carry = [];   // markers with no paragraph above them yet — attach to the next one
     src.forEach(b => {
       if (b && b.type === "p" && onlyFnMarkers(b.tokens)) {
-        const markers = b.tokens.filter(isFnMarker);
+        const markers = b.tokens.filter(fresh);
+        if (!markers.length) return;   // every marker here duplicates a real reference → drop the stranded paragraph
         const prev = out[out.length - 1];
         if (prev && prev.type === "p") out[out.length - 1] = Object.assign({}, prev, { tokens: (prev.tokens || []).concat(markers) });
         else carry = carry.concat(markers);

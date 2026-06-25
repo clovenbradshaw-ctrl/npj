@@ -251,6 +251,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           // skips spans that already carry data-cite-id), so legacy drafts gain
           // reusable citations the first time they're opened, with no data loss.
           if (window.NpjCitations) window.NpjCitations.migrateRoot(ed.current);
+          // a draft saved with a footnote marker stranded on its own line (an
+          // Enter/paste/drag cloned a trailing marker) shows a stray number until
+          // it's touched — fold/drop it now so the page opens clean, then renumber.
+          if (destrandFootnotes()) renumberFootnotes();
           // hydrate the explicit Subtitle field from the restored .nr-dek node
           const dekEl0 = ed.current.querySelector(".nr-dek");
           if (dekEl0) setDek((dekEl0.textContent || "").trim());
@@ -1242,6 +1246,51 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         list.appendChild(li);   // appendChild moves an existing <li> into marker order
       });
     }
+  };
+  // Footnote hygiene in the LIVE editor — the DOM mirror of articles.js
+  // mergeStrandedFootnotes. A footnote marker references a WORD, so a marker left
+  // alone in its block (an Enter/paste/drag can clone a trailing contenteditable=
+  // false <sup> onto a fresh line) renders as a lone number. Fold a fresh marker
+  // onto the end of the previous text block so its note is never orphaned; DROP one
+  // whose key already rides a text-attached marker — every manual footnote key is
+  // unique per insertion (insertFootnote), so that is an accidental clone, not a
+  // second reference. Caret-safe: only contenteditable=false markers move, and the
+  // blank block a strand leaves behind is removed only when the caret isn't in it.
+  const destrandFootnotes = () => {
+    const root = ed.current; if (!root) return false;
+    const BLOCK = "p,li,h1,h2,h3,blockquote,figcaption";
+    const isMark = (n) => !!n && n.nodeType === 1 && n.tagName === "SUP" && n.classList.contains("md-cite") && n.hasAttribute("data-fn");
+    // a block's reading text with footnote markers (which carry only a number)
+    // excluded — so a block holding nothing but markers reads as empty
+    const prose = (el) => {
+      let t = "";
+      el.childNodes.forEach(n => { if (n.nodeType === 3) t += n.nodeValue || ""; else if (n.nodeType === 1 && !isMark(n)) t += n.textContent || ""; });
+      return t.replace(/[\s ]+/g, "");
+    };
+    const caretIn = (blk) => { try { const s = window.getSelection(); return !!(s && s.rangeCount && blk.contains(s.getRangeAt(0).commonAncestorContainer)); } catch (e) { return false; } };
+    const inNotes = (el) => !!(el && el.closest && el.closest("ol.nr-fnotes"));
+    const attached = new Set();   // keys carried by a marker that sits against text
+    root.querySelectorAll('sup.md-cite[data-fn][data-cite]').forEach(s => {
+      const blk = s.closest && s.closest(BLOCK);
+      if (blk && !inNotes(blk) && prose(blk)) { const k = (s.getAttribute('data-cite') || '').trim(); if (k) attached.add(k); }
+    });
+    let changed = false;
+    Array.from(root.querySelectorAll(BLOCK)).forEach(blk => {
+      if (inNotes(blk)) return;                                          // the notes list, not prose
+      const markers = Array.from(blk.childNodes).filter(isMark);
+      if (!markers.length || prose(blk)) return;                         // not a marker-only block
+      let prev = blk.previousElementSibling;                             // nearest text block above to fold onto
+      while (prev && ((prev.matches && prev.matches("ol.nr-fnotes,pre,figure")) || !(prev.textContent || "").replace(/[\s ]+/g, ""))) prev = prev.previousElementSibling;
+      markers.forEach(m => {
+        const k = (m.getAttribute('data-cite') || '').trim();
+        if (k && attached.has(k)) { m.remove(); changed = true; return; }      // duplicate of a real reference → drop
+        if (k) attached.add(k);
+        if (prev && root.contains(prev)) { prev.appendChild(m); changed = true; } // unique → fold onto the text above
+        // nothing above to fold onto → leave the marker where it is (don't orphan its note)
+      });
+      if (!prose(blk) && !blk.querySelector('img, sup.md-cite') && !caretIn(blk)) { blk.remove(); changed = true; } // the blank line the strand left
+    });
+    return changed;
   };
   // the span to bind: the live in-editor selection if there is one, else the
   // last one we saved — a collapsed caret is never a span
@@ -2330,7 +2379,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
