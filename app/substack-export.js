@@ -242,6 +242,10 @@
         out.push("");
         break;
       case "img": if (!b.banner) pushImageMd(out, b); break;       // banner is lifted to the hero
+      case "gallery":                                              // Substack has no carousel → a clean stack of photos
+        (b.images || []).forEach(im => pushImageMd(out, im));
+        if (b.caption) out.push("*" + cleanCaption(b.caption) + "*", "");
+        break;
       case "embed":
         if (b.url) { out.push(b.url, ""); if (b.caption) out.push("*" + cleanCaption(b.caption) + "*", ""); }
         break;                                                     // a bare URL on its own line → Substack auto-embeds
@@ -360,6 +364,11 @@
       case "code": return "<pre><code>" + esc(String(b.text || "").replace(/\n+$/, "")) + "</code></pre>";
       case "verse": return "<p><em>" + esc(String(b.text || "").replace(/\n+$/, "")).replace(/\n/g, "<br>") + "</em></p>";
       case "img": return b.banner ? "" : imgHtml(b);
+      case "gallery": {                                            // a stack of figures — Substack has no carousel
+        const imgs = (b.images || []).map(im => imgHtml(im)).filter(Boolean).join("");
+        if (!imgs) return "";
+        return imgs + (b.caption ? "<p><em>" + esc(cleanCaption(b.caption)) + "</em></p>" : "");
+      }
       case "embed": return b.url ? '<p><a href="' + esc(b.url) + '">' + esc(b.url) + "</a></p>" : "";
       default: {
         const inner = tokensToHtml(b.tokens, ctx);

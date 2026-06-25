@@ -53,6 +53,7 @@ const I = {
   listNumbers: phIcon("list-numbers"),
   divider: phIcon("minus"),
   image:   phIcon("image"),
+  images:  phIcon("images"),
   play:    phIcon("play-circle"),
   dots:    phIcon("dots-three-outline"),
   code:    phIcon("code"),
@@ -751,5 +752,134 @@ function MediaImg({ srcs, alt, style, fit, crop }) {
   return <img src={resolved} alt={alt || ""} loading="lazy" style={style} onError={onError} />;
 }
 
+// ── Fullscreen photo viewer (GLightbox) ───────────────────────────────────
+// Any published photo opens edge-to-edge and zoomable — which is how a WIDE
+// image is actually read: the inline figure shows the whole frame, and a click
+// blows it up to full resolution with pinch / scroll zoom. One library
+// (window.GLightbox, vendored) instead of a hand-rolled overlay.
+//
+// The href is the same public candidate the inline <img> resolves to — the
+// proxied archive.org copy first (loads even on a network that can't reach
+// archive.org directly), the direct archive.org URL next. A markdown credit
+// ([label](url)) is flattened to its label for the caption line.
+function lightboxHref(im) {
+  if (!im) return "";
+  const c = imageCandidates([im.src, im.store]);
+  return c[0] || im.src || im.store || "";
+}
+function lightboxCaption(im) {
+  if (!im) return "";
+  const credit = String(im.credit || "").replace(/\[([^\]]+)\]\(([^)]+)\)/g, "$1");
+  return [im.caption, credit && ("— " + credit)].filter(Boolean).join(" ");
+}
+function openLightbox(images, start) {
+  if (!window.GLightbox) return false;
+  const elements = (images || []).map((im) => ({
+    href: lightboxHref(im), type: "image",
+    alt: (im && (im.description || im.caption)) || "",
+    description: lightboxCaption(im) || undefined,
+  })).filter((e) => e.href);
+  if (!elements.length) return false;
+  const lb = window.GLightbox({
+    elements, startAt: Math.max(0, Math.min(start || 0, elements.length - 1)),
+    loop: elements.length > 1, touchNavigation: true, zoomable: true,
+    openEffect: "fade", closeEffect: "fade", moreLength: 0,
+  });
+  // GLightbox fires "close" as it tears down; destroy after the fade so each
+  // open doesn't leave a stale instance behind (the modal DOM is already gone).
+  lb.on("close", () => { setTimeout(() => { try { lb.destroy(); } catch (e) {} }, 350); });
+  lb.open();
+  return true;
+}
+
+// A single published photo that opens the fullscreen viewer on click/Enter.
+// Wraps MediaImg so the inline render (cover/contain/crop) is unchanged; only
+// the click-to-zoom affordance is added. Used by the reader's inline images and
+// the lifted hero — never the editor, where the live <image-slot> owns clicks.
+function ZoomImg({ image, alt, style }) {
+  if (!image) return null;
+  return (
+    <button type="button" className="npj-zoom" aria-label={(alt || image.caption || "Photo") + " — view full size"}
+      onClick={() => openLightbox([image], 0)}>
+      <MediaImg srcs={[image.store, image.src]} alt={alt} fit={image.fit} crop={image.crop} style={style} />
+    </button>
+  );
+}
+
+// ── In-article carousel (Splide) ──────────────────────────────────────────
+// A {type:'gallery'} block → a swipeable, keyboard-navigable carousel. Each
+// slide shows the WHOLE photo (object-fit: contain on a uniform stage, so a
+// wide panorama and a tall portrait both sit un-cropped) and opens the
+// fullscreen viewer on click. Splide owns arrows / dots / drag / touch.
+//
+// The Splide-managed subtree is isolated behind React.memo (keyed on the slide
+// srcs). ArticleRead re-renders on every hover/selection, and React must NOT
+// reconcile the DOM Splide owns — the cloned loop slides it never sees, the
+// is-active classes and drag transforms it toggles — or it would reset Splide's
+// state on each of those renders. So the track mounts once and React leaves it
+// be. Clicks are delegated on the root and read data-cidx off the (possibly
+// cloned) slide, so the right photo opens even from a loop clone.
+const CarouselTrack = React.memo(function CarouselTrack({ imgs }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const root = ref.current;
+    if (!root || imgs.length < 1) return;
+    // splide-core hides .splide until JS initialises it. If the library never
+    // loaded (script blocked), reveal the slides as a plain horizontal scroll
+    // instead of leaving an invisible block.
+    if (!window.Splide) { root.classList.add("npj-carousel--raw"); return; }
+    const multi = imgs.length > 1;
+    const sp = new window.Splide(root, {
+      type: multi ? "loop" : "fade", rewind: !multi, perPage: 1, perMove: 1,
+      arrows: multi, pagination: multi, drag: multi, keyboard: "focused",
+      speed: 450, slideFocus: true, label: "Image gallery",
+    });
+    sp.mount();
+    return () => { try { sp.destroy(true); } catch (e) {} };
+  }, []); // mount once — imgs is stable for this instance (the memo key below)
+  const onClick = (e) => {
+    const t = e.target.closest && e.target.closest("[data-cidx]");
+    if (!t) return;
+    e.preventDefault();
+    openLightbox(imgs, parseInt(t.getAttribute("data-cidx"), 10) || 0);
+  };
+  return (
+    <div className="splide npj-carousel" ref={ref} onClick={onClick}>
+      <div className="splide__track">
+        <ul className="splide__list">
+          {imgs.map((im, i) => {
+            const cap = lightboxCaption(im);
+            return (
+              <li className="splide__slide" key={i}>
+                <button type="button" className="npj-carousel-slide" data-cidx={i}
+                  aria-label={(im.description || im.caption || ("Image " + (i + 1))) + " — view full size"}>
+                  {/* plain contained <img> (no crop/fit routing) so every slide
+                      sits whole on a uniform stage — wide or tall, never cropped */}
+                  <MediaImg srcs={[im.store, im.src]} alt={im.description || im.caption || ""}
+                    style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+                </button>
+                {cap ? <figcaption className="npj-carousel-slidecap np-mono">{cap}</figcaption> : null}
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+      <div className="npj-carousel-count np-mono" aria-hidden="true">{imgs.length} photos</div>
+    </div>
+  );
+}, (a, b) => a.ckey === b.ckey);
+
+function Carousel({ images, caption, style }) {
+  const imgs = (images || []).filter((im) => im && (im.src || im.store));
+  if (!imgs.length) return null;
+  const ckey = imgs.map((im) => im.src || im.store).join("|");
+  return (
+    <figure className="npj-carousel-fig" style={style}>
+      <CarouselTrack imgs={imgs} ckey={ckey} />
+      {caption ? <figcaption className="npj-carousel-cap">{caption}</figcaption> : null}
+    </figure>
+  );
+}
+
 Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, SourceLightbox, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
-  MediaImg, CropFrame, imageCandidates });
+  MediaImg, CropFrame, imageCandidates, Carousel, ZoomImg, openLightbox });

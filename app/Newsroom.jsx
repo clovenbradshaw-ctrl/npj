@@ -35,6 +35,20 @@ const FIG_CAPS =
   '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
   '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>' +
   '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
+
+// One carousel slide: the SAME editable image-slot a single inline image uses
+// (so a drop still uploads to the media store and freezes to archive.org at
+// publish), plus the shared caption lines and a ✕ to drop the slide. The reader
+// renders the whole figure as a swipeable gallery (Splide) + fullscreen viewer;
+// blocksToHtml (app/articles.js) emits this very shape on re-edit.
+const CAROUSEL_SLIDE = (id) =>
+  '<div class="cmp-slide"><image-slot id="' + id + '" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:240px;display:block"></image-slot>' +
+  FIG_CAPS +
+  '<span class="cmp-slide-rm" contenteditable="false" role="button" title="Remove this image" aria-label="Remove this image">✕</span></div>';
+// contenteditable=false chips inside the (non-editable) figure — the caret never
+// lands on them; a delegated click handler in the editor runs add/remove.
+const CAROUSEL_ADD = '<span class="cmp-carousel-add np-mono" contenteditable="false" role="button">+ Add image</span>';
+const CAROUSEL_CAP = '<figcaption class="cmp-carousel-cap np-mono" contenteditable="true" data-ph="Gallery caption (optional)" style="font-size:11px;color:var(--nr-muted);margin-top:6px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
@@ -912,6 +926,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
   const imageFigure = (id) => `<figure contenteditable="false" class="cmp-embed"><image-slot id="${id}" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:280px;display:block"></image-slot>${FIG_CAPS}</figure><p><br/></p>`;
   const insertImage = () => insertBlock(imageFigure("img-" + Date.now()));
+  // A carousel starts with three drop targets; "+ Add image" appends more and a
+  // per-slide ✕ removes one (both via the delegated handler below). Empty slots
+  // are just drop targets — the publish fold (htmlToBlocks) keeps only filled
+  // ones, so an author can leave a spare slot without it shipping.
+  const carouselFigure = () => {
+    const base = "car-" + Date.now().toString(36);
+    const slides = [0, 1, 2].map((k) => CAROUSEL_SLIDE(base + "-" + k)).join("");
+    return '<figure contenteditable="false" class="cmp-embed cmp-carousel" data-carousel="1"><div class="cmp-carousel-track">' + slides + '</div>' + CAROUSEL_ADD + CAROUSEL_CAP + '</figure><p><br/></p>';
+  };
+  const insertCarousel = () => insertBlock(carouselFigure());
 
   // ---- images come in by paste/drop too ----
   // A figure can't live inside the headline or the dek — if the caret is in
@@ -1192,6 +1216,47 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     el.addEventListener("image-slot-change", f);
     return () => el.removeEventListener("image-slot-change", f);
   }, [scanHeadings, scheduleSave]);
+
+  // Carousel add/remove. The "+ Add image" chip and the per-slide ✕ are
+  // contenteditable=false islands inside the figure, so the caret can't reach
+  // them — a delegated click runs the mutation instead. A freshly appended slot
+  // is upgraded at once so its drop zone is live without a reload; removing the
+  // last slide removes the whole carousel.
+  useEffect(() => {
+    const root = ed.current; if (!root) return;
+    const onClick = (e) => {
+      const add = e.target.closest && e.target.closest(".cmp-carousel-add");
+      if (add && root.contains(add)) {
+        e.preventDefault();
+        const fig = add.closest(".cmp-carousel");
+        const track = fig && fig.querySelector(".cmp-carousel-track");
+        if (track) {
+          const holder = document.createElement("div");
+          holder.innerHTML = CAROUSEL_SLIDE("car-" + Date.now().toString(36) + "-" + track.children.length);
+          const slide = holder.firstElementChild;
+          if (slide) {
+            track.appendChild(slide);
+            try { if (window.customElements && customElements.upgrade) customElements.upgrade(slide); } catch (x) {}
+            scheduleSave();
+          }
+        }
+        return;
+      }
+      const rm = e.target.closest && e.target.closest(".cmp-slide-rm");
+      if (rm && root.contains(rm)) {
+        e.preventDefault();
+        const fig = rm.closest(".cmp-carousel");
+        const slide = rm.closest(".cmp-slide");
+        if (fig && slide) {
+          const count = fig.querySelectorAll(".cmp-slide").length;
+          if (count <= 1) fig.remove(); else slide.remove();
+          scheduleSave();
+        }
+      }
+    };
+    root.addEventListener("click", onClick);
+    return () => root.removeEventListener("click", onClick);
+  }, [scheduleSave]);
 
   // media viewer keyboard: esc closes, arrows move
   const mediaImages = media.filter(m => m.kind === "image");
@@ -2550,6 +2615,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <TB onClick={() => exec("insertHorizontalRule")} title="Divider"><I.divider /></TB>
         <Sep />
         <TB onClick={insertImage} title="Inline image"><I.image style={{ fontSize: 14 }} /> Image</TB>
+        <TB onClick={insertCarousel} title="Image carousel — a swipeable gallery of photos"><I.images style={{ fontSize: 14 }} /> Carousel</TB>
         <div style={{ position: "relative", display: "inline-block" }}>
           <TB onClick={() => setFmtMenu(fmtMenu === "embed" ? null : "embed")} title="Embed video, audio or a link card"><I.play style={{ fontSize: 14 }} /> Embed</TB>
           {fmtMenu === "embed" && (

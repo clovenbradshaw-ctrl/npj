@@ -361,3 +361,20 @@ test("the Sources footnote quotes each cited passage, each linked to the snapsho
   const m = NS.toMarkdown(EVID, eopts);
   assert.match(m, /^   - \[“passed seven to two”\]\(https:\/\/web\.archive\.org\/web\/2026\/https:\/\/reuters\.com\/b#:~:text=passed%20seven%20to%20two\)$/m);
 });
+
+test("a gallery degrades to a stack of images — Substack has no carousel", () => {
+  const galArticle = Object.assign({}, ARTICLE, { image: null, body: [
+    { type: "gallery", caption: "On the ground", images: [
+      { src: "https://web.archive.org/web/2026/g1.jpg", caption: "First shot", description: "alt one" },
+      { src: "https://web.archive.org/web/2026/g2.jpg", caption: "Second shot" },
+    ] },
+  ] });
+  const m = NS.toMarkdown(galArticle, opts);
+  assert.match(m, /!\[alt one\]\(https:\/\/web\.archive\.org\/web\/2026\/g1\.jpg\)/);   // description → alt
+  assert.match(m, /!\[Second shot\]\(https:\/\/web\.archive\.org\/web\/2026\/g2\.jpg\)/); // caption is the alt fallback
+  assert.match(m, /\*First shot\*/);
+  assert.match(m, /\*On the ground\*/);                                                 // the gallery caption
+  const h = NS.toHtml(galArticle, opts);
+  assert.equal((h.match(/<img /g) || []).length, 2, "both photos render as plain figures");
+  assert.match(h, /On the ground/);
+});

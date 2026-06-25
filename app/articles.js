@@ -30,6 +30,7 @@
  *   {type:'p', tokens:[ "text" | {c,src[],id} | {t:'strong'|'em'|'s'|'code'|'a'|'sup'|'br', text, href?} ]}
  *   {type:'h2'|'h3', text} · {type:'pull', text, attribution?} · {type:'hr'}
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
+ *   {type:'gallery', images:[{src, store?, caption?, credit?, description?, fit?, crop?}], caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
  *
  * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN.
@@ -114,6 +115,7 @@
       if (b.type === "ul" || b.type === "ol") return (b.items || []).map(it => "· " + it.map(tokenText).join("")).join("\n");
       if (b.type === "footnotes") return (b.notes || []).map(n => n && n.text || "").filter(Boolean).join("\n");
       if (b.type === "img") return b.caption || "";
+      if (b.type === "gallery") return (b.images || []).map(im => (im && im.caption) || "").filter(Boolean).concat(b.caption ? [b.caption] : []).join("\n");
       if (b.type === "embed") return b.url || "";
       if (b.type === "code" || b.type === "verse") return b.text || "";
       return "";
@@ -263,7 +265,13 @@
     // front-page thumbnail — so an article with any image always shows one on
     // the front page, while only a real banner is lifted into the reader hero.
     const imgBlocks = (Array.isArray(state.body) ? state.body : []).filter(b => b && b.type === "img" && b.src);
-    const bannerBlock = imgBlocks.find(b => b.banner) || imgBlocks[0] || null;
+    // failing any standalone photo, the first image of the first carousel still
+    // gives the front page a lead thumbnail (it's never lifted into a hero).
+    const firstGalleryImg = (() => {
+      const g = (Array.isArray(state.body) ? state.body : []).find(b => b && b.type === "gallery" && Array.isArray(b.images) && b.images.some(im => im && im.src));
+      return g ? g.images.find(im => im && im.src) : null;
+    })();
+    const bannerBlock = imgBlocks.find(b => b.banner) || imgBlocks[0] || firstGalleryImg || null;
     const article = {
       slug: state.slug || "untitled",
       kicker: state.column || "Published",
@@ -714,6 +722,55 @@
         return;
       }
       if (tag === "figure") {
+        const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
+        const isArchive = (u) => !!u && (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u));
+        const okSrc = (u) => !!u && (window.NpjMedia ? window.NpjMedia.isPublishable(u) : isArchive(u));
+        // Resolve one image slot (inside `scope`) to a published image object,
+        // honouring the same src/store/fit/crop rules a single inline image uses.
+        // Shared by the carousel branch below and reused for each slide.
+        const slotToImage = (scope) => {
+          const sl = scope.querySelector("image-slot");
+          if (!sl) return null;
+          const cands = [sl.getAttribute("src"), sl.getAttribute("data-alt")].filter(Boolean);
+          let archiveU = null, storeU = null, otherU = null;
+          cands.forEach(u => { if (isStore(u)) storeU = storeU || u; else if (isArchive(u)) archiveU = archiveU || u; else otherU = otherU || u; });
+          let src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
+          let local = false;
+          if (!src && preview) { const d = cands.find(u => /^data:image\//i.test(u)); if (d) { src = d; local = true; } }
+          if (!src) return null;
+          const im = { src };
+          const c = scope.querySelector("figcaption.cmp-cap, figcaption:not(.cmp-credit):not(.cmp-desc):not(.cmp-carousel-cap)");
+          const cr = scope.querySelector(".cmp-credit");
+          const ds = scope.querySelector(".cmp-desc");
+          const ct = c ? c.textContent.trim() : ""; if (ct) im.caption = ct;
+          const crt = cr ? cr.textContent.trim() : ""; if (crt) im.credit = crt;
+          const dt = ds ? ds.textContent.trim() : ""; if (dt) im.description = dt;
+          if (local) im.local = true;
+          if (storeU && storeU !== src) im.store = storeU;
+          const fit = (sl.getAttribute("fit") || "").toLowerCase();
+          if (fit === "contain" || fit === "fill") im.fit = fit;
+          const crop = parseCrop(sl.getAttribute("data-crop"));
+          if (crop && crop.ar && (im.fit || crop.s !== 1 || crop.x || crop.y)) im.crop = crop;
+          return im;
+        };
+        // ---- carousel / gallery: a figure holding several image slides, rendered
+        // as a swipeable carousel (Splide) + fullscreen lightbox in the reader.
+        // Empty slides (a drop target the author never filled) are skipped; an
+        // all-empty carousel drops out entirely, like an empty inline image.
+        if (node.classList && (node.classList.contains("cmp-carousel") || node.hasAttribute("data-carousel"))) {
+          const slideEls = Array.from(node.querySelectorAll(".cmp-slide"));
+          const scopes = slideEls.length ? slideEls : [node];
+          const images = [];
+          scopes.forEach(s => { const im = slotToImage(s); if (im) images.push(im); });
+          if (images.length) {
+            const block = { type: "gallery", images };
+            const gcap = node.querySelector("figcaption.cmp-carousel-cap");
+            const gc = gcap ? gcap.textContent.trim() : "";
+            if (gc) block.caption = gc;
+            blocks.push(block);
+          }
+          return;
+        }
         // Three caption lines now: the caption (first figcaption), the photo
         // credit (.cmp-credit) and the description (.cmp-desc, the alt text).
         // Excluding both classes keeps the caption right whichever order they sit
@@ -728,9 +785,6 @@
         const descText = descEl ? descEl.textContent.trim() : "";
         const slot = node.querySelector("image-slot");
         const plainImg = node.querySelector("img");
-        const isStore = (u) => !!(u && window.NpjMedia && window.NpjMedia.isStoreUrl(u));
-        const isArchive = (u) => !!u && (!window.NpjArchiveCDN || window.NpjArchiveCDN.isMediaUrl(u));
-        const okSrc = (u) => !!u && (window.NpjMedia ? window.NpjMedia.isPublishable(u) : isArchive(u));
         // the lead/banner image: the composer marks it with the nr-banner class
         // (or a data-banner flag / an eo-banner slot id). It rides in the body
         // like any image but carries banner:true, so the reader can lift it into
@@ -892,6 +946,35 @@
         const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
         const descHtml = '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px">' + esc(b.description || "") + '</figcaption>';
         return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + descHtml + "</figure>";
+      }
+      // carousel / gallery → an editable figure of image slides. Each slide is
+      // the SAME editable image-slot a single inline image uses (so a fresh drop
+      // still uploads to the media store and freezes to archive.org at publish),
+      // wrapped in .cmp-slide with its own caption/credit/description islands. A
+      // contenteditable=false "+ Add image" control and a per-slide ✕ are driven
+      // by delegated handlers in the Newsroom editor. The reader renders this
+      // block as a Splide carousel; blocksToHtml is only the EDIT representation.
+      if (b.type === "gallery") {
+        const slideCap = (im) =>
+          '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(im.caption || "") + '</figcaption>' +
+          '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(im.credit || "") + '</figcaption>' +
+          '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px">' + esc(im.description || "") + '</figcaption>';
+        const slides = (Array.isArray(b.images) ? b.images : []).map((im, j) => {
+          const primary = im.store || im.src || "";
+          const alt = (im.store && im.src && im.src !== im.store) ? im.src : "";
+          const fitAttr = im.fit ? ' fit="' + esc(im.fit) + '"' : '';
+          const cropAttr = (im.crop && im.crop.ar) ? ' data-crop="' + esc([im.crop.s, im.crop.x, im.crop.y, im.crop.ar].join(",")) + '"' : '';
+          const sid = "eo-car-" + bi + "-" + j;
+          return '<div class="cmp-slide">' +
+            '<image-slot id="' + sid + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr +
+            ' conform fitcontrol shape="rect" style="width:100%;height:240px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' +
+            slideCap(im) +
+            '<span class="cmp-slide-rm" contenteditable="false" role="button" title="Remove image" aria-label="Remove image">✕</span>' +
+            '</div>';
+        }).join("");
+        const addBtn = '<span class="cmp-carousel-add" contenteditable="false" role="button">+ Add image</span>';
+        const galCap = '<figcaption class="cmp-carousel-cap np-mono" contenteditable="true" data-ph="Gallery caption (optional)" style="font-size:11px;margin-top:6px">' + esc(b.caption || "") + '</figcaption>';
+        return '<figure contenteditable="false" class="cmp-embed cmp-carousel" data-carousel="1"><div class="cmp-carousel-track">' + slides + '</div>' + addBtn + galCap + "</figure>";
       }
       if (b.type === "embed") return '<figure data-embed-url="' + esc(b.url) + '" contenteditable="false"><a href="' + esc(b.url) + '">' + esc(b.url) + "</a>" + (b.caption ? "<figcaption>" + esc(b.caption) + "</figcaption>" : "") + "</figure>";
       return "";
