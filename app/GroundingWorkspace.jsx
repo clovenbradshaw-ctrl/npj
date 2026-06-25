@@ -214,6 +214,9 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [armIdx, setArmIdx] = useState(0);
   const [srcQuery, setSrcQuery] = useState("");
   const [srcFindIdx, setSrcFindIdx] = useState(0);
+  const [addSrcOpen, setAddSrcOpen] = useState(false);  // the in-modal "add a source" form (URL / file)
+  const [addSrcUrl, setAddSrcUrl] = useState("");
+  const [addSrcBusy, setAddSrcBusy] = useState(false);
   const [browseQuery, setBrowseQuery] = useState("");   // search the whole registry to reuse a record
   const [browseOpen, setBrowseOpen] = useState(false);
   const [renameKey, setRenameKey] = useState(null);     // the source being renamed in the library
@@ -890,14 +893,79 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     </div>
   );
 
+  // ---- add a net-new source without leaving the grounding flow ----
+  // The cite modal (and the Sources panel) ingest a URL or a file right here,
+  // then open the new source's reader so the author grabs the supporting words
+  // in one motion — no trip back to the Prose rail. Routes through the same
+  // Newsroom ingest the rail uses (snapshot, upload, OCR); degrades to nothing
+  // if the api predates these methods.
+  const canIngest = !!(api.addUrlSources || api.addFileSources);
+  const afterIngest = (keys, label) => {
+    setAddSrcBusy(false);
+    if (keys && keys.length) {
+      pickSource(keys[0]); setAddSrcOpen(false); setAddSrcUrl("");
+      say(label || ("Added “" + clip(srcShort(keys[0]), 36) + "” — now select the exact words that back this claim."));
+    } else {
+      say("Nothing added — paste a full http(s):// URL, or upload a file.");
+    }
+    bump();
+  };
+  const ingestUrlHere = () => {
+    const raw = addSrcUrl.trim(); if (!raw || !api.addUrlSources) return;
+    setAddSrcBusy(true);
+    try { afterIngest(api.addUrlSources(raw)); } catch (e) { setAddSrcBusy(false); say("Couldn’t add that URL."); }
+  };
+  const ingestFilesHere = (fileList) => {
+    const files = Array.from(fileList || []); if (!files.length || !api.addFileSources) return;
+    setAddSrcBusy(true);
+    try { afterIngest(api.addFileSources(files), "Uploaded — Citey is reading the words; grab them once they appear below."); }
+    catch (e) { setAddSrcBusy(false); say("Upload failed."); }
+  };
+  const addSrcDisabled = addSrcBusy || !addSrcUrl.trim();
+  const addSourceForm = canIngest ? (
+    <div style={{ border: "1px solid " + NR.line, background: NR.field, padding: "9px 10px", margin: "8px 0" }}>
+      <div className="np-mono" style={{ fontSize: 9, color: NR.soft, letterSpacing: ".06em", textTransform: "uppercase", fontWeight: 600, marginBottom: 7 }}>Add a source — it opens right here</div>
+      {api.addUrlSources && (
+        <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+          <input value={addSrcUrl} onChange={e => setAddSrcUrl(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); ingestUrlHere(); } }}
+            placeholder="Paste a URL — it snapshots & stores…" className="np-mono"
+            style={{ flex: 1, minWidth: 0, border: "1px solid " + NR.line, background: NR.panel, color: NR.text, fontSize: 11.5, padding: "6px 8px", outline: "none" }} />
+          <button onClick={ingestUrlHere} disabled={addSrcDisabled} className="np-cond"
+            style={{ border: 0, background: addSrcDisabled ? NR.line : "var(--yellow)", color: addSrcDisabled ? NR.muted : "var(--ink)", padding: "6px 12px", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap", cursor: addSrcDisabled ? "default" : "pointer" }}>
+            {addSrcBusy ? "Adding…" : "Snapshot & store"}
+          </button>
+        </div>
+      )}
+      {api.addUrlSources && api.addFileSources && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "8px 0 6px" }}>
+          <span style={{ flex: 1, height: 1, background: NR.line }} /><span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>or</span><span style={{ flex: 1, height: 1, background: NR.line }} />
+        </div>
+      )}
+      {api.addFileSources && (
+        <label className="np-cond" style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 7, width: "100%", boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.panel, color: NR.text, padding: "7px", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>
+          <input type="file" multiple style={{ display: "none" }} onChange={e => { ingestFilesHere(e.target.files); e.target.value = ""; }} />
+          ⬆ Upload a document, screenshot or PDF
+        </label>
+      )}
+      <div className="np-mono" style={{ fontSize: 9, color: NR.muted, marginTop: 7, lineHeight: 1.5 }}>Screenshots & PDFs are read for their text automatically; a web page opens for pasting the passage you’re citing.</div>
+    </div>
+  ) : null;
+
   const srcTabs = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
       {srcList.map(({ key }) => (
         <button key={key} onClick={() => pickSource(key)}
           style={chipBtn({ background: selSrc === key ? "var(--yellow)" : "transparent", color: selSrc === key ? "var(--ink)" : NR.text, borderColor: selSrc === key ? "var(--yellow)" : NR.line, fontWeight: 700 })}>
           {clip(srcShort(key), 26)}
         </button>
       ))}
+      {canIngest && (
+        <button onClick={() => setAddSrcOpen(o => !o)} title="Add a new source — a URL or a file — without leaving this claim"
+          style={chipBtn({ border: "1px dashed " + (addSrcOpen ? NR.text : NR.line), color: addSrcOpen ? NR.text : NR.soft, background: addSrcOpen ? NR.field : "transparent", fontWeight: 700 })}>
+          {addSrcOpen ? "× Close" : "+ Add source"}
+        </button>
+      )}
     </div>
   );
 
@@ -1366,9 +1434,13 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const sourcesPanel = (
     <div>
       {srcList.length === 0
-        ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>No sources yet — ingest one in the rail (Prose view).</div>
+        ? (<React.Fragment>
+            <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6 }}>{addSourceForm ? "No sources yet — add one:" : "No sources yet — ingest one in the rail (Prose view)."}</div>
+            {addSourceForm}
+          </React.Fragment>)
         : (<React.Fragment>
           {srcTabs}
+          {addSrcOpen && addSourceForm}
           {searchRow()}
           {readerBody(srcRefPanel, true)}
         </React.Fragment>)}
@@ -1485,10 +1557,18 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         </div>
         <div className="np-scroll" style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "12px 16px" }}>
           {citeMode === "source" && (srcList.length === 0
-            ? <div className="np-mono" style={{ fontSize: 11, color: NR.muted, lineHeight: 1.6 }}>No sources added yet — add one in the Sources rail (Prose view), then come back. Or ground this as <button onClick={() => setCiteMode("own")} style={{ border: 0, background: "none", color: "#6b5bd6", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>your own</button> or a <button onClick={() => setCiteMode("void")} style={{ border: 0, background: "none", color: "#8a6a1f", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>void</button>.</div>
+            ? (<React.Fragment>
+                <div className="np-mono" style={{ fontSize: 11, color: NR.soft, lineHeight: 1.6, marginBottom: addSourceForm ? 4 : 0 }}>
+                  {addSourceForm
+                    ? <React.Fragment>No sources on this draft yet — <strong style={{ color: NR.text }}>add the one that backs this claim</strong> and grab the words, right here. Or ground it as <button onClick={() => setCiteMode("own")} style={{ border: 0, background: "none", color: "#6b5bd6", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>your own</button> or a <button onClick={() => setCiteMode("void")} style={{ border: 0, background: "none", color: "#8a6a1f", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>void</button>.</React.Fragment>
+                    : <React.Fragment>No sources added yet — add one in the Sources rail (Prose view), then come back. Or ground this as <button onClick={() => setCiteMode("own")} style={{ border: 0, background: "none", color: "#6b5bd6", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>your own</button> or a <button onClick={() => setCiteMode("void")} style={{ border: 0, background: "none", color: "#8a6a1f", cursor: "pointer", font: "inherit", textDecoration: "underline" }}>void</button>.</React.Fragment>}
+                </div>
+                {addSourceForm}
+              </React.Fragment>)
             : (<React.Fragment>
                 <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Open the source and <strong style={{ color: NR.text }}>select the exact words</strong> that support the claim — that becomes the citation. Support in two places? Grab them one after another.</div>
                 {srcTabs}
+                {addSrcOpen && addSourceForm}
                 {searchRow("Search this source for the supporting words…")}
                 {readerBody(srcRefModal, false)}
                 {hitNav}
