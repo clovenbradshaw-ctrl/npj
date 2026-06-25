@@ -104,6 +104,27 @@ a { color: inherit; }
 }
 .read-clean .claim-marker { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
 
+/* ---- the lede drop cap ---- */
+/* An elegant initial on the opening paragraph: the body serif, enlarged to
+   sink roughly three lines, floated so the prose wraps around it. It inherits
+   var(--serif), so it tracks whatever body face the site is set to. */
+.np-dropcap::first-letter {
+  float: left;
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 4.4em;
+  line-height: 0.78;
+  padding: 0.02em 0.09em 0 0;
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+}
+@media (max-width: 560px) {
+  /* a touch smaller on phones so the cap never crowds a narrow measure */
+  .np-dropcap::first-letter { font-size: 3.8em; }
+}
+
 /* the grounded glyph (⊥) — a claim standing on its source: a stem planted on
    solid ground. Used in legends (e.g. the front-page manifesto strip) to mean
    "this mark means the text above it is grounded in an archived source". */

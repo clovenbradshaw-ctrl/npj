@@ -790,6 +790,8 @@ function ArticleRead(props) {
     : { marginTop: top, marginBottom: bottom };
   const hasHero = !!((A.image && A.image.src && A.image.banner) || (A.body || []).some(b => b.type === "img" && b.banner));
   const topInlineImgIdx = hasHero ? -1 : (A.body || []).findIndex(b => b.type === "img");
+  // the opening paragraph (the lede) carries a drop cap on its first letter
+  const firstParaIdx = (A.body || []).findIndex(b => b.type === "p");
 
   const Body = (
     <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
@@ -855,7 +857,7 @@ function ArticleRead(props) {
         if (b.type === "hr") return <hr key={i} style={{ border: 0, borderTop: "2.5px solid var(--ink)", width: 110, margin: "30px auto" }} />;
         if (b.type === "code") return <pre key={i} className="np-mono np-scroll" style={{ fontSize: 13, lineHeight: 1.55, background: "var(--paper-2)", border: "1.5px solid var(--ink)", padding: "12px 14px", overflowX: "auto", margin: "0 0 20px" }}>{b.text}</pre>;
         if (b.type === "verse") return <pre key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17.5, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 20px", padding: "0 0 0 20px", borderLeft: "3px solid var(--rule-strong, var(--ink))" }}>{b.text}</pre>;
-        return <p key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>;
+        return <p key={i} className={i === firstParaIdx ? "np-dropcap" : undefined} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>;
       })}
     </article>
   );
