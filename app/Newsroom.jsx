@@ -135,6 +135,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // so a sentence's grounding follows it through edits, moves, reloads.
   const sentenceLedger = useRef(window.NpjSentences ? window.NpjSentences.newLedger() : { v: 1, seq: 0, entries: {} });
   const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
+  const [citeHl, setCiteHl] = useState(true);       // show citation/claim highlights in the prose editor — off = a clean read
   const [rev, setRev] = useState(0);                // bump to recompute span counts
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -561,9 +562,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     let secId = null;
     if (isHeading) { try { reconcileStructure(); } catch (x) {} secId = block.getAttribute("data-sec"); }
     blockDrag.current = { el: block, isHeading, secId };
-    setDragging(true);
-    block.classList.add("nr-block-dragging");
     try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); e.dataTransfer.setDragImage(block, 14, 12); } catch (x) {}
+    // Defer the "dragging" visuals by a frame. setDragging re-renders the grip —
+    // the drag SOURCE node — and dimming the block mutates it too; doing either
+    // synchronously inside dragstart makes Chrome cancel the drag before it
+    // begins (the reported "drag does nothing"). One frame on, the drag is live,
+    // so hiding the grip + fading the block is safe.
+    requestAnimationFrame(() => {
+      if (!blockDrag.current || blockDrag.current.el !== block) return;
+      setDragging(true);
+      block.classList.add("nr-block-dragging");
+    });
   };
 
   // where would a drop land right now? Returns the reference block to insert
@@ -908,6 +917,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       e.preventDefault();
       document.execCommand("insertLineBreak");
       scheduleSave();
+    } else if (host && host.closest && host.closest("h1,h2,h3")) {
+      // A Return out of a heading must start BODY text — never clone the heading.
+      // contentEditable otherwise carries the <h2>/<h3> onto the next line, so the
+      // paragraph you type inherits the heading style and lands in the Contents
+      // rail. Let the browser split, then coerce the fresh block the caret lands
+      // in (empty = the common "next line is body" case) back to a <p>. A split
+      // mid-heading keeps its first half a heading; a Return at the very start
+      // leaves the heading intact (its text-bearing block is never converted).
+      e.preventDefault();
+      document.execCommand("insertParagraph");
+      const s2 = window.getSelection();
+      let n2 = s2 && s2.anchorNode;
+      n2 = n2 && (n2.nodeType === 1 ? n2 : n2.parentElement);
+      const nb = n2 && n2.closest && n2.closest("h1,h2,h3");
+      if (nb && ed.current && ed.current.contains(nb) && !(nb.textContent || "").trim())
+        document.execCommand("formatBlock", false, "p");
+      scanHeadings(); scheduleSave();
     }
   };
 
@@ -2118,6 +2144,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             </div>
           )}
         </div>
+        <Sep />
+        {/* clean-read toggle: hide the citation/claim highlights (tints, underlines,
+            stance glyphs, marker chips) without touching the words or their sources */}
+        <button onMouseDown={e => e.preventDefault()} onClick={() => setCiteHl(v => !v)} aria-pressed={!citeHl}
+          title={citeHl ? "Citation highlights are on — click to hide them and read the prose clean" : "Citation highlights are hidden — click to show them"}
+          className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
+        </button>
         <span style={{ flex: 1 }} />
         <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source — then pin the words in the source</span>
       </div>
@@ -2185,7 +2219,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}

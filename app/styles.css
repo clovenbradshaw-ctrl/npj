@@ -529,6 +529,13 @@ a { color: inherit; }
 /* a sentence that is grounded another way but also carries context links
    (prior coverage) — a faint trailing ⊪ marks "set in context, too" */
 .md-preview .claim-src[data-context]:not([data-stance]):not(.needs-quote)::after { content: "⊪"; font-size: 9px; color: #2e8b86; vertical-align: super; margin-left: 1px; opacity: .8; }
+/* clean-read toggle (the toolbar's Citations eye): strip every citation overlay
+   — the claim tints/underlines, the stance + context glyphs, and the marker
+   chips — so the prose reads plain. The spans, their sources and the footnote
+   numbers all stay in the DOM; only the visual highlighting is suppressed. */
+.md-preview.nr-no-cites .claim-src { background: transparent; border-bottom-color: transparent; cursor: text; }
+.md-preview.nr-no-cites .claim-src::after { display: none; }
+.md-preview.nr-no-cites .md-cite { color: var(--nr-muted); background: transparent; border-color: transparent; }
 /* "armed" — a source is picked and waiting for you to select the words it
    backs; the page invites a text selection */
 .md-preview.nr-arming { cursor: text; box-shadow: inset 0 0 0 2px var(--yellow); }
