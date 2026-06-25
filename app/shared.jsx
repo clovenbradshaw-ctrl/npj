@@ -25,6 +25,7 @@ const I = {
   check:   phIcon("check", "bold"),
   x:       phIcon("x", "bold"),
   ext:     phIcon("arrow-square-out"),
+  trash:   phIcon("trash"),
   expand:  phIcon("arrows-out"),
   up:      phIcon("arrow-fat-up", "fill"),
   chat:    phIcon("chat-circle"),

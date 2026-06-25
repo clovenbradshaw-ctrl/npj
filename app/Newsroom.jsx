@@ -521,6 +521,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const dropPlan = useRef(null);     // { refEl|null, indicator } recomputed on each dragover
   const gripRaf = useRef(0);
   const [grip, setGrip] = useState(null);      // { top, left, isHeading, block } — the hover handle
+  const [gripHover, setGripHover] = useState(false); // pointer is over the grip → reveal its delete button
   const [dropAt, setDropAt] = useState(null);  // { top, left, width } — the insertion line
   const [dragging, setDragging] = useState(false);
 
@@ -647,6 +648,35 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     e.preventDefault(); e.stopPropagation();
     performBlockDrop(d, dropPlan.current || computeBlockDrop(e.clientY));
     endBlockDrag();
+  };
+
+  // ---- delete a block from the grip ----------------------------------------
+  // The only way to remove a non-editable figure (image / embed): the caret
+  // can't enter a contenteditable=false block to backspace it away. Works for
+  // any movable block the grip offers. A removed heading drops its section
+  // annotation on the next reconcile (its prose stays put — I3, structure-dom
+  // test). Lead nodes (banner / title / dek) are never offered a grip; guard
+  // anyway so this can't strand the headline or subtitle.
+  const blockDelLabel = (block) => {
+    if (!block) return "Delete this block";
+    if (block.tagName === "FIGURE")
+      return block.querySelector("image-slot") ? "Delete this image"
+        : (block.getAttribute("data-embed-url") ? "Delete this embed" : "Delete this block");
+    if (isHeadingBlock(block)) return "Delete this heading";
+    return "Delete this block";
+  };
+  const deleteBlock = (block) => {
+    const root = ed.current;
+    if (!block || !root || !root.contains(block) || isLeadBlock(block)) return;
+    const wasHeading = isHeadingBlock(block);
+    try { block.remove(); } catch (x) { return; }
+    // never leave the body with no editable line for the caret to land in
+    if (!root.querySelector("p, h1, h2, h3, li, blockquote, figcaption")) {
+      const p = document.createElement("p"); p.appendChild(document.createElement("br")); root.appendChild(p);
+    }
+    setGrip(null); setGripHover(false);
+    if (wasHeading) { try { reconcileStructure(); } catch (x) {} } // drop the section now, not on the debounce
+    scanHeadings(); scheduleSave();
   };
 
   const onBodyClick = (e) => {
@@ -2229,11 +2259,22 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
           {!isMobile && grip && (
-            <div className={"nr-grip" + (dragging ? "" : " show")} draggable
-              onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
-              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } }}
-              title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}
-              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>⠿</div>
+            <div className="nr-grip-group"
+              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } setGripHover(true); }}
+              onMouseLeave={() => setGripHover(false)}
+              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>
+              <div className={"nr-grip" + (dragging ? "" : " show")} draggable
+                onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
+                title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}>⠿</div>
+              {gripHover && !dragging && (
+                <button type="button" className="nr-grip-del"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => deleteBlock(grip.block)}
+                  title={blockDelLabel(grip.block)} aria-label={blockDelLabel(grip.block)}>
+                  <I.trash style={{ fontSize: 13 }} />
+                </button>
+              )}
+            </div>
           )}
           {!isMobile && dropAt && (
             <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
