@@ -1033,6 +1033,7 @@ function Ledger({ sourceList, activeSrc, setActiveSrc, spansForSource, onJump })
                     {spans.length > 0 && <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>· {spans.length} passage{spans.length !== 1 ? "s" : ""}</span>}
                     {ivLink
                       ? <span className="np-mono" style={{ fontSize: 9.5, color: "var(--review)" }}>{window.NpjInterview.outletLine(s.talk || {})}</span>
+                      : s.redacted ? <span className="np-mono" title="Original withheld — this source was redacted before archiving" style={{ fontSize: 9.5, color: "var(--review)" }}>redacted ↯</span>
                       : url ? <a href={url} target="_blank" rel="noopener" className="np-mono" title="Open the archived snapshot" style={{ fontSize: 9.5, color: "var(--verified)", textDecoration: "none" }}>snapshot ↗</a> : null}
                   </div>
                 </div>
@@ -1069,7 +1070,7 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
             <React.Fragment>
               <span className="claim-marker" style={{ verticalAlign: "baseline", height: "fit-content" }}>{num}</span>
               <span style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.25 }}>
-                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: ivLink ? "var(--review)" : "var(--verified)" }}>{ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved) : ((s.archive_url ? "archived " + (s.retrieved || "") : "live link") + " ↗")}</span>
+                <strong style={{ fontWeight: 600 }}>{s.outlet}.</strong> {s.title}. <span className="np-mono" style={{ fontSize: 10.5, color: (ivLink || s.redacted) ? "var(--review)" : "var(--verified)" }}>{ivLink ? window.NpjInterview.humanDate((s.talk && s.talk.date) || s.retrieved) : s.redacted ? "redacted — original withheld" : ((s.archive_url ? "archived " + (s.retrieved || "") : "live link") + " ↗")}</span>
               </span>
             </React.Fragment>
           );
