@@ -250,6 +250,28 @@
     else placeChild(s, toParentSlotId, id, toOrder);
   }
 
+  // Map a drop — "place draggedId relative to refId, on `edge`" — onto a concrete
+  // (parentSlotId, index) for a section.move. The index is returned in refId's
+  // sibling space WITH the dragged row already removed (exactly what placeTop /
+  // placeChild consume), so the SAME call drives both the outline rail and the
+  // in-document block drag — they can never drift apart. The target container is
+  // always refId's container, so dropping next to a slotted section lands you in
+  // that slot, and dropping next to an orphan lands you at the top level.
+  function sectionDropIndex(s, draggedId, refId, edge) {
+    var ref = sectionById(s, refId);
+    if (!ref) return null;
+    var parent = ref.parentSlotId == null ? null : ref.parentSlotId;
+    var sibs = parent == null
+      ? topRefs(s).filter(function (r) { return r.kind === "section"; }).map(function (r) { return r.id; })
+      : childRefs(s, parent).map(function (sec) { return sec.id; });
+    var idx = sibs.indexOf(refId);
+    if (idx < 0) idx = sibs.length;
+    if (edge === "after") idx += 1;
+    var from = sibs.indexOf(draggedId);
+    if (from > -1 && from < idx) idx -= 1; // the dragged row leaves its old spot first
+    return { parentSlotId: parent, index: idx };
+  }
+
   // a section's position in the linear (flatten) walk — for stable bulk moves.
   function flatIndex(s, id) {
     var i = 0, found = -1;
@@ -474,6 +496,7 @@
     types: typeStore,
     dom: { collect: domCollect, reflow: domReflow, reconcile: domReconcile },
     // low-level selectors (the editor reads these to render the rail)
-    topRefs: topRefs, childRefs: childRefs, sectionById: sectionById, slotById: slotById, flatIndex: flatIndex
+    topRefs: topRefs, childRefs: childRefs, sectionById: sectionById, slotById: slotById, flatIndex: flatIndex,
+    sectionDropIndex: sectionDropIndex
   };
 });

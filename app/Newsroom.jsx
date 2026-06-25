@@ -503,6 +503,138 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     };
   }, [structure, structTypes, blankChosen, toc.length, dispatchStruct, isMobile]);
 
+  // ---- in-document block drag (the Google-Docs/Notion grip) ----------------
+  // A grip in the page's left gutter lets the author grab any block — paragraph,
+  // image, quote, list — and drop it elsewhere. Grabbing a HEADING moves its
+  // whole section, routed through the structure log (lib.sectionDropIndex, the
+  // same math the Contents rail uses) so the outline stays in step. Any other
+  // block moves in the DOM directly — the structure layer only tracks headings,
+  // and a paragraph simply belongs to whichever section's span it now sits in.
+  // Desktop only: there's room in the gutter and a real pointer to grab with.
+  const blockDrag = useRef(null);    // { el, isHeading, secId } for the duration of a drag
+  const dropPlan = useRef(null);     // { refEl|null, indicator } recomputed on each dragover
+  const gripRaf = useRef(0);
+  const [grip, setGrip] = useState(null);      // { top, left, isHeading, block } — the hover handle
+  const [dropAt, setDropAt] = useState(null);  // { top, left, width } — the insertion line
+  const [dragging, setDragging] = useState(false);
+
+  const isLeadBlock = (b) => !!(b && (b.tagName === "H1" || (b.classList && (b.classList.contains("nr-dek") || (b.tagName === "FIGURE" && b.classList.contains("nr-banner"))))));
+  const isMovableBlock = (b) => !!(b && b.nodeType === 1 && b.tagName !== "BR" && !isLeadBlock(b));
+  const isHeadingBlock = (b) => !!(b && /^H[2-3]$/.test(b.tagName || ""));
+  // walk up to the direct child of the editor root that holds this node
+  const topBlockOf = (node) => {
+    const root = ed.current; if (!root) return null;
+    let el = node;
+    while (el && el !== root && el.parentNode !== root) el = el.parentNode;
+    return (el && el.parentNode === root) ? el : null;
+  };
+
+  // hover → place the grip beside the block under the cursor. While the pointer
+  // sits in the gutter (over the editor itself, not a block) we keep the last
+  // grip, so the author can travel out to grab it without it vanishing.
+  const onEdMouseMove = (e) => {
+    if (isMobile || dragging) return;
+    if (gripRaf.current) return;
+    const target = e.target;
+    gripRaf.current = requestAnimationFrame(() => {
+      gripRaf.current = 0;
+      const root = ed.current, sc = scroller.current; if (!root || !sc) return;
+      const block = topBlockOf(target);
+      if (!isMovableBlock(block)) return; // gutter / lead node — leave the grip where it is
+      const sRect = sc.getBoundingClientRect(), bRect = block.getBoundingClientRect();
+      const top = bRect.top - sRect.top + sc.scrollTop;
+      const left = bRect.left - sRect.left + sc.scrollLeft - 26;
+      setGrip(prev => (prev && prev.block === block && Math.abs(prev.top - top) < 0.5) ? prev : { top, left, isHeading: isHeadingBlock(block), block });
+    });
+  };
+  const clearGrip = () => { if (!dragging) setGrip(null); };
+
+  const onGripDragStart = (e) => {
+    const block = grip && grip.block;
+    if (!block || !ed.current || !ed.current.contains(block)) { e.preventDefault(); return; }
+    const isHeading = isHeadingBlock(block);
+    let secId = null;
+    if (isHeading) { try { reconcileStructure(); } catch (x) {} secId = block.getAttribute("data-sec"); }
+    blockDrag.current = { el: block, isHeading, secId };
+    setDragging(true);
+    block.classList.add("nr-block-dragging");
+    try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", ""); e.dataTransfer.setDragImage(block, 14, 12); } catch (x) {}
+  };
+
+  // where would a drop land right now? Returns the reference block to insert
+  // before (null = end of document) and the geometry of the insertion line.
+  const computeBlockDrop = (clientY) => {
+    const d = blockDrag.current, root = ed.current, sc = scroller.current;
+    if (!d || !root || !sc) return null;
+    const kids = Array.prototype.slice.call(root.children).filter(b => b.nodeType === 1);
+    let firstBody = 0;
+    for (let i = 0; i < kids.length; i++) { if (isLeadBlock(kids[i])) firstBody = i + 1; else break; }
+    let k = kids.length;
+    for (let i = firstBody; i < kids.length; i++) { const r = kids[i].getBoundingClientRect(); if (clientY < r.top + r.height / 2) { k = i; break; } }
+    if (k < firstBody) k = firstBody;
+    let refEl = null;
+    if (d.isHeading) {
+      // sections drop between sections — snap to the next section heading
+      for (let i = k; i < kids.length; i++) { const b = kids[i]; if (isHeadingBlock(b) && b !== d.el && b.getAttribute("data-sec")) { refEl = b; break; } }
+    } else {
+      refEl = kids[k] || null;
+    }
+    const sRect = sc.getBoundingClientRect();
+    const sample = kids[firstBody] || refEl || kids[kids.length - 1];
+    if (!sample) return null;
+    const smr = sample.getBoundingClientRect();
+    const left = smr.left - sRect.left + sc.scrollLeft;
+    const width = Math.max(40, smr.width);
+    let top;
+    if (refEl) { const rr = refEl.getBoundingClientRect(); top = rr.top - sRect.top + sc.scrollTop - 1; }
+    else { const last = kids[kids.length - 1]; const rr = last.getBoundingClientRect(); top = rr.bottom - sRect.top + sc.scrollTop - 1; }
+    return { refEl, indicator: { top, left, width } };
+  };
+
+  const onBlockDragOver = (e) => {
+    if (!blockDrag.current) return;
+    e.preventDefault(); try { e.dataTransfer.dropEffect = "move"; } catch (x) {}
+    const plan = computeBlockDrop(e.clientY);
+    dropPlan.current = plan;
+    setDropAt(prev => (plan && prev && Math.abs(prev.top - plan.indicator.top) < 0.5 && prev.left === plan.indicator.left) ? prev : (plan ? plan.indicator : null));
+  };
+
+  const performBlockDrop = (d, plan) => {
+    const root = ed.current, lib = window.NpjStructure; if (!root) return;
+    if (d.isHeading && d.secId && lib) {
+      const st = lib.fold(structLog.current); // fold fresh — dragstart may have just reconciled
+      if (plan && plan.refEl) {
+        const refSec = plan.refEl.getAttribute("data-sec");
+        if (!refSec || refSec === d.secId) return;
+        const m = lib.sectionDropIndex(st, d.secId, refSec, "before");
+        if (m) structApi.moveSection(d.secId, m.parentSlotId, m.index);
+      } else {
+        const ids = lib.flattenIds(st), lastId = ids[ids.length - 1];
+        if (!lastId || lastId === d.secId) return; // already last
+        const lastSec = lib.sectionById(st, lastId);
+        structApi.moveSection(d.secId, lastSec ? lastSec.parentSlotId : null, 1e6);
+      }
+    } else {
+      const ref = plan ? plan.refEl : null;
+      if (ref === d.el || (ref && ref.previousSibling === d.el)) return; // no move
+      try { root.insertBefore(d.el, ref); } catch (x) { return; }
+      scanHeadings(); scheduleSave();
+    }
+  };
+
+  const endBlockDrag = () => {
+    const d = blockDrag.current;
+    if (d && d.el && d.el.classList) d.el.classList.remove("nr-block-dragging");
+    blockDrag.current = null; dropPlan.current = null;
+    setDragging(false); setDropAt(null); setGrip(null);
+  };
+  const onBlockDrop = (e) => {
+    const d = blockDrag.current; if (!d) return;
+    e.preventDefault(); e.stopPropagation();
+    performBlockDrop(d, dropPlan.current || computeBlockDrop(e.clientY));
+    endBlockDrag();
+  };
+
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
     if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); return; }
@@ -706,6 +838,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (r && ed.current && ed.current.contains(r.startContainer)) { const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
   };
   const onDropText = (e) => {
+    if (blockDrag.current) return; // a block-grip drag — onBlockDrop (on the scroller) owns this
     if (dragFromSelf.current || !e.dataTransfer) return; // internal rearrange — native handles it
     e.preventDefault(); // never let the browser insert the formatted flavor (or navigate to a dropped file)
     const files = Array.from(e.dataTransfer.files || []).filter(f => /^image\//.test(f.type));
@@ -1974,7 +2107,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} style={{ display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
           <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
             <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
@@ -1986,11 +2119,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
           <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
-            onMouseOver={onBodyOver} onMouseLeave={onBodyLeave}
+            onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
             style={{ color: NR.text, outline: "none" }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
+          {/* the Google-Docs grip + the live insertion line. Editing chrome only —
+              they live OUTSIDE the contentEditable, so they never serialize. */}
+          {!isMobile && grip && (
+            <div className={"nr-grip" + (dragging ? "" : " show")} draggable
+              onDragStart={onGripDragStart} onDragEnd={endBlockDrag}
+              onMouseEnter={() => { if (gripRaf.current) { cancelAnimationFrame(gripRaf.current); gripRaf.current = 0; } }}
+              title={grip.isHeading ? "Drag to move this whole section" : "Drag to move this block"}
+              style={{ top: grip.top, left: grip.left, opacity: dragging ? 0 : undefined, pointerEvents: dragging ? "none" : "auto" }}>⠿</div>
+          )}
+          {!isMobile && dropAt && (
+            <div className="nr-drop-line" style={{ top: dropAt.top, left: dropAt.left, width: dropAt.width }} />
+          )}
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
           <div style={{ flex: isMobile ? 1 : undefined, background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0, overflow: "hidden" }}>
