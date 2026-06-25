@@ -469,13 +469,37 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
    locks the page scroll while open, and restores it on close. SourceViewer lives
    in the READ bundle (loaded before the reader renders), so by the time a reader
    can open this it's present; a stub message covers the vanishingly-rare race. */
-function SourceLightbox({ srcKey, rec, onClose }) {
-  const s = rec || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || null;
+function SourceLightbox({ srcKey, rec, onClose, keys, start }) {
+  // Gallery mode: opened with an ordered list of source keys, the sheet lets you
+  // tab through every source at full size — the ‹ › buttons, the ← → arrow keys,
+  // and an "n / total" counter. Opened with a lone srcKey (a citation card's
+  // "View document"), it's a single document with no nav — unchanged from before.
+  const list = Array.isArray(keys) ? keys.filter(Boolean) : null;
+  const [idx, setIdx] = useState(() => {
+    if (!list || !list.length) return 0;
+    const want = typeof start === "number" ? start : list.indexOf(srcKey);
+    return Math.min(list.length - 1, Math.max(0, want >= 0 ? want : 0));
+  });
+  const gallery = !!(list && list.length > 1);
+  const activeKey = (list && list.length) ? list[Math.min(idx, list.length - 1)] : srcKey;
+  const s = (list ? null : rec) || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[activeKey]) || null;
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800);
+  // step through the gallery, wrapping around at either end so it reads like a
+  // slideshow of the receipts
+  const go = useCallback((d) => { if (list && list.length) setIdx(i => (i + d + list.length) % list.length); }, [list]);
   useEffect(() => {
     // Esc closes (capture phase + stopPropagation so it beats the reader's own
-    // Escape handlers); the body scroll is frozen so the page behind can't drift.
-    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose && onClose(); } };
+    // Escape handlers); ← / → walk the gallery (but never while typing in a field
+    // the viewer owns, e.g. the OCR editor); the body scroll is frozen so the
+    // page behind can't drift.
+    const onKey = (e) => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose && onClose(); return; }
+      if (!gallery) return;
+      const t = e.target, tag = (t && t.tagName) || "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
+      else if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+    };
     const onResize = () => setVh(window.innerHeight);
     document.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", onResize);
@@ -486,7 +510,7 @@ function SourceLightbox({ srcKey, rec, onClose }) {
       window.removeEventListener("resize", onResize);
       document.body.style.overflow = prevOverflow;
     };
-  }, [onClose]);
+  }, [onClose, gallery, go]);
   if (!s) return null;
   // the document fills the sheet; leave room for the header and a little air
   const bodyH = Math.max(280, vh - 150);
@@ -495,18 +519,27 @@ function SourceLightbox({ srcKey, rec, onClose }) {
       aria-label={"Source — " + (s.title || s.id || "document")} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose && onClose(); }}>
       <div className="srclb" onMouseDown={(e) => e.stopPropagation()}>
         <header className="srclb-head">
+          {gallery && (
+            <button onClick={() => go(-1)} className="srclb-nav" title="Previous source (←)" aria-label="Previous source">‹</button>
+          )}
           <div style={{ minWidth: 0, flex: 1 }}>
-            <SourceTag type={s.type} />
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <SourceTag type={s.type} />
+              {gallery && <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{idx + 1} / {list.length}</span>}
+            </div>
             <div className="np-cond" style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.12, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || s.filename || "Document"}</div>
             <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}{s.outlet ? " · " + s.outlet : ""}</div>
           </div>
+          {gallery && (
+            <button onClick={() => go(1)} className="srclb-nav" title="Next source (→)" aria-label="Next source">›</button>
+          )}
           <button onClick={onClose} className="btn btn-sm" title="Back to the article (Esc)" style={{ flex: "0 0 auto", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
             <I.x /> Close
           </button>
         </header>
         <div className="srclb-body np-scroll">
           {window.SourceViewer
-            ? <window.SourceViewer key={srcKey || (s.id || s.key)} srcKey={srcKey} rec={s} height={bodyH} />
+            ? <window.SourceViewer key={activeKey || (s.id || s.key)} srcKey={activeKey} rec={s} height={bodyH} />
             : <div className="np-mono" style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>Loading the document viewer…</div>}
         </div>
       </div>
