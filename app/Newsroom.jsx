@@ -1151,12 +1151,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // laid out as the outside will lay them out.
   const openPreview = () => {
     if (!window.NpjArticles) return;
-    const html = ed.current ? ed.current.innerHTML : (htmlRef.current || "");
+    // Preview should faithfully show EVERY photo the author placed — including one
+    // that's still a session data: URL because its upload hasn't landed (or
+    // failed). That image lives on the live <image-slot> (exposed via .url), not in
+    // the serialized HTML, so inline it onto a CLONE of the editor for the preview
+    // build only. genesisFromContent({preview}) keeps those as flagged `local`
+    // blocks; the real publish path never sets preview, so a data: URL is still
+    // dropped from the committed record (no base64 into a commit).
+    let html = ed.current ? ed.current.innerHTML : (htmlRef.current || "");
+    if (ed.current) {
+      try {
+        const clone = ed.current.cloneNode(true);
+        clone.querySelectorAll("image-slot").forEach(cs => {
+          const durable = cs.getAttribute("src");
+          if (durable && window.NpjMedia && window.NpjMedia.isPublishable(durable)) return;
+          const id = cs.id;
+          const live = id ? ed.current.querySelector('image-slot[id="' + id + '"]') : null;
+          const u = live && live.url;
+          if (u && /^data:image\//i.test(u)) cs.setAttribute("src", u);
+        });
+        html = clone.innerHTML;
+      } catch (e) { /* fall back to the plain serialization */ }
+    }
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     try {
       const gen = window.NpjArticles.genesisFromContent(
         { html, title, tags, column, sources },
-        { slug: fileSlug || slugify(title), headline: title, actor,
+        { slug: fileSlug || slugify(title), headline: title, actor, preview: true,
           composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null }
       );
       setPreviewDoc(gen.article);

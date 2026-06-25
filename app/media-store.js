@@ -95,12 +95,38 @@
         body: blob
       });
     } catch (e) { throw new Error("Couldn't reach the media store."); }
-    if (res.status === 413) throw new Error("That image is too large for the media store.");
-    if (!res.ok) throw new Error("Media upload failed (HTTP " + res.status + ").");
+    // Size rejections are tagged (err.tooLarge) so the caller can shrink-and-retry
+    // a tall document instead of just surfacing a dead end. Both the standard 413
+    // and a 200-shaped homeserver error with errcode M_TOO_LARGE are honoured.
+    if (res.status === 413) { const e = new Error("That image is too large for the media store."); e.tooLarge = true; throw e; }
+    if (!res.ok) {
+      let eb = null; try { eb = await res.json(); } catch (e) {}
+      if (eb && eb.errcode === "M_TOO_LARGE") { const e = new Error(eb.error || "That image is too large for the media store."); e.tooLarge = true; throw e; }
+      throw new Error("Media upload failed (HTTP " + res.status + ")." + (eb && eb.error ? " " + eb.error : ""));
+    }
     let j = null; try { j = await res.json(); } catch (e) {}
     const mxc = j && j.content_uri;
     if (!mxc) throw new Error("The media store returned no URL.");
     return { url: mxcToHttp(mxc, base), mxc };
+  }
+
+  /* uploadLimit() → Promise<number|null>. The homeserver's max upload size in
+     bytes (m.upload.size from /_matrix/media/v3/config), so a drop can shrink to
+     fit BEFORE it bounces off a 413. Best-effort + cached for the session; null
+     when the homeserver doesn't advertise one (then the caller falls back to
+     reacting to a 413). */
+  let _uploadLimit; // undefined = unfetched · null = unknown · number = bytes
+  async function uploadLimit() {
+    if (_uploadLimit !== undefined) return _uploadLimit;
+    _uploadLimit = null;
+    const m = MA(); const s = sess(); const base = s && s.base_url;
+    if (!base) { _uploadLimit = undefined; return null; } // not signed in yet — let a later call retry
+    try {
+      const headers = (m && m.token && m.token()) ? { "Authorization": "Bearer " + m.token() } : {};
+      const r = await fetch(base + "/_matrix/media/v3/config", { headers });
+      if (r.ok) { const j = await r.json(); const n = j && j["m.upload.size"]; if (typeof n === "number" && n > 0) _uploadLimit = n; }
+    } catch (e) {}
+    return _uploadLimit;
   }
 
   /* fetchBytes(url) → Promise<Blob|null>. Authenticated download from the media
@@ -301,7 +327,7 @@
 
   window.NpjMedia = {
     canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint,
-    upload, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
+    upload, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
     freeze, freezeArticleMedia
   };
 })();
