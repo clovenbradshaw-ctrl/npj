@@ -287,6 +287,87 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
   );
 }
 
+// The Previews twin of the citation card, for grounded things that have no source
+// to cite: an assertion the author owns (their analysis / account / position) or a
+// documented void (an asserted absence). Hover (desktop) or tap (phone) one and a
+// card floats up in the margin saying HOW it's grounded — by the author's own
+// declaration, or by a documented absence of a given kind, and whether that absence
+// is shown, located or only inferred (void-kinds.js). Mirrors FootnotePop's
+// positioning: a margin card on a desktop, a dismissible bottom sheet on a phone.
+function GroundingPop({ data, onEnter, onLeave, onClose }) {
+  const isPhone = window.useIsMobile(760);
+  if (!data) return null;
+  const { tok, x, y, mk, col, blockL, blockR } = data;
+  const isAbsence = tok.stance === "absence";
+  const kind = isAbsence ? "absence" : (STANCE_KIND[tok.stance] || "own-analysis");
+  const gm = GROUND_KINDS[kind] || GROUND_KINDS["own-analysis"];
+  const VK = window.NpjVoidKinds;
+  const vk = (isAbsence && VK) ? VK.norm(tok.vkind) : null;
+  const vdef = vk ? VK.get(vk) : null;
+  const reader = (isAbsence && VK) ? VK.reader(vk) : null;   // shown | located | inferred
+  const glyph = vdef ? vdef.glyph : gm.glyph;
+  // the small kicker echoes the two epistemic kinds the reader asked for by name —
+  // an assertion by the writer, or a void — and the headline names which one.
+  const kicker = isAbsence ? "Void" : "Assertion";
+  const headline = isAbsence ? (vdef ? vdef.label : "Unspecified kind") : gm.label;
+  const ariaLabel = isAbsence ? (vdef ? vdef.label + " void" : "Documented void") : gm.label;
+  const blurb = isAbsence ? (vdef ? vdef.blurb : gm.note) : gm.note;
+  // for a void, name how it stands — the reader's confidence rides on this
+  const standLine = {
+    shown: "Shown — you can point to the absence.",
+    located: "Located — the author cites the gap, or says where it's out of reach.",
+    inferred: "Inferred — no record; the author is arguing it."
+  }[reader];
+  const accent = gm.mark;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const sheet = isPhone;
+  // Mirrors FootnotePop: float in the margin beside the marker, anchoring under it
+  // only when there's no gutter to spare.
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  let cardStyle;
+  if (sheet) {
+    cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "62vh", overflowY: "auto",
+      borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (beside) {
+    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
+  } else {
+    const w = Math.min(320, vw - 24);
+    const left = Math.min(Math.max(12, x - 16), vw - w - 12);
+    const top = y + 8;
+    const flip = top > vh - 220;
+    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+  }
+  const inner = (
+    <div className="gpop np-scroll" role="dialog" aria-label={ariaLabel} style={cardStyle}
+      onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      <div className="gpop-h" style={{ borderLeft: "3px solid " + accent }}>
+        <span className="gpop-g np-mono" style={{ color: accent }}>{glyph}</span>
+        <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>{kicker}</span>
+        {sheet && <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px" }}><I.x /></button>}
+      </div>
+      <div className="gpop-b">
+        <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, lineHeight: 1.12 }}>{headline}</div>
+        {standLine && <div className="np-mono" style={{ fontSize: 10.5, color: accent, marginTop: 4, letterSpacing: ".02em" }}>{standLine}</div>}
+        <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>{blurb}</p>
+        {tok.note ? (
+          <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid var(--rule)" }}>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4 }}>{isAbsence ? "What the author searched" : "In the author's words"}</div>
+            <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>{window.npjRichText ? window.npjRichText(tok.note) : tok.note}</div>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+  if (!sheet) return inner;
+  return (
+    <React.Fragment>
+      <div onClick={onClose} aria-hidden="true" className="fade-in"
+        style={{ position: "fixed", inset: 0, zIndex: 3990, background: "rgba(8,7,5,.35)" }} />
+      {inner}
+    </React.Fragment>
+  );
+}
+
 // MediaImg / CropFrame / imageCandidates moved to app/shared.jsx (eager): the
 // front page renders cover photos through window.MediaImg before the reader
 // bundle loads, so the image components must exist in the always-loaded core.
@@ -388,6 +469,12 @@ function ArticleRead(props) {
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
   const [fnPop, setFnPop] = useState(null);
   const fnLeaveTimer = useRef(null);
+  // an owned claim or a void — the author's own analysis/account/position, or a
+  // documented absence — previews the same way a citation does: hover (desktop)
+  // or tap (phone) floats up a card explaining HOW it's grounded. There's no
+  // source to cite (that's the point), so it carries its own light card (GroundingPop).
+  const [groundPop, setGroundPop] = useState(null);
+  const groundLeaveTimer = useRef(null);
   // Source & note previews — the margin cards that float up when you hover a claim
   // or a footnote. On by default (that's the point of a grounded read), but a
   // reader who wants nothing popping up can switch them off, and the choice sticks.
@@ -397,7 +484,7 @@ function ArticleRead(props) {
   useEffect(() => {
     try { localStorage.setItem("npj.previews", previews ? "1" : "0"); } catch (e) {}
     // turning them off dismisses anything currently floating
-    if (!previews) { setHover(null); setFnPop(null); setActiveSrc(null); }
+    if (!previews) { setHover(null); setFnPop(null); setGroundPop(null); setActiveSrc(null); }
   }, [previews]);
   const footnoteByKey = React.useMemo(() => {
     const m = {};
@@ -492,6 +579,26 @@ function ArticleRead(props) {
     const el = document.getElementById("fn-" + key);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
   }, []);
+
+  // owned-claim / void preview — mirrors enterFn: hover (desktop) or tap (phone)
+  // an assertion the author owns (analysis/account/position) or a documented void,
+  // and a card explaining HOW it's grounded floats up beside it; leaving hides it
+  // after a beat so a slide onto the card keeps it open. Gated on Previews, exactly
+  // like the citation and footnote cards.
+  const enterGround = useCallback((e, tok) => {
+    if (!previews || !tok) return;
+    if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
+    const r = e.currentTarget.getBoundingClientRect();
+    const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    setGroundPop({ tok, x: r.left, y: r.bottom,
+      mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
+      blockL: railBlockL, blockR: railBlockR });
+  }, [previews, railBlockL, railBlockR]);
+  const scheduleGroundLeave = useCallback(() => {
+    if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
+    groundLeaveTimer.current = setTimeout(() => setGroundPop(null), 240);
+  }, []);
+  const cancelGroundLeave = useCallback(() => { if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current); }, []);
 
   // every passage a given source backs (newest model: sourceList carries the
   // claim ids; claimById carries each span's text) — drives the click-to-jump
@@ -713,30 +820,59 @@ function ArticleRead(props) {
       }
       return <React.Fragment key={i}>{t.text || ""}</React.Fragment>;
     }
-    // an OWNED claim — the author's analysis/account/position. It publishes as
-    // prose and reads like it; the transparency lens is the only thing that tints
-    // it (and names the stance on hover). No source card — there's no citation.
+    // an OWNED claim — the author's analysis/account/position, or a documented
+    // void (an asserted absence). It publishes as prose and reads like it; the
+    // transparency lens tints it, and — like a citation — Previews floats up a
+    // card on hover/tap saying HOW it's grounded. No source card; there's no
+    // citation. That's the whole point of an owned claim.
     if (t && t.c != null && t.stance && (!t.src || !t.src.length)) {
       const kind = STANCE_KIND[t.stance] || "own-analysis";
       const gm = GROUND_KINDS[kind];
-      // Owned claims read as clean prose; the transparency lens is the only thing
-      // that marks them. An asserted absence is a distinct epistemic claim and
-      // carries WHICH kind it is (removed/withheld/silent/inaccessible/unrecorded/
-      // ambient): the kind sets the mark glyph and shades it by whether the absence
-      // is shown, located, or only inferred (data-void; see void-kinds.js + styles.css).
-      // But, like every grounding mark, that surfaces only with the lens on — a void
-      // is invisible on a clean read.
+      // An asserted absence is a distinct epistemic claim and carries WHICH kind it
+      // is (removed/withheld/silent/inaccessible/unrecorded/ambient): the kind sets
+      // the mark glyph and shades it by whether the absence is shown, located, or
+      // only inferred (data-void; see void-kinds.js + styles.css). The lens-on glyph
+      // surfaces it visually; the hover card (GroundingPop) reads it out in full.
       const isAbsence = t.stance === "absence";
       const VK = window.NpjVoidKinds;
       const vk = isAbsence && VK ? VK.norm(t.vkind) : null;
       const vdef = vk ? VK.get(vk) : null;
       const glyph = vdef ? vdef.glyph : gm.glyph;
-      const title = !transparency ? undefined
+      const oid = t.id || "o" + i;
+      // With Previews on, the floating card carries the whole explanation, so the
+      // native title would only double it up — keep title as the quiet fallback for
+      // a previews-off reader who still has the lens on.
+      const title = (previews || !transparency) ? undefined
         : isAbsence
           ? ((vdef ? vdef.label + " void — you can " + ({ shown: "point to it", located: "locate it", inferred: "only assert it" }[VK.reader(vk)]) : gm.label) + (t.note ? " — " + t.note : ""))
           : gm.label;
+      // the card needs the token's grounding fields; pass a trim copy with a stable id
+      const ownedTok = { id: oid, c: t.c, stance: t.stance, note: t.note, vkind: t.vkind };
+      const gAria = isAbsence
+        ? ((vdef ? vdef.label : "Unspecified") + " void — an asserted absence" + (vk ? ", " + VK.reader(vk) : "") + ". Press Enter for how it's grounded.")
+        : (gm.label + " — " + gm.note + " Press Enter for detail.");
+      const popOpen = !!(groundPop && groundPop.tok && groundPop.tok.id === oid);
+      // Interactive only while Previews is on. Off → an inert, plain span (the
+      // clean read): no card, no focus stop, just the lens's optional tint + title.
+      const popProps = previews ? {
+        tabIndex: 0, role: "button", "aria-haspopup": "dialog",
+        "aria-expanded": popOpen ? "true" : "false", "aria-label": gAria,
+        onMouseEnter: isPhone ? undefined : (e) => enterGround(e, ownedTok),
+        onMouseLeave: isPhone ? undefined : scheduleGroundLeave,
+        onKeyDown: (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            if (popOpen) setGroundPop(null);
+            else enterGround({ currentTarget: e.currentTarget }, ownedTok);
+          } else if (e.key === "Escape" && groundPop) {
+            e.stopPropagation(); setGroundPop(null); e.currentTarget.focus();
+          }
+        },
+        onClick: (e) => { if (isPhone) enterGround({ currentTarget: e.currentTarget }, ownedTok); }
+      } : {};
       return (
-        <span key={i} id={"claim-" + (t.id || "o" + i)} className="gowned" data-ground={kind} data-void={vk ? VK.reader(vk) : undefined} title={title}>
+        <span key={i} id={"claim-" + oid} className="gowned" data-ground={kind} data-void={vk ? VK.reader(vk) : undefined}
+          title={title} {...popProps}>
           {ent ? markEntities(t.c, ent, "o" + i) : t.c}
           {transparency && <sup className="gmark" style={{ color: gm.mark }}>{glyph}</sup>}
         </span>
@@ -792,7 +928,7 @@ function ArticleRead(props) {
   const topInlineImgIdx = hasHero ? -1 : (A.body || []).findIndex(b => b.type === "img");
 
   const Body = (
-    <article ref={bodyRef} className={transparency ? "ground-lens" : undefined} style={{ fontFamily: "var(--serif)" }}
+    <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}
       onMouseUp={() => setTimeout(refreshBubble, 0)} onKeyUp={(e) => { if (e.shiftKey || e.key === "Shift") setTimeout(refreshBubble, 0); }}>
       {A.body.map((b, i) => {
         if (b.type === "h2" || b.type === "h3") {
@@ -992,6 +1128,8 @@ function ArticleRead(props) {
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
           onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
+        <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
+          onClose={() => setGroundPop(null)} />
         {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
       </div>
     );
@@ -1032,6 +1170,9 @@ function ArticleRead(props) {
 
       <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
         onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
+
+      <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
+        onClose={() => setGroundPop(null)} />
 
       {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
 
