@@ -866,6 +866,7 @@ function ArticleRead(props) {
       {Header}
       {Body}
       <MethodsFooter sourceList={sourceList} claimCount={claimList.length} spansForSource={spansForSource} onJump={jumpToClaim} />
+      <CompositionFooter composition={A.composition} />
     </div>
   );
 
@@ -1168,4 +1169,66 @@ function MethodsFooter({ sourceList, claimCount, spansForSource, onJump }) {
   );
 }
 
-Object.assign(window, { ArticleRead, MediaImg });
+// How this was written — a calm, honest strip under the receipts. It reads the
+// `composition` record the editor captured (app/composition.js): typed vs.
+// pasted characters, the biggest single paste, how much was revised away, over
+// how long. NEVER the words — only counts and timestamps — so it can hint that
+// a passage may have arrived whole (from notes, another doc, an AI tool) while
+// being upfront that this is context, not proof. Renders in BOTH the preview
+// and the published reader (it lives inside <Main>); silently absent on pieces
+// published before this shipped, or too short to characterize fairly.
+function CompositionFooter({ composition }) {
+  const isPhone = window.useIsMobile(760);
+  const s = (window.NpjComposition && window.NpjComposition.summary) ? window.NpjComposition.summary(composition) : null;
+  if (!s) return null;
+  const pct = (x) => Math.round(x * 100);
+  const words = (chars) => Math.max(1, Math.round(chars / 5.5));
+  const toneColor = ({ calm: "var(--verified)", note: "var(--review)", warn: "var(--reject)" })[s.tone] || "var(--ink-soft)";
+  const typedW = Math.max(2, Math.round(s.typedPct * 100));
+  const pastedW = Math.max(0, 100 - typedW);
+  const span = !s.started ? null
+    : s.dayCount > 1 ? ("drafted across " + s.dayCount + " days")
+    : s.activeMin >= 1 ? ("drafted in one sitting · ~" + s.activeMin + " min hands-on")
+    : "drafted in one sitting";
+  // re-landing your OWN already-cited text isn't an outside import — call it out
+  const groundedShare = s.pasted ? s.groundedPasted / s.pasted : 0;
+  const notes = [];
+  if (s.dominantPaste) notes.push("one pasted block of ~" + words(s.maxPaste) + " words");
+  if (s.largePasteCount > (s.dominantPaste ? 1 : 0)) notes.push(s.largePasteCount + " large pastes");
+  if (s.heavilyRevised) notes.push("substantially revised");
+  if (groundedShare >= 0.34 && s.groundedPasted >= 120) notes.push(pct(groundedShare) + "% of pasted text was your own cited writing");
+
+  return (
+    <section style={{ margin: "30px 0 0", borderTop: "1.5px solid var(--rule)", paddingTop: 16 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+        <h4 className="np-eyebrow" style={{ margin: 0, color: "var(--ink-soft)" }}>How this was written</h4>
+        <span className="np-mono" style={{ fontSize: 11, color: toneColor, border: "1px solid " + toneColor, padding: "1px 7px", borderRadius: 2, fontWeight: 600 }}>{s.label}</span>
+        {span && <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{span}</span>}
+      </div>
+      {/* typed vs. pasted — a single proportional bar, captioned in plain numbers */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, flexWrap: isPhone ? "wrap" : "nowrap" }}>
+        <div title={pct(s.typedPct) + "% typed · " + pct(s.pastedPct) + "% pasted"}
+          style={{ display: "flex", height: 9, flex: isPhone ? "1 1 100%" : "0 0 220px", width: isPhone ? "100%" : 220, border: "1px solid var(--ink)", overflow: "hidden" }}>
+          <span style={{ width: typedW + "%", background: "var(--ink)" }} />
+          <span style={{ width: pastedW + "%", background: "var(--yellow)" }} />
+        </div>
+        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+          <strong style={{ color: "var(--ink)" }}>{pct(s.typedPct)}%</strong> typed · <strong style={{ color: "var(--ink)" }}>{pct(s.pastedPct)}%</strong> pasted
+          {s.pasteCount ? <span> · {s.pasteCount} paste{s.pasteCount === 1 ? "" : "s"}</span> : null}
+        </span>
+      </div>
+      {notes.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          {notes.map((n, i) => (
+            <span key={i} className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", background: "var(--card)", border: "1px solid var(--rule)", padding: "2px 8px" }}>{n}</span>
+          ))}
+        </div>
+      )}
+      <p className="np-mono" style={{ fontSize: 10, lineHeight: 1.55, color: "var(--ink-soft)", maxWidth: "64ch", margin: "12px 0 0" }}>
+        A record of how the draft was assembled — not what it says. Pasting can be a quote, your own notes, or text from another tool; we can't tell which, and the words themselves were never stored. Read it as context, not a verdict.
+      </p>
+    </section>
+  );
+}
+
+Object.assign(window, { ArticleRead, MediaImg, CompositionFooter });

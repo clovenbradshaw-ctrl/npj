@@ -191,7 +191,7 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status", "composition"];
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -274,6 +274,10 @@
       // normalize on read too, so a draft already saved with a stranded marker
       // renders right for every consumer (reader + Substack export) without a re-save
       body: mergeStrandedFootnotes(Array.isArray(state.body) ? state.body : []),
+      // how the piece was assembled (typed vs. pasted, paste sizes, timeline) —
+      // aggregate counts only, never the words; absent on pieces published before
+      // this shipped, so the reader's footer simply omits it for them
+      composition: (state.composition && typeof state.composition === "object") ? state.composition : null,
       sources, versions
     };
     return { article, sources, versions, events: events.map(e => e.ev) };
@@ -870,6 +874,9 @@
       body: blocks,
       sources
     };
+    // composition provenance rides the genesis when the editor captured it
+    // (aggregate counts only — see app/composition.js); harmless when absent
+    if (o.composition && typeof o.composition === "object") operand.composition = o.composition;
     const line = genesisLine(operand, actor);
     const folded = foldLog(line);
     return { line, operand, article: folded.article };

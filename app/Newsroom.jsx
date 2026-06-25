@@ -194,7 +194,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     sources.forEach(s => { if (window.NPJ.SOURCES[s.key]) sourceRecords[s.key] = window.NPJ.SOURCES[s.key]; });
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
     const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, room, structure: structLog.current });
+    const composition = window.NpjComposition ? window.NpjComposition.serialize(draftId) : undefined;
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
     saveTimer.current = null;
   }, [draftId, title, fileSlug, tags, column, sources, room]);
   const persistRef = useRef(persist);
@@ -223,6 +224,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (d.sourceRecords) Object.assign(window.NPJ.SOURCES, d.sourceRecords); // rehydrate source cards
         if (d.citations && window.NpjCitations) window.NpjCitations.hydrate(d.citations); // rehydrate citation records
         if (d.sentenceLedger && window.NpjSentences) sentenceLedger.current = window.NpjSentences.hydrateLedger(d.sentenceLedger); // stable sentence ids survive reload
+        if (d.composition && window.NpjComposition) window.NpjComposition.hydrate(draftId, d.composition); // carry the typed-vs-pasted record across reloads
         if (ed.current && d.html) {
           ed.current.innerHTML = d.html;
           // older drafts predate the dek — every article gets the field
@@ -276,6 +278,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         }
         setTimeout(scanHeadings, 30); setRev(v => v + 1);
       }
+      // baseline the composition tracker to whatever's now in the editor (seed or
+      // restored body) so the first real keystroke — not the load — starts the count
+      if (window.NpjComposition) window.NpjComposition.attach(draftId, ed.current ? (ed.current.textContent || "").length : 0);
       restored.current = true;
     })();
     return () => { alive = false; };
@@ -796,6 +801,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     walk(out, src);
     return { html: out.innerHTML, keys: Object.keys(keys) };
   };
+  // ---- composition provenance (app/composition.js) ----
+  // Record how the body is assembled — typed vs. pasted, paste sizes, deletions
+  // — as plain counts (never the words), so the preview + published footer can
+  // show a reader how the piece came together. Guarded behind `restored` so the
+  // initial draft load (seed / rehydrate) never counts as fresh writing.
+  const recordComposition = (e) => {
+    if (!restored.current || !window.NpjComposition || !ed.current) return;
+    const len = (ed.current.textContent || "").length;
+    const it = (e && e.nativeEvent && e.nativeEvent.inputType) || "";
+    window.NpjComposition.onInput(draftId, len, it);
+  };
+  // bracket OUR programmatic insertion so its synthetic input event isn't read
+  // as typing — the paste is booked here, by its known size, exactly once
+  const notePaste = (n, opts, insert) => {
+    if (window.NpjComposition && n) window.NpjComposition.recordPaste(draftId, n, opts || {});
+    if (window.NpjComposition) window.NpjComposition.mute(draftId);
+    try { insert(); }
+    finally {
+      if (window.NpjComposition) {
+        window.NpjComposition.unmute(draftId);
+        // re-baseline the length counter to the post-insert body, so the next real
+        // keystroke measures from here — robust even on browsers that don't fire an
+        // input event for our programmatic execCommand insert
+        window.NpjComposition.attach(draftId, ed.current ? (ed.current.textContent || "").length : 0);
+      }
+    }
+  };
   const onPaste = (e) => {
     const cd = e.clipboardData; if (!cd) return;
     e.preventDefault();
@@ -813,7 +845,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const prov = provenanceHtml(cd.getData("text/html") || "");
     if (prov.html) {
       if (/\n/.test(text)) escapeBlock(); // a multi-line paste never lands inside a headline / the dek
-      document.execCommand("insertHTML", false, prov.html);
+      notePaste((text || "").length, { grounded: true }, () => document.execCommand("insertHTML", false, prov.html));
       // re-register any source the pasted spans cite, so it shows in the library
       if (prov.keys.length) setSources(s => {
         const have = {}; s.forEach(x => { have[x.key] = 1; });
@@ -828,7 +860,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     }
     if (!text) return;
     if (/\n/.test(text)) escapeBlock(); // block-level paste never lands inside a headline or the dek
-    window.NpjPlainText.insert(text);
+    notePaste(text.length, { kind: "paste" }, () => window.NpjPlainText.insert(text));
     scanHeadings(); scheduleSave();
   };
   const caretToPoint = (e) => {
@@ -848,7 +880,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!text) return;
     caretToPoint(e);
     if (/\n/.test(text)) escapeBlock();
-    window.NpjPlainText.insert(text);
+    notePaste(text.length, { kind: "drop" }, () => window.NpjPlainText.insert(text));
     scanHeadings(); scheduleSave();
   };
 
@@ -892,7 +924,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     try {
       const gen = window.NpjArticles.genesisFromContent(
         { html, title, tags, column, sources },
-        { slug: fileSlug || slugify(title), headline: title, actor }
+        { slug: fileSlug || slugify(title), headline: title, actor,
+          composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null }
       );
       setPreviewDoc(gen.article);
     } catch (e) { setPreviewDoc(null); }
@@ -2117,7 +2150,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={() => { scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
@@ -2681,7 +2714,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       // authors carries the userid (meMx); byline overrides the shown name only
       // when it was customized away from the contributor's own resolved name
       authors: bylineAuthors, editors: bylineEditors,
-      byline: unsigned ? "Unsigned" : bylineOverride
+      byline: unsigned ? "Unsigned" : bylineOverride,
+      // how the draft was assembled (typed vs. pasted, paste sizes, timeline) —
+      // aggregate counts only, no words; ships with the piece for the reader's footer
+      composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null
     });
     // move any media-store images onto archive.org (download + reupload, or the
     // Wayback fallback), then rebuild the genesis line from the mutated operand
