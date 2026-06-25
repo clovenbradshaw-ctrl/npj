@@ -6,6 +6,19 @@
 // The caption + photo credit under an image. The credit is markdown ([label](url))
 // like a contributor bio, rendered through npjRichText so a [outlet](https://…)
 // becomes a safe, sanitized link — never raw innerHTML.
+// A photo the author placed that hasn't reached the durable store yet (its upload
+// is pending or failed). It shows in Preview so the layout is faithful, but it
+// won't ride into the published piece until it uploads — say so plainly instead of
+// letting it silently vanish at publish. Only ever set on a preview render.
+function NotUploadedNote() {
+  return (
+    <div className="np-mono" style={{ marginTop: 6, fontSize: 11, lineHeight: 1.45, color: "var(--reject, #e67b3c)", display: "flex", alignItems: "baseline", gap: 6 }}>
+      <span aria-hidden="true">⚠</span>
+      <span>Not uploaded yet — this photo won’t appear in the published piece until its upload finishes.</span>
+    </div>
+  );
+}
+
 function PhotoFigCaption({ caption, credit }) {
   if (!caption && !credit) return null;
   return (
@@ -658,6 +671,7 @@ function ArticleRead(props) {
           return (
             <figure key={i} style={{ margin: "26px 0" }}>
               <MediaImg srcs={[b.store, b.src]} alt={b.caption || ""} fit={b.fit} crop={b.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+              {b.local ? <NotUploadedNote /> : null}
               <PhotoFigCaption caption={b.caption} credit={b.credit} />
             </figure>
           );
@@ -722,6 +736,7 @@ function ArticleRead(props) {
   const Hero = (heroImg && heroImg.src) ? (
     <figure style={{ margin: "4px 0 24px" }}>
       <MediaImg srcs={[heroImg.store, heroImg.src]} alt={heroImg.caption || A.headline || ""} fit={heroImg.fit} crop={heroImg.crop} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+      {heroImg.local ? <NotUploadedNote /> : null}
       <PhotoFigCaption caption={heroImg.caption} credit={heroImg.credit} />
     </figure>
   ) : null;

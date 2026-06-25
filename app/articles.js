@@ -288,7 +288,10 @@
       image: bannerBlock ? {
         src: bannerBlock.src, store: bannerBlock.store || "", caption: bannerBlock.caption || "",
         credit: bannerBlock.credit || "",
-        banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null
+        banner: !!bannerBlock.banner, fit: bannerBlock.fit || "", crop: bannerBlock.crop || null,
+        // a not-yet-uploaded lead photo (preview only) carries the flag through so
+        // the reader's hero can mark it "won't publish yet"
+        local: !!bannerBlock.local
       } : null,
       // normalize on read too, so a draft already saved with a stranded marker
       // renders right for every consumer (reader + Substack export) without a re-save
@@ -536,7 +539,11 @@
     };
   }
 
-  function htmlToBlocks(html) {
+  function htmlToBlocks(html, opts) {
+    // preview: keep a photo that's still a session data: URL (its upload hasn't
+    // landed/failed) so the editor's Preview shows what the author placed. Off for
+    // the real publish, so a data: URL never rides into the committed record.
+    const preview = !!(opts && opts.preview);
     const root = document.createElement("div"); root.innerHTML = html || "";
     let idSeq = 0;
     const newId = () => "cl-" + Date.now().toString(36) + "-" + (++idSeq);
@@ -731,10 +738,20 @@
             else if (isArchive(u)) archiveU = archiveU || u;
             else otherU = otherU || u;
           });
-          const src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
+          let src = archiveU || storeU || (okSrc(otherU) ? otherU : null);
+          // Preview only: no durable URL, but the slot carries the freshly-dropped
+          // image as a data: URL (inlined for the preview build) — keep it, flagged
+          // `local`, so Preview shows the photo and the reader can mark it as not
+          // yet uploaded. Publish never sets preview, so this never ships.
+          let local = false;
+          if (!src && preview) {
+            const dataU = cands.find(u => /^data:image\//i.test(u));
+            if (dataU) { src = dataU; local = true; }
+          }
           if (src) {
             const block = { type: "img", src, caption };
             if (creditText) block.credit = creditText;
+            if (local) block.local = true;
             if (storeU && storeU !== src) block.store = storeU;
             if (isBanner) block.banner = true;
             // fill mode + crop chosen on the slot ride along so the reader and
@@ -910,7 +927,7 @@
   function genesisFromContent(content, opts) {
     const c = content || {};
     const o = opts || {};
-    const { blocks, headline, dek } = htmlToBlocks(c.html || "");
+    const { blocks, headline, dek } = htmlToBlocks(c.html || "", { preview: !!o.preview });
     const usedKeys = {};
     blocks.forEach(b => {
       (b.tokens || []).forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); });

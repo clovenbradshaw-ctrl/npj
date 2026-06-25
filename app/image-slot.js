@@ -91,6 +91,18 @@
   const MAX_DIM = 3000;
   // A touch higher than a photo would need, so screenshot text keeps its edges.
   const WEBP_Q = 0.9;
+  // Size ladder for a media-store upload. A tall document at MAX_DIM/q=0.9 can be
+  // several MB — bigger than some homeservers allow — so if the store rejects it
+  // (a 413, or its advertised m.upload.size), step the long-side cap + quality
+  // down and re-encode from the SAME decoded bitmap until it fits, instead of
+  // dropping the photo. The first tier is the legible default; the last is a
+  // still-readable last resort.
+  const UPLOAD_TIERS = [
+    { maxDim: MAX_DIM, q: WEBP_Q },
+    { maxDim: 2400, q: 0.85 },
+    { maxDim: 1800, q: 0.80 },
+    { maxDim: 1280, q: 0.78 },
+  ];
   // Raster formats only. SVG is excluded (can carry script; createImageBitmap
   // on SVG blobs is inconsistent). GIF is excluded because the canvas
   // re-encode keeps only the first frame, so an animated GIF would silently
@@ -186,11 +198,12 @@
   // width-sized box (which turned dense text to mush). Never upscales past the
   // original. WebP keeps alpha and is ~10× smaller than PNG, so there's no need
   // for per-image format picking.
-  function scaledCanvas(bitmap, targetW) {
-    const wantW = Math.max(1, Math.round(targetW * 2)) || MAX_DIM;   // retina the width
+  function scaledCanvas(bitmap, targetW, maxDim) {
+    const cap = maxDim || MAX_DIM;
+    const wantW = Math.max(1, Math.round(targetW * 2)) || cap;       // retina the width
     let scale = wantW / bitmap.width;
     const longest = Math.max(bitmap.width, bitmap.height);
-    if (longest * scale > MAX_DIM) scale = MAX_DIM / longest;        // but cap the long side
+    if (longest * scale > cap) scale = cap / longest;               // but cap the long side
     scale = Math.min(1, scale);                                      // never upscale
     const w = Math.max(1, Math.round(bitmap.width * scale));
     const h = Math.max(1, Math.round(bitmap.height * scale));
@@ -200,21 +213,15 @@
     return canvas;
   }
 
+  function canvasToBlob(canvas, q) {
+    return new Promise((res, rej) =>
+      canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/webp', q));
+  }
+
   async function toDataUrl(file, targetW) {
     const bitmap = await createImageBitmap(file);
     try { return scaledCanvas(bitmap, targetW).toDataURL('image/webp', WEBP_Q); }
     finally { bitmap.close && bitmap.close(); }
-  }
-
-  // Same downscale as toDataUrl, but yields a Blob for upload to a media store —
-  // smaller than a data URL, and the bytes go straight onto the wire.
-  async function toBlob(file, targetW) {
-    const bitmap = await createImageBitmap(file);
-    try {
-      const canvas = scaledCanvas(bitmap, targetW);
-      return await new Promise((res, rej) =>
-        canvas.toBlob((b) => b ? res(b) : rej(new Error('encode failed')), 'image/webp', WEBP_Q));
-    } finally { bitmap.close && bitmap.close(); }
   }
 
   // A pre-encoded blob (e.g. from the photo editor) → data URL, for the no-media
@@ -695,54 +702,92 @@
       // resumes — bump + capture a generation so stale work bails.
       const gen = ++this._gen;
       const media = window.NpjMedia;
+      const w = this.clientWidth || this.offsetWidth || MAX_DIM;
       // Preferred path: upload to the media store and ride the durable https URL
       // in `src` (same as an archive.org link) so it persists in drafts and gets
       // moved onto archive.org at publish — never base64 bytes in the commit.
       if (media && media.canUpload && media.canUpload()) {
         const prevCap = this._cap.textContent;
         this._cap.textContent = 'Uploading…';
+        let bitmap = null;
         try {
-          const w = this.clientWidth || this.offsetWidth || MAX_DIM;
-          const blob = await toBlob(file, w);
+          // Decode once; the size ladder re-encodes from this same bitmap so a
+          // tall document that overshoots the homeserver's limit is shrunk to fit
+          // rather than bounced. createImageBitmap can throw on a pathological
+          // source — that lands in the catch and the local fallback below.
+          bitmap = await createImageBitmap(file);
+          if (gen !== this._gen) return;
+          const limit = (media.uploadLimit ? await media.uploadLimit() : 0) || 0;
           if (gen !== this._gen) return;
           const base = (file.name || 'image').replace(/\.[^.]+$/, '') || 'image';
-          const up = await media.upload(blob, base + '.webp');
-          if (gen !== this._gen) return;
+          let up = null, lastErr = null;
+          for (let ti = 0; ti < UPLOAD_TIERS.length; ti++) {
+            const t = UPLOAD_TIERS[ti];
+            const last = ti === UPLOAD_TIERS.length - 1;
+            const blob = await canvasToBlob(scaledCanvas(bitmap, w, t.maxDim), t.q);
+            if (gen !== this._gen) return;
+            // Known limit → skip a tier we already know won't fit (≈5% headroom
+            // for request overhead) and re-encode smaller without a wasted POST.
+            if (limit && blob.size > limit * 0.95 && !last) { this._cap.textContent = 'Resizing to fit…'; continue; }
+            try { up = await media.upload(blob, base + '.webp'); break; }
+            catch (err) {
+              if (gen !== this._gen) return;
+              lastErr = err;
+              // Only a SIZE rejection is worth re-encoding smaller for; anything
+              // else (auth, network) is terminal — surface it.
+              if (err && err.tooLarge && !last) { this._cap.textContent = 'Resizing to fit…'; continue; }
+              throw err;
+            }
+          }
+          if (!up) throw lastErr || new Error('Upload failed.');
           this._setRemoteSrc(up.url);
         } catch (err) {
           if (gen !== this._gen) return;
           this._cap.textContent = prevCap;
-          this._render();
-          this._setError((err && err.message) || 'Upload failed.');
+          // Never lose the drop: keep a session copy so the photo still shows in
+          // the editor and (flagged) in Preview, and say it didn't upload — so the
+          // author knows it won't publish until the upload goes through.
+          const kept = await this._fallbackLocal(file, w, gen);
+          if (gen !== this._gen) return;
+          this._setError(kept
+            ? ((err && err.message ? err.message + ' ' : '') + "Kept a local copy — it won't publish until it uploads.")
+            : ((err && err.message) || 'Upload failed.'));
           console.warn('<image-slot> upload failed:', err);
-        }
+        } finally { if (bitmap && bitmap.close) bitmap.close(); }
         return;
       }
       // Fallback (no signed-in media store — e.g. a logged-out standalone embed):
       // a session-only data-URL preview. It shows, but it does not publish.
-      try {
-        const w = this.clientWidth || this.offsetWidth || MAX_DIM;
-        const url = await toDataUrl(file, w);
-        if (gen !== this._gen) return;
-        // Only exit reframe once the new image is in hand — a rejected type
-        // or decode failure leaves the in-progress crop untouched.
-        this._exitReframe(false);
-        // a slot-set durable src would otherwise keep publishing the OLD
-        // image underneath this local replacement — retire it
-        this._dropCdnSrc();
-        const val = { u: url, s: 1, x: 0, y: 0 };
-        setSlot(this.id || '', val);
-        // Keep a session-local copy for id-less slots so the drop still
-        // shows, even though it cannot persist.
-        if (!this.id) { this._local = val; this._render(); }
-        // a local fill changes no attribute, so tell hosts (media rails,
-        // autosave) that this slot's content moved
-        this._announce(null);
-      } catch (err) {
-        if (gen !== this._gen) return;
-        this._setError('Could not read that image.');
-        console.warn('<image-slot> ingest failed:', err);
-      }
+      const kept = await this._fallbackLocal(file, w, gen);
+      if (gen === this._gen && !kept) this._setError('Could not read that image.');
+    }
+
+    // Keep the drop as a session-only data: URL on the slot (sidecar for an id'd
+    // slot, in-memory for an id-less one) — used when there's no media store AND as
+    // the safety net when an upload fails, so the photo stays visible instead of
+    // vanishing. A data: URL never reaches the committed record (the NPJ builder
+    // drops it from publish), so this is a stopgap, not a substitute for upload.
+    // Returns true when a copy was kept, false when even the local decode failed.
+    async _fallbackLocal(file, targetW, gen) {
+      let url;
+      try { url = await toDataUrl(file, targetW); }
+      catch (err) { if (gen === this._gen) console.warn('<image-slot> ingest failed:', err); return false; }
+      if (gen !== this._gen) return false;
+      // Only exit reframe once the new image is in hand — a rejected type or decode
+      // failure leaves the in-progress crop untouched.
+      this._exitReframe(false);
+      // a slot-set durable src would otherwise keep publishing the OLD image
+      // underneath this local replacement — retire it
+      this._dropCdnSrc();
+      const val = { u: url, s: 1, x: 0, y: 0 };
+      setSlot(this.id || '', val);
+      // Keep a session-local copy for id-less slots so the drop still shows, even
+      // though it cannot persist.
+      if (!this.id) { this._local = val; this._render(); }
+      // a local fill changes no attribute, so tell hosts (media rails, autosave)
+      // that this slot's content moved
+      this._announce(null);
+      return true;
     }
 
     // ── Edit (crop + hard redact) ───────────────────────────────────────────
