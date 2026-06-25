@@ -15,6 +15,12 @@ const NR = {
 const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
+// clean-read preference (the toolbar's Citations eye). Default ON — highlights,
+// marker chips and footnotes are shown. "0" means the author chose a clean read
+// and it should survive reloads instead of snapping back on every refresh.
+const CITEHL_KEY = "npj_nr_citehl";
+function nrCiteHl() { try { return localStorage.getItem(CITEHL_KEY) !== "0"; } catch (e) { return true; } }
+
 // A source the file explorer/viewer should open: an uploaded document, or any
 // source whose content the app can render inline (image / pdf / text). Web-link
 // snapshots are excluded — they keep their "open ↗".
@@ -333,7 +339,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // so a sentence's grounding follows it through edits, moves, reloads.
   const sentenceLedger = useRef(window.NpjSentences ? window.NpjSentences.newLedger() : { v: 1, seq: 0, entries: {} });
   const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
-  const [citeHl, setCiteHl] = useState(true);       // show citation/claim highlights in the prose editor — off = a clean read
+  const [citeHl, setCiteHl] = useState(nrCiteHl);   // show citation/claim highlights in the prose editor — off = a clean read (remembered across reloads)
   const [rev, setRev] = useState(0);                // bump to recompute span counts
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -2722,10 +2728,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <Sep />
-        {/* clean-read toggle: hide the citation/claim highlights (tints, underlines,
-            stance glyphs, marker chips) without touching the words or their sources */}
-        <button onMouseDown={e => e.preventDefault()} onClick={() => setCiteHl(v => !v)} aria-pressed={!citeHl}
-          title={citeHl ? "Citation highlights are on — click to hide them and read the prose clean" : "Citation highlights are hidden — click to show them"}
+        {/* clean-read toggle: hide every citation overlay — the claim highlights
+            (tints, underlines, stance glyphs), the inline citation + footnote
+            marker chips, and the Footnotes list — for a clean read, without
+            touching the words, their sources or the notes. Remembered across
+            reloads (localStorage, CITEHL_KEY). */}
+        <button onMouseDown={e => e.preventDefault()} onClick={() => setCiteHl(v => { const next = !v; try { localStorage.setItem(CITEHL_KEY, next ? "1" : "0"); } catch (e) {} return next; })} aria-pressed={!citeHl}
+          title={citeHl ? "Citations & footnotes shown — click for a clean read (hides the highlights, marker chips and footnotes)" : "Clean read — highlights, marker chips and footnotes hidden. Click to show them"}
           className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
           {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
         </button>
