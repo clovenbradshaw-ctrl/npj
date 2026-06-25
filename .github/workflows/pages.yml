@@ -1,0 +1,56 @@
+name: Deploy to GitHub Pages
+
+# Why this workflow exists
+# ------------------------
+# The site is a no-build static app (in-browser Babel; libs load at runtime),
+# so it was being served by the legacy "Deploy from a branch" mechanism, which
+# runs an unnecessary Jekyll build and — more importantly — offers no way to
+# serialize deployments. When several PRs merge to main seconds apart (as the
+# automated merges do), those branch deployments collide: the GitHub Pages API
+# rejects the newer one with "due to in progress deployment" (a hard failure)
+# or concurrency cancels it. That is the cause of the failed/cancelled
+# "pages build and deployment" runs.
+#
+# Deploying through Actions instead lets us hold a single "pages" concurrency
+# slot with cancel-in-progress: false, so overlapping pushes queue and run one
+# at a time instead of fighting over the live deployment.
+#
+# One-time switch required: Settings → Pages → Build and deployment → Source →
+# "GitHub Actions". Until that is set, this workflow's deploy step cannot take
+# over from the legacy branch build.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Least privilege: read the repo, mint the OIDC token, write the deployment.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. Do not cancel an in-flight deploy — let production
+# deployments finish and queue the next push behind them.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload site (served as-is — the app is no-build)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
