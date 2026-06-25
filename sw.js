@@ -12,7 +12,12 @@
  *     left entirely to the network. Article data MUST stay live; vendor with no
  *     CORS headers would only cache opaquely. So we don't touch them.
  */
-var CACHE = "npj-shell-v1";
+// app HTML/CSS/JSX — BUMP this after a deploy to force clients past the
+// stale-while-revalidate copy and fetch the new code on their next load.
+var SHELL = "npj-shell-v2";
+// pinned React/Babel live in their own cache so a SHELL bump never re-downloads
+// the ~3 MB compiler — they're immutable, so they survive every shell version.
+var VENDOR = "npj-vendor-v1";
 
 // pinned, content-addressed vendor — safe to keep forever
 var IMMUTABLE = [
@@ -31,7 +36,7 @@ self.addEventListener("activate", function (e) {
     // ~3 MB compiler on the next visit.
     var names = await caches.keys();
     await Promise.all(names
-      .filter(function (n) { return n.indexOf("npj-shell-") === 0 && n !== CACHE; })
+      .filter(function (n) { return n.indexOf("npj-shell-") === 0 && n !== SHELL; })
       .map(function (n) { return caches.delete(n); }));
     await self.clients.claim();
   })());
@@ -43,7 +48,7 @@ function isImmutable(url) {
 }
 
 async function cacheFirst(req) {
-  var cache = await caches.open(CACHE);
+  var cache = await caches.open(VENDOR);
   var hit = await cache.match(req);
   if (hit) return hit;
   var res = await fetch(req);
@@ -52,7 +57,7 @@ async function cacheFirst(req) {
 }
 
 async function staleWhileRevalidate(req) {
-  var cache = await caches.open(CACHE);
+  var cache = await caches.open(SHELL);
   var hit = await cache.match(req);
   var net = fetch(req).then(function (res) {
     if (res && res.ok) { try { cache.put(req, res.clone()); } catch (e) {} }
