@@ -585,8 +585,20 @@
               toks.push(owned);
               return;
             }
-            // a SOURCED span in the edit surface's round-trip shape (eo-claim).
-            if (isEo) {
+            // a SOURCED claim span. Two shapes, one rule: the SPAN ITSELF is the
+            // claim boundary, so the WHOLE wrapped text becomes the claim token —
+            //   eo-claim   — the post-publish edit surface's round-trip shape.
+            //   .claim-src — the live editor's wrapper. bindRangeToSource wraps the
+            //     author's exact selection (which may be more than one sentence) and
+            //     drops the numbered <sup class="md-cite"> as the NEXT sibling.
+            // Honouring the span keeps the published/preview claim identical to what
+            // the editor and the grounding workspace highlight. (The old path recursed
+            // into .claim-src and let the trailing marker run splitClaim, which shrank
+            // a multi-sentence selection to just its last sentence — so the
+            // transparency lens grounded less than the prose editor showed.) The
+            // trailing marker(s) still merge their key + pinned quote onto this token
+            // via the md-cite branch below (buf is empty → it folds into prev).
+            if (isEo || src.length) {
               flush();
               if (src.length) {
                 let q; try { q = JSON.parse(c.getAttribute("data-quotes") || "null") || undefined; } catch (e) {}
@@ -598,13 +610,13 @@
                   q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
                   if (!Object.keys(q).length) q = undefined;
                 }
-                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || newId(), q });
+                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId(), q });
               } else buf += plain(c);
               return;
             }
-            // a SOURCED .claim-src from the live editor is a transparent wrapper:
-            // recurse so its trailing <sup class="md-cite"> builds the citation
-            // token — the long-standing path, unchanged.
+            // a .claim-src with no source of its own (a transient/owned-forming
+            // wrapper) is transparent: recurse so its contents — and any trailing
+            // <sup class="md-cite"> — fold the long-standing way.
             walk(c);
             return;
           }
