@@ -3259,7 +3259,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, sources })} />}
       {previewDoc && window.ArticleRead && (
-        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} me={session && session.user_id} />
+        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
       )}
     </div>
   );

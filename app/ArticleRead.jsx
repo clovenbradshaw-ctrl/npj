@@ -250,7 +250,7 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
 // rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
 // <audio> for direct media files, or (for anything we don't recognize) the
 // link card, since the committed artifact is always the URL itself.
-function EmbedFigure({ url, caption, height }) {
+function EmbedFigure({ url, caption, height, reload }) {
   const u = String(url || "");
   let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
   // one resolver (window.NpjEmbed) maps the stored permalink to a player, the
@@ -263,7 +263,12 @@ function EmbedFigure({ url, caption, height }) {
     const style = r.panel
       ? { width: "100%", height: (height || (E && E.DEFAULT_HEIGHT) || 600), border: 0, display: "block" }
       : { width: "100%", aspectRatio: r.aspect || "16 / 9", border: 0, display: "block" };
-    media = <iframe src={r.src} title={caption || "embedded media"} style={style} allow={r.allow || undefined} allowFullScreen={!!r.fullscreen} loading="lazy" />;
+    // `reload` is the preview's refresh counter. When non-zero we hang it on the
+    // src as a throwaway param so the browser re-fetches the frame instead of
+    // serving the cached (or transiently failed) first load. The stored block keeps
+    // the clean URL; the reader passes no reload, so its src is untouched.
+    const src = reload ? r.src + (r.src.indexOf("?") >= 0 ? "&" : "?") + "npjcb=" + reload : r.src;
+    media = <iframe src={src} title={caption || "embedded media"} style={style} allow={r.allow || undefined} allowFullScreen={!!r.fullscreen} loading="lazy" />;
   }
   else if (r && r.kind === "video") media = <video controls preload="metadata" src={u} style={{ width: "100%", maxHeight: 460, background: "#000", display: "block" }} />;
   else if (r && r.kind === "audio") media = <audio controls preload="metadata" src={u} style={{ width: "100%" }} />;
@@ -290,7 +295,7 @@ function ArticleRead(props) {
           // very same publish pipeline). Same Header + Body the reader uses, just
           // dropped on the paper page with a Close affordance — no masthead,
           // control bar, evidence rails or modals.
-          preview, previewArticle, onClose } = props;
+          preview, previewArticle, onClose, onRefresh } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
   const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
@@ -299,6 +304,11 @@ function ArticleRead(props) {
   // reader instance, so the live page and the editor's Preview each carry their
   // own. Off by default: a clean read.
   const [transparency, setTransparency] = useState(false);
+  // Preview's "Refresh" bumps this. It re-keys every embed (forcing a brand-new
+  // iframe element) and rides along as a throwaway cache-buster on the frame src,
+  // so an embed that failed or got cached on its first load is fetched fresh —
+  // the way to tell a real rendering bug from a stale frame. Stays 0 in the reader.
+  const [reloadTick, setReloadTick] = useState(0);
   // a count per grounding kind, for the lens legend
   const groundTally = React.useMemo(() => {
     const tally = {};
@@ -741,7 +751,7 @@ function ArticleRead(props) {
           if (!imgs.length) return null;
           return <Carousel key={i} images={imgs} caption={b.caption} style={wideFig(26, 26)} />;
         }
-        if (b.type === "embed") return <EmbedFigure key={i} url={b.url} caption={b.caption} height={b.height} />;
+        if (b.type === "embed") return <EmbedFigure key={i + ":" + reloadTick} url={b.url} caption={b.caption} height={b.height} reload={reloadTick} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
@@ -880,6 +890,14 @@ function ArticleRead(props) {
             title="Transparency — colour each claim by how it's grounded: cited (⊤/⊨), the author's own (⊢/⊨/⊩), or needs a source (⊥)"
             style={{ display: "inline-flex", alignItems: "center", gap: 7, background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
             <I.swatches style={{ fontSize: 14 }} /> Transparency
+          </button>
+          {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
+             with a fresh cache-buster (reloadTick) — so an embed that's in the draft
+             but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
+          <button className="btn btn-sm" onClick={() => { setReloadTick(t => t + 1); if (onRefresh) onRefresh(); }}
+            title="Refresh — rebuild this preview from the editor and reload every embed, bypassing any cached frame"
+            style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <I.redo style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Refresh</span>
           </button>
           <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
         </div>
