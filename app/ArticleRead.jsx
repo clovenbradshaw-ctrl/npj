@@ -134,7 +134,9 @@ function besideColumn(mk, col, opts) {
   // as wide as a full card, shrunk to the roomier gutter, never below a readable
   // measure (a card narrower than this isn't worth pulling out to the side)
   const best = Math.max(blockL ? 0 : leftRoom, blockR ? 0 : rightRoom);
-  const w = Math.min(340, Math.max(248, best - gap - 12));
+  // a roomier card than a tooltip — wide enough to read a passage and click into
+  // without it feeling cramped, still capped so it stays a margin note, not a panel
+  const w = Math.min(404, Math.max(300, best - gap - 12));
   const canL = !blockL && leftRoom >= w + gap + 12;
   const canR = !blockR && rightRoom >= w + gap + 12;
   if (!canL && !canR) return null;
@@ -178,7 +180,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
     // no room either side — anchor under the marker (flip up near the foot)
-    const w = Math.min(340, vw - 24);
+    const w = Math.min(404, vw - 24);
     const left = Math.min(Math.max(12, x), vw - w - 12);
     const top = y + 8;
     const flip = top > vh - 260;
@@ -241,7 +243,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
 // losing your place. The note text still has its permanent home in the "Notes"
 // endnotes — this card is the inline preview, with a link down to it. Mirrors
 // HoverCard's positioning (margin card on a desktop; a bottom sheet on a phone).
-function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
+function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
   const { num, text, x, y, mk, col, blockL, blockR } = data;
@@ -257,7 +259,7 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
   } else if (beside) {
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
-    const w = Math.min(340, vw - 24);
+    const w = Math.min(404, vw - 24);
     const left = Math.min(Math.max(12, x - 16), vw - w - 12);
     const top = y + 8;
     const flip = top > vh - 220;
@@ -269,7 +271,13 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
       <div className="fnpop-h">
         <span className="np-mono fnpop-n">{num}</span>
         <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>Note</span>
-        {sheet && <button onClick={onClose} aria-label="Close note" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px" }}><I.x /></button>}
+        {onExpand && (
+          <button onMouseDown={e => e.preventDefault()} onClick={() => onExpand(data)} aria-label="Open in full" title="Open in full — take the main stage"
+            className="np-mono gpop-open" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, lineHeight: 1.4, cursor: "pointer", padding: "2px 7px", border: "1px solid var(--rule)", borderRadius: 4, background: "none", color: "var(--ink-soft)" }}>
+            <I.expand style={{ fontSize: 13 }} /> Open
+          </button>
+        )}
+        {sheet && <button onClick={onClose} aria-label="Close note" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>}
       </div>
       <div className="fnpop-b">
         {text ? (window.npjRichText ? window.npjRichText(text) : text) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
@@ -287,17 +295,11 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump }) {
   );
 }
 
-// The Previews twin of the citation card, for grounded things that have no source
-// to cite: an assertion the author owns (their analysis / account / position) or a
-// documented void (an asserted absence). Hover (desktop) or tap (phone) one and a
-// card floats up in the margin saying HOW it's grounded — by the author's own
-// declaration, or by a documented absence of a given kind, and whether that absence
-// is shown, located or only inferred (void-kinds.js). Mirrors FootnotePop's
-// positioning: a margin card on a desktop, a dismissible bottom sheet on a phone.
-function GroundingPop({ data, onEnter, onLeave, onClose }) {
-  const isPhone = window.useIsMobile(760);
-  if (!data) return null;
-  const { tok, x, y, mk, col, blockL, blockR } = data;
+// One place that turns an owned/void token into reader-facing grounding copy, so
+// the margin card (GroundingPop) and the full main-stage panel (GroundingStage)
+// read it the same way. There's no source to cite — that's the point of an owned
+// claim — so this copy IS the receipt.
+function groundingDetail(tok) {
   const isAbsence = tok.stance === "absence";
   const kind = isAbsence ? "absence" : (STANCE_KIND[tok.stance] || "own-analysis");
   const gm = GROUND_KINDS[kind] || GROUND_KINDS["own-analysis"];
@@ -305,20 +307,40 @@ function GroundingPop({ data, onEnter, onLeave, onClose }) {
   const vk = (isAbsence && VK) ? VK.norm(tok.vkind) : null;
   const vdef = vk ? VK.get(vk) : null;
   const reader = (isAbsence && VK) ? VK.reader(vk) : null;   // shown | located | inferred
-  const glyph = vdef ? vdef.glyph : gm.glyph;
-  // the small kicker echoes the two epistemic kinds the reader asked for by name —
-  // an assertion by the writer, or a void — and the headline names which one.
-  const kicker = isAbsence ? "Void" : "Assertion";
-  const headline = isAbsence ? (vdef ? vdef.label : "Unspecified kind") : gm.label;
-  const ariaLabel = isAbsence ? (vdef ? vdef.label + " void" : "Documented void") : gm.label;
-  const blurb = isAbsence ? (vdef ? vdef.blurb : gm.note) : gm.note;
-  // for a void, name how it stands — the reader's confidence rides on this
   const standLine = {
     shown: "Shown — you can point to the absence.",
     located: "Located — the author cites the gap, or says where it's out of reach.",
     inferred: "Inferred — no record; the author is arguing it."
   }[reader];
-  const accent = gm.mark;
+  return {
+    isAbsence,
+    glyph: vdef ? vdef.glyph : gm.glyph,
+    accent: gm.mark,
+    // the kicker echoes the two epistemic kinds the reader named — an assertion by
+    // the writer, or a void — and the headline says which one.
+    kicker: isAbsence ? "Void" : "Assertion",
+    headline: isAbsence ? (vdef ? vdef.label : "Unspecified kind") : gm.label,
+    ariaLabel: isAbsence ? (vdef ? vdef.label + " void" : "Documented void") : gm.label,
+    blurb: isAbsence ? (vdef ? vdef.blurb : gm.note) : gm.note,
+    standLine,
+    noteLabel: isAbsence ? "What the author searched" : "In the author's words",
+    note: tok.note || "",
+    prompt: vdef ? vdef.prompt : ""
+  };
+}
+
+// The Previews twin of the citation card, for grounded things that have no source
+// to cite: an assertion the author owns (their analysis / account / position) or a
+// documented void (an asserted absence). Hover (desktop) or tap (phone) one and a
+// card floats up in the margin saying HOW it's grounded — by the author's own
+// declaration, or by a documented absence of a given kind, and whether that absence
+// is shown, located or only inferred (void-kinds.js). Mirrors FootnotePop's
+// positioning: a margin card on a desktop, a dismissible bottom sheet on a phone.
+function GroundingPop({ data, onEnter, onLeave, onClose, onExpand }) {
+  const isPhone = window.useIsMobile(760);
+  if (!data) return null;
+  const { tok, x, y, mk, col, blockL, blockR } = data;
+  const { isAbsence, glyph, accent, kicker, headline, ariaLabel, blurb, standLine, noteLabel } = groundingDetail(tok);
   const vw = window.innerWidth, vh = window.innerHeight;
   const sheet = isPhone;
   // Mirrors FootnotePop: float in the margin beside the marker, anchoring under it
@@ -331,7 +353,7 @@ function GroundingPop({ data, onEnter, onLeave, onClose }) {
   } else if (beside) {
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
-    const w = Math.min(320, vw - 24);
+    const w = Math.min(404, vw - 24);
     const left = Math.min(Math.max(12, x - 16), vw - w - 12);
     const top = y + 8;
     const flip = top > vh - 220;
@@ -343,16 +365,22 @@ function GroundingPop({ data, onEnter, onLeave, onClose }) {
       <div className="gpop-h" style={{ borderLeft: "3px solid " + accent }}>
         <span className="gpop-g np-mono" style={{ color: accent }}>{glyph}</span>
         <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>{kicker}</span>
-        {sheet && <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px" }}><I.x /></button>}
+        {onExpand && (
+          <button onMouseDown={e => e.preventDefault()} onClick={() => onExpand(tok)} aria-label="Open in full" title="Open in full — take the main stage"
+            className="np-mono gpop-open" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, lineHeight: 1.4, cursor: "pointer", padding: "2px 7px", border: "1px solid var(--rule)", borderRadius: 4, background: "none", color: "var(--ink-soft)" }}>
+            <I.expand style={{ fontSize: 13 }} /> Open
+          </button>
+        )}
+        {sheet && <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>}
       </div>
       <div className="gpop-b">
-        <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, lineHeight: 1.12 }}>{headline}</div>
+        <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12 }}>{headline}</div>
         {standLine && <div className="np-mono" style={{ fontSize: 10.5, color: accent, marginTop: 4, letterSpacing: ".02em" }}>{standLine}</div>}
-        <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>{blurb}</p>
+        <p style={{ margin: "7px 0 0", fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)" }}>{blurb}</p>
         {tok.note ? (
           <div style={{ marginTop: 9, paddingTop: 8, borderTop: "1px solid var(--rule)" }}>
-            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4 }}>{isAbsence ? "What the author searched" : "In the author's words"}</div>
-            <div style={{ fontSize: 13, lineHeight: 1.5, color: "var(--ink)" }}>{window.npjRichText ? window.npjRichText(tok.note) : tok.note}</div>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4 }}>{noteLabel}</div>
+            <div style={{ fontSize: 13.5, lineHeight: 1.5, color: "var(--ink)" }}>{window.npjRichText ? window.npjRichText(tok.note) : tok.note}</div>
           </div>
         ) : null}
       </div>
@@ -365,6 +393,72 @@ function GroundingPop({ data, onEnter, onLeave, onClose }) {
         style={{ position: "fixed", inset: 0, zIndex: 3990, background: "rgba(8,7,5,.35)" }} />
       {inner}
     </React.Fragment>
+  );
+}
+
+// A margin card, promoted to the MAIN STAGE: the glance becomes the read. The
+// same grounding (a void / an assertion) or footnote a small card previews, blown
+// up to a centered, dimmed-backdrop panel you can sit in and study — the reading
+// counterpart to the source document explorer (SourceLightbox) a citation opens.
+// ✕ / Esc / a click on the margin exits; the article underneath is untouched.
+// `stage` is { kind:"ground", tok } or { kind:"note", num, text, key }.
+function MainStage({ stage, onClose, onJumpNote }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+  if (!stage) return null;
+  const isNote = stage.kind === "note";
+  const d = isNote ? null : groundingDetail(stage.tok);
+  const accent = isNote ? "var(--data)" : d.accent;
+  const glyph = isNote ? "※" : d.glyph;
+  const kicker = isNote ? "Footnote" : d.kicker;
+  const headline = isNote ? ("Note " + (stage.num != null ? stage.num : "")) : d.headline;
+  return (
+    <div className="fade-in" onClick={onClose} role="presentation"
+      style={{ position: "fixed", inset: 0, zIndex: 6500, background: "rgba(8,7,5,.58)", display: "flex", alignItems: "center", justifyContent: "center", padding: "4vh 16px", WebkitOverflowScrolling: "touch" }}>
+      <div role="dialog" aria-modal="true" aria-label={headline} onClick={e => e.stopPropagation()} className="np-scroll"
+        style={{ width: "min(720px, 100%)", maxHeight: "92vh", overflowY: "auto", background: "var(--card)", color: "var(--ink)", border: "2px solid var(--ink)", boxShadow: "0 26px 80px rgba(8,7,5,.5)" }}>
+        <div style={{ position: "sticky", top: 0, background: "var(--card)", borderBottom: "2px solid var(--ink)", borderLeft: "6px solid " + accent, display: "flex", alignItems: "center", gap: 12, padding: "13px 16px" }}>
+          <span className="np-mono" style={{ fontSize: 22, lineHeight: 1, color: accent }}>{glyph}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>{kicker}</div>
+            <div style={{ fontFamily: "var(--display)", fontSize: 26, lineHeight: 1.04 }}>{headline}</div>
+          </div>
+          <button onClick={onClose} className="btn btn-sm" title="Close (Esc)">✕ Close</button>
+        </div>
+        <div style={{ padding: "20px 24px 26px" }}>
+          {isNote ? (
+            <React.Fragment>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 17.5, lineHeight: 1.62, color: "var(--ink)" }}>
+                {stage.text ? (window.npjRichText ? window.npjRichText(stage.text) : stage.text) : <span style={{ color: "var(--ink-soft)" }}>— (no note text)</span>}
+              </div>
+              {onJumpNote && stage.key && (
+                <button className="btn btn-sm" style={{ marginTop: 18 }} onClick={() => { onClose(); onJumpNote(stage.key); }}>See in Notes ↓</button>
+              )}
+            </React.Fragment>
+          ) : (
+            <React.Fragment>
+              {d.standLine && <div className="np-mono" style={{ fontSize: 12, color: accent, letterSpacing: ".02em", marginBottom: 10 }}>{d.standLine}</div>}
+              <p style={{ fontFamily: "var(--serif)", fontSize: 17.5, lineHeight: 1.6, margin: "0 0 4px", color: "var(--ink)" }}>{d.blurb}</p>
+              {d.note ? (
+                <div style={{ marginTop: 18, paddingTop: 14, borderTop: "1.5px solid var(--ink)" }}>
+                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>{d.noteLabel}</div>
+                  <div style={{ fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.6, color: "var(--ink)" }}>{window.npjRichText ? window.npjRichText(d.note) : d.note}</div>
+                </div>
+              ) : (
+                <div className="np-mono" style={{ marginTop: 16, fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.55, borderTop: "1px solid var(--rule)", paddingTop: 12 }}>
+                  {d.isAbsence ? "The author recorded no search behind this void." : "The author added no note beyond the stance above."}
+                  {d.prompt ? <div style={{ marginTop: 6, fontStyle: "italic" }}>{d.isAbsence ? "A void of this kind is best backed by: " + d.prompt : ""}</div> : null}
+                </div>
+              )}
+            </React.Fragment>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -475,6 +569,11 @@ function ArticleRead(props) {
   // source to cite (that's the point), so it carries its own light card (GroundingPop).
   const [groundPop, setGroundPop] = useState(null);
   const groundLeaveTimer = useRef(null);
+  // a popup promoted to the main stage — a void/assertion or a note, blown up to a
+  // centered reading panel. Holds { kind:"ground", tok } or { kind:"note", … }.
+  // Opening it dismisses the floating cards so nothing lingers behind the panel.
+  const [stage, setStage] = useState(null);
+  const openStage = useCallback((s) => { setStage(s); setGroundPop(null); setFnPop(null); setHover(null); }, []);
   // Source & note previews — the margin cards that float up when you hover a claim
   // or a footnote. On by default (that's the point of a grounded read), but a
   // reader who wants nothing popping up can switch them off, and the choice sticks.
@@ -548,11 +647,13 @@ function ArticleRead(props) {
       blockL: railBlockL, blockR: railBlockR });
     setActiveSrc(claim.src[0]);
   }, [previews, railBlockL, railBlockR]);
-  // a touch more grace than a tooltip: the card now sits out in the margin, so a
-  // reader needs a beat to slide the pointer across the gutter and onto it
+  // a generous grace period — the card sits out in the margin and is a real
+  // surface to read and click into (expand to the full document, hop between
+  // passages), so it lingers well after the pointer leaves and only fades once
+  // you've clearly moved on. Moving onto the card cancels the timer entirely.
   const scheduleLeave = useCallback(() => {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 240);
+    leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 600);
   }, []);
   const cancelLeave = useCallback(() => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
@@ -571,7 +672,7 @@ function ArticleRead(props) {
   }, [footnoteByKey, previews, railBlockL, railBlockR]);
   const scheduleFnLeave = useCallback(() => {
     if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
-    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 240);
+    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 600);
   }, []);
   const cancelFnLeave = useCallback(() => { if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current); }, []);
   const jumpToFn = useCallback((key) => {
@@ -596,7 +697,7 @@ function ArticleRead(props) {
   }, [previews, railBlockL, railBlockR]);
   const scheduleGroundLeave = useCallback(() => {
     if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
-    groundLeaveTimer.current = setTimeout(() => setGroundPop(null), 240);
+    groundLeaveTimer.current = setTimeout(() => setGroundPop(null), 600);
   }, []);
   const cancelGroundLeave = useCallback(() => { if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current); }, []);
 
@@ -1127,9 +1228,11 @@ function ArticleRead(props) {
           onClose={() => { setHover(null); setActiveSrc(null); }}
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
-          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
+          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
+          onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
         <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
-          onClose={() => setGroundPop(null)} />
+          onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
+        <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
         {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
       </div>
     );
@@ -1169,10 +1272,13 @@ function ArticleRead(props) {
         suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} />
 
       <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
-        onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} />
+        onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
+        onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
 
       <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
-        onClose={() => setGroundPop(null)} />
+        onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
+
+      <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
 
       {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
 

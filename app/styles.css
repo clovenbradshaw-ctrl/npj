@@ -265,6 +265,11 @@ a { color: inherit; }
 .gpop-g { font-size: 15px; line-height: 1; flex: 0 0 auto; }
 .gpop-b { padding: 9px 14px 12px; }
 .gpop-b a { color: var(--data); text-underline-offset: 2px; }
+/* the "Open" affordance that promotes a margin card to the main stage — shared by
+   the grounding card and the footnote card. Subtle until hovered, then it reads as
+   the clear escalation it is. */
+.gpop-open { transition: background-color .12s ease, color .12s ease, border-color .12s ease; }
+.gpop-open:hover { background: var(--paper-2) !important; color: var(--ink) !important; border-color: var(--ink) !important; }
 
 /* ---- source document, expanded full-screen ----
    The thumbnail in a citation card (SourceFilePreview) is a button that opens
