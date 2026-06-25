@@ -724,13 +724,21 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!r) { r = document.createRange(); r.selectNodeContents(root); r.collapse(false); }
     s.removeAllRanges(); s.addRange(r);
   };
+  // WebKit doesn't upgrade custom elements inserted through
+  // execCommand("insertHTML"): a freshly-dropped-in <image-slot> never runs its
+  // connectedCallback, so the slot's drag/drop + paste listeners never attach —
+  // dropping a photo onto it does nothing until a reload re-parses the HTML
+  // ("had to refresh before the photo drop zone worked"). Force the upgrade so
+  // an inserted slot is live at once. No-op where the engine already upgrades
+  // (Chromium); skips already-upgraded nodes, so it never re-runs a live slot.
+  const upgradeCustomEls = () => { try { const r = ed.current; if (r && window.customElements && customElements.upgrade) customElements.upgrade(r); } catch (e) {} };
   const exec = (cmd, val) => { ed.current && ed.current.focus(); restore(); document.execCommand(cmd, false, val); scanHeadings(); scheduleSave(); };
   const insertHTML = (html) => { if (!ed.current) return; caretIntoBody(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
   // Block-level components (image, embed, verse, poll) can't be nested inside the
   // banner, headline or dek — put the caret in the body, then step past any such
   // block, so the new block always lands in the prose flow rather than splitting a
   // heading or vanishing into the non-editable banner figure.
-  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); scanHeadings(); scheduleSave(); };
+  const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); upgradeCustomEls(); scanHeadings(); scheduleSave(); };
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
