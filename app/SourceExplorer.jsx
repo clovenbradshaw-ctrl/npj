@@ -14,7 +14,11 @@
 
    Publishes window.SourceExplorer.
    ============================================================ */
-function SourceExplorer({ items, initialKey, title, onClose, onRename, onCite }) {
+// Light-theme palette for the in-explorer SourceAdapter (the explorer reads on
+// paper/ink, not the dark newsroom NR theme the adapter also serves).
+const ADAPTER_THEME = { line: "var(--rule)", panel: "var(--paper-2)", field: "var(--paper)", text: "var(--ink)", muted: "var(--ink-soft)", warn: "#c2724a", ok: "var(--verified)" };
+
+function SourceExplorer({ items, initialKey, title, onClose, onRename, onCite, srcApi }) {
   const SV = window.NpjSourceView;
   const list = (items || []).filter(it => it && it.key);
   const [sel, setSel] = useState(initialKey || (list[0] && list[0].key) || null);
@@ -161,6 +165,11 @@ function SourceExplorer({ items, initialKey, title, onClose, onRename, onCite })
                 {window.SourceViewer
                   ? <window.SourceViewer key={selItem.key} srcKey={selItem.key} rec={selRec} height={460} onText={seedText} />
                   : <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)" }}>Viewer unavailable.</div>}
+
+                {/* adapt the source: treat-as-image + OCR on/off/edit. Only when the
+                    host wired a source api (the newsroom does; read-only browses don't). */}
+                {srcApi && window.SourceAdapter && SV && SV.hasFile && SV.hasFile(selRec) &&
+                  <window.SourceAdapter rec={selRec} api={srcApi} NR={ADAPTER_THEME} nCites={(selItem.carriers || []).length} />}
 
                 {/* cited by */}
                 {selItem.carriers && selItem.carriers.length > 0 && (

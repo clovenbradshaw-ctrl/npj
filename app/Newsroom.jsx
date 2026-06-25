@@ -1635,6 +1635,33 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       rec.text = String(text || "");
       setRev(v => v + 1); scheduleSave();
     },
+    // Treat this source AS a given kind — image | pdf | text | office — overriding
+    // what its extension/mime auto-detected. Pass "" or "auto" to drop the override
+    // and fall back to detection. This is what lets a scan that arrived as
+    // octet-stream (or a screenshot with no extension) be opened — and OCR'd — as
+    // the image it really is. Persists through the same autosave.
+    setSourceKind: (key, kind) => {
+      const rec = window.NPJ.SOURCES[key]; if (!rec) return;
+      const k = String(kind || "").toLowerCase();
+      if (k && k !== "auto") rec.kind = k; else delete rec.kind;
+      setRev(v => v + 1); scheduleSave();
+    },
+    // Turn OCR on or off for an image source. OFF deletes the recognized text and
+    // pins ocrOff so it isn't re-read; ON clears that and re-reads the picture
+    // (lazy Tesseract), seeding the text. Returns a promise (resolves when the ON
+    // read finishes) so the UI can show progress. Persists through autosave.
+    setSourceOcr: (key, on) => {
+      const rec = window.NPJ.SOURCES[key]; if (!rec) return Promise.resolve(false);
+      if (on) {
+        delete rec.ocrOff;
+        setRev(v => v + 1); scheduleSave();
+        return runOcr(key);
+      }
+      rec.ocrOff = true; rec.text = "";
+      scanSource(key);                 // no text now → the PII review has nothing to flag
+      setRev(v => v + 1); scheduleSave();
+      return Promise.resolve(true);
+    },
     // rename a source — its display title across the editor, reader and exports.
     // The citation records and bound spans (keyed by the stable source key) are
     // untouched, so nothing about the grounding changes.
@@ -1849,6 +1876,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!rec.piiReview) rec.piiReview = { state: "pending", basis: window.NpjPII.BASIS, scannedAt: new Date().toISOString(), redactions: [], affirmations: [] };
     rec.piiReview.findings = findings.length; rec.piiReview.scannedAt = new Date().toISOString();
   };
+  // OCR an image source (lazy Tesseract) and seed its recognized text so it's
+  // citable + scannable. Drives the per-row `ocr` spinner, re-scans for PII, and
+  // autosaves. Best-effort: a failure clears the spinner and leaves the image as
+  // is. Shared by the on-upload pass and the manual "turn on OCR" control.
+  const runOcr = (key) => {
+    const SVocr = window.NpjSourceView;
+    const rec = window.NPJ.SOURCES[key];
+    if (!SVocr || !SVocr.extractImageText || !rec || SVocr.kindOf(rec) !== "image") return Promise.resolve(false);
+    setSources(s => s.map(x => x.key === key ? { ...x, ocr: true } : x));
+    return SVocr.extractImageText(rec).then(t => {
+      const live = window.NPJ.SOURCES[key]; let got = false;
+      if (live && t && t.trim()) { live.text = t; live.binary = false; scanSource(key); got = true; }
+      setSources(s => s.map(x => x.key === key ? { ...x, ocr: false } : x));
+      scheduleSave();
+      return got;
+    }).catch(() => { setSources(s => s.map(x => x.key === key ? { ...x, ocr: false } : x)); return false; });
+  };
   // A source bound for archive.org that Citey can act on (an upload, or anything
   // with text/opaque bytes) must clear the review before it's archived.
   const piiGated = (key) => { const rec = window.NPJ.SOURCES[key]; return !!rec && rec.type !== "interview" && (/^doc-/.test(key) || rec.binary || !!String(rec.text || "").trim()); };
@@ -1908,17 +1952,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // failure leaves the image as-is (cite it by transcribing).
     const SVocr = window.NpjSourceView;
     if (SVocr && SVocr.extractImageText) {
-      made.filter(m => SVocr.kindOf(window.NPJ.SOURCES[m.key]) === "image").forEach(m => {
-        setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: true } : x));
-        SVocr.extractImageText(window.NPJ.SOURCES[m.key]).then(t => {
-          const rec = window.NPJ.SOURCES[m.key];
-          if (rec && t && t.trim()) { rec.text = t; rec.binary = false; scanSource(m.key); }
-          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
-          scheduleSave();
-        }).catch(() => {
-          setSources(s => s.map(x => x.key === m.key ? { ...x, ocr: false } : x));
-        });
-      });
+      made.filter(m => { const r = window.NPJ.SOURCES[m.key]; return SVocr.kindOf(r) === "image" && !(r && r.ocrOff); }).forEach(m => runOcr(m.key));
     }
     return made.map(m => m.key);
   };
@@ -2650,6 +2684,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           title={all ? "Preview sources — this article" : "Source files — this article"}
           initialKey={explorer.key}
           items={base.map(s => ({ key: s.key, rec: window.NPJ.SOURCES[s.key] || {} }))}
+          srcApi={tableApi}
           onRename={(key, t) => tableApi.renameSource(key, t)}
           onCite={explorer.cite ? (key => { setExplorer(null); bindSource(key); }) : undefined}
           onClose={() => { setExplorer(null); setSources(x => [...x]); }} />

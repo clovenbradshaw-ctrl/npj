@@ -68,7 +68,15 @@
     };
   }
 
-  function kindOf(rec) {
+  // The kinds an author can pin a source TO, overriding detection. 'unknown' isn't
+  // offered — it's the absence of a guess, not a thing you'd choose.
+  var ADAPT_KINDS = ['image', 'pdf', 'text', 'office'];
+  var ADAPTABLE = { image: 1, pdf: 1, text: 1, office: 1 };
+
+  // What the file LOOKS like from its mime / name / url — the automatic read,
+  // before any manual override. (This was kindOf; kindOf now layers the override
+  // on top, so existing callers keep their single call.)
+  function detectKind(rec) {
     if (!rec) return 'unknown';
     var h = hints(rec), s = h.name + ' ' + h.url;
     if (/^image\//.test(h.mime) || IMG_RE.test(s)) return 'image';
@@ -78,6 +86,19 @@
     if (str(rec.text).trim() && !rec.binary) return 'text';   // we read words out of it
     return 'unknown';
   }
+
+  // The kind the app TREATS this source as. Honors an explicit rec.kind the author
+  // pinned ("treat this as an image") over detection — that's how a scan that
+  // arrived as application/octet-stream, or a file with no extension, gets the
+  // image viewer and the OCR path. Falls back to detection when nothing's pinned.
+  function kindOf(rec) {
+    if (rec && rec.kind && ADAPTABLE[rec.kind]) return rec.kind;
+    return detectKind(rec);
+  }
+
+  // Did the author pin this source's kind, vs. it being auto-detected? Drives the
+  // "treated as X — use detected type instead" affordance in the source adapter.
+  function kindPinned(rec) { return !!(rec && rec.kind && ADAPTABLE[rec.kind]); }
 
   // A coarse, human label for the type badge.
   function kindLabel(rec) {
@@ -92,6 +113,13 @@
   // Can the app show the file's content inline (vs. only offer open/download)?
   function isViewable(rec) { var k = kindOf(rec); return k === 'image' || k === 'pdf' || k === 'text'; }
   function hasFile(rec) { return !!(rec && (rec.file_url || hasBlob(recKey(rec)) || rec.archive_url || rec.original_url)); }
+
+  // OCR only makes sense for an image we hold bytes for. ocrOff is the author's
+  // explicit "don't read text off this picture" — set when they turn OCR off
+  // (which also deletes the recognized text). Auto-OCR and ensureText honor it, so
+  // a disabled image stays text-free until OCR is turned back on.
+  function ocrEligible(rec) { return kindOf(rec) === 'image' && hasFile(rec); }
+  function ocrEnabled(rec) { return ocrEligible(rec) && !(rec && rec.ocrOff); }
 
   /* ---------------- a renderable URL ---------------- */
   // Resolve to something an <img>/<iframe> can load right now. Best-effort —
@@ -308,7 +336,7 @@
     if (String(rec && rec.text || '').trim()) return rec.text;
     var k = kindOf(rec);
     if (k === 'pdf') return await extractPdfText(rec);
-    if (k === 'image') return await extractImageText(rec);
+    if (k === 'image') return (rec && rec.ocrOff) ? '' : await extractImageText(rec);   // OCR off → no words read
     if (k === 'text') {
       var key = recKey(rec);
       if (_txt[key] && _txt[key].state === 'done') return _txt[key].text;
@@ -345,10 +373,12 @@
   root.NpjSourceView = {
     recKey: recKey,
     registerBlob: registerBlob, blobUrl: blobUrl, getBlob: getBlob, hasBlob: hasBlob,
-    kindOf: kindOf, kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
+    kindOf: kindOf, detectKind: detectKind, kindPinned: kindPinned, ADAPT_KINDS: ADAPT_KINDS,
+    kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
+    ocrEligible: ocrEligible, ocrEnabled: ocrEnabled,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
-    ensureTesseract: ensureTesseract, extractImageText: extractImageText, imageTextState: imageTextState, cleanOcrText: cleanOcrText,
+    ensureTesseract: ensureTesseract, extractImageText: extractImageText, ocrImage: ocrImage, imageTextState: imageTextState, cleanOcrText: cleanOcrText,
     ensureText: ensureText, decodeText: decodeText,
     humanSize: humanSize, download: download
   };
