@@ -1180,7 +1180,7 @@ function ArticleRead(props) {
             raw file, for a legacy single-file log) */}
         <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleLogUrl(A)}`} title={A.headline} />
       </div>
-      {headings.length >= 2 && (
+      {tocItems.length >= 2 && (
         <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)" }}>
           <button onClick={() => setTocOpen(o => !o)} aria-expanded={tocOpen} aria-controls="article-toc-list"
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
