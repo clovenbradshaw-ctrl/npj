@@ -135,6 +135,18 @@
     return _uploadLimit;
   }
 
+  /* fetch with a hard timeout. A bare fetch() never resolves if the peer accepts
+     the connection then stalls — at the publish boundary that hangs the whole
+     commit on a spinner with no way out. Abort after `ms` so every network leg of
+     archiving is bounded; an AbortError surfaces as a normal fetch failure that
+     the caller already handles (fall through / warn). */
+  async function fetchT(url, opts, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    try { return await fetch(url, Object.assign({}, opts, { signal: ctrl.signal })); }
+    finally { clearTimeout(timer); }
+  }
+
   /* fetchBytes(url) → Promise<Blob|null>. Authenticated download from the media
      store (the v1 endpoint works on locked-down homeservers; plain v3 is the
      fallback). This is the "download" half of download-and-reupload, and also
@@ -148,7 +160,7 @@
     }
     tries.push([url, {}]);
     for (const [u, headers] of tries) {
-      try { const r = await fetch(u, { headers }); if (r.ok) return await r.blob(); } catch (e) {}
+      try { const r = await fetchT(u, { headers }, 60000); if (r.ok) return await r.blob(); } catch (e) {}
     }
     return null;
   }
@@ -247,7 +259,10 @@
     const b64 = await blobToBase64(blob);
     let res;
     try {
-      res = await fetch(mediaEndpoint(), {
+      // n8n PUTs the bytes to archive.org within the request — that round-trip can
+      // take up to a minute, so give it the same generous bound migrateToArchive
+      // uses rather than letting a stalled PUT hang the publish forever.
+      res = await fetchT(mediaEndpoint(), {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
         body: JSON.stringify({
@@ -255,8 +270,12 @@
           mimetype: (blob && blob.type) || "image/webp",
           title: opts.title || "", contentBase64: b64
         })
-      });
-    } catch (e) { throw new Error("Couldn't reach the media upload service."); }
+      }, 120000);
+    } catch (e) {
+      throw new Error(e && e.name === "AbortError"
+        ? "archive.org upload timed out — the media upload service took too long."
+        : "Couldn't reach the media upload service.");
+    }
     let j = null; try { j = await res.json(); } catch (e) {}
     if (!res.ok || !j || !j.ok || !j.url) throw new Error((j && j.error) || ("archive.org upload failed (HTTP " + res.status + ")."));
     return j.url;
