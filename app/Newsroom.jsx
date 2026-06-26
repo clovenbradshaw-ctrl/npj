@@ -2596,6 +2596,80 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // overflow:hidden caps the container (the old minHeight:100vh was a floor, so
   // a tall draft grew the page and scrolled the whole header away). The body's
   // columns already scroll internally (overflowY:auto, minHeight:0).
+
+  // The citation explorer for a cited span — the source, its pinned passage and
+  // the in-source picker. Clicking a cited span turns the right Sources panel into
+  // this (inPanel=true, a self-contained dark card filling the column) so it never
+  // covers the prose; on a phone there's no side column, so it stays a bottom sheet
+  // over the page (inPanel=false). Same content and logic either way.
+  const renderPinCard = (inPanel) => {
+    if (!pinTarget) return null;
+    const rec = window.NPJ.SOURCES[pinTarget.key] || {};
+    const ready = !!String(pinQuote || "").trim();
+    const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
+    const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
+    const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;
+    const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
+    const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
+    const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
+    const outer = inPanel
+      ? { background: "var(--ink)", color: "var(--paper)", padding: "12px 14px", minHeight: "100%", boxSizing: "border-box" }
+      : { position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" };
+    return (
+      <div className={inPanel ? "" : "fade-in"} style={outer}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
+          <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
+          <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
+        </div>
+        {pinTarget.claimText && (
+          <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
+            “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
+          </div>
+        )}
+        {onSpan.length > 1 && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
+            <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
+            {onSpan.map(k => {
+              const cur = k === pinTarget.key;
+              return (
+                <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
+                  <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
+                    style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
+                  <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
+                    style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
+        <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
+          style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
+        {window.SourcePicker && (
+          <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
+            onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+          {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
+            className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
+          {others.length > 0 && (
+            <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
+              title="Add another source to this same span — one claim can rest on several"
+              className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
+              <option value="">+ add a source…</option>
+              {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
+            </select>
+          )}
+          <span style={{ flex: 1 }} />
+          <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
+          <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {/* top bar — pinned: never shrinks or scrolls with the body */}
@@ -2990,7 +3064,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         )}
 
         {/* sources */}
-        <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
+        <div className="np-scroll" style={{ position: "relative", display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: (pinTarget && !isMobile) ? "hidden" : "auto", padding: "16px 16px 40px", background: NR.panel }}>
+          {/* a cited span was clicked — the panel turns into that span's citation
+              explorer (the source + its pinned passage), filling the column over the
+              sources list until dismissed. On a phone this is a bottom sheet instead. */}
+          {pinTarget && !isMobile && (
+            <div className="np-scroll fade-in" style={{ position: "absolute", inset: 0, zIndex: 6, overflowY: "auto", background: "var(--ink)" }}>
+              {renderPinCard(true)}
+            </div>
+          )}
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
             <I.source style={{ fontSize: 14 }} /> Sources · {sources.length}
             <span style={{ flex: 1 }} />
@@ -3261,73 +3343,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
-      {/* pin the source-span: the exact words IN the source that back the claim.
-          A page is not a citation — this is what makes it one. */}
-      {pinTarget && (() => {
-        const rec = window.NPJ.SOURCES[pinTarget.key] || {};
-        const ready = !!String(pinQuote || "").trim();
-        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
-        const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
-        const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;   // include the one being added
-        const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
-        const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
-        const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
-        return (
-        <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
-            <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
-            <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
-          </div>
-          {pinTarget.claimText && (
-            <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
-              <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
-              “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
-            </div>
-          )}
-          {/* every source on this span — one claim can rest on several. Click to edit
-              that one's pinned words; × drops it. The right-hand picker adds more. */}
-          {onSpan.length > 1 && (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
-              <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
-              {onSpan.map(k => {
-                const cur = k === pinTarget.key;
-                return (
-                  <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
-                    <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
-                      style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
-                    <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
-                      style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
-          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
-          <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
-            style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
-          {/* render the source and select-to-cite (+ Citey's smarter ranking) */}
-          {window.SourcePicker && (
-            <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
-              onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-            {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
-              className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
-            {others.length > 0 && (
-              <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
-                title="Add another source to this same span — one claim can rest on several"
-                className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
-                <option value="">+ add a source…</option>
-                {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
-              </select>
-            )}
-            <span style={{ flex: 1 }} />
-            <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
-            <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
-          </div>
-        </div>
-      ); })()}
+      {/* pin the source-span — the exact words IN the source that back the claim.
+          On desktop this lives in the right Sources panel (see renderPinCard above);
+          a phone has no side column, so there it's a bottom sheet over the prose. */}
+      {pinTarget && isMobile && renderPinCard(false)}
 
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
