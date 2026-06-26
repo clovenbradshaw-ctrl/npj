@@ -393,6 +393,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const reconcileTimer = useRef(null);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
   const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
+  const mediaPick = useRef(null);                   // hidden <input type=file> behind the Media panel's Upload button
   const [archiveStat, setArchiveStat] = useState(null);  // { total, pending, archived } — media-store images vs. pre-archived
   const [prearch, setPrearch] = useState(null);     // null | {done,total} in flight | {result} | {error} — proactive archive.org upload
   const [explorer, setExplorer] = useState(null);   // { key } — the source file explorer, open on a source
@@ -2867,7 +2868,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
         <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail, flexShrink: 0 }}>
-          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
+          {[["write", "Write"], ["contents", "Media" + (media.length ? " · " + media.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -2875,30 +2876,43 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
       <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px", gridTemplateRows: isMobile ? undefined : "minmax(0, 1fr)" }}>
-        {/* contents / jumplinks */}
+        {/* media — upload · review · store (replaces the old contents/structure rail) */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
-          <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
-          {/* the structure rail IS the editor TOC: the top-level Item list — slots
-              (labeled containers showing their prompt when empty) + orphan
-              sections, draggable. Editing-only; none of it reaches a reader. */}
-          {structApi && window.StructureRail
-            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} mode={structMode} setMode={setStructMode} graphText={graphText} onSelectSentence={jumpToProse} onExpand={() => setView("graph")} activeId={activeId} />
-            : (toc.length === 0
-                ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>
-                : toc.map(h => <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>))}
-          {/* media census — every image/embed in the piece; images open the viewer */}
-          <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
-            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Click <b>Image</b> in the toolbar to drop an image into the body where you're writing — or paste / drag a photo straight onto the page.</div>}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {media.map(m => m.kind === "image"
-                ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
-                    <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                  </button>
-                : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
-            </div>
-            {/* proactive archive.org upload — move the story's media-store images
-                onto archive.org now, so the publish boundary doesn't have to. */}
+          {/* ── Media ──────────────────────────────────────────────────────
+              The left rail was a grab-bag (contents/structure, column, tags,
+              definitions); it's now one focused job: the piece's media. Upload
+              a photo, review every image/embed in a thumbnail grid, and store
+              them durably on archive.org before publish. Media lives in the
+              article body as <figure> blocks, so uploading drops one in at the
+              caret and the grid below is just a live census of those figures. */}
+          <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Media{media.length ? " · " + media.length : ""}</div>
+          {/* upload — a real file picker that ingests through the same media-store
+              path as a drag/drop or paste (NpjMedia.upload → durable URL). */}
+          <input ref={mediaPick} type="file" accept="image/*" multiple style={{ display: "none" }}
+            onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) insertImageFiles(fs, null); e.target.value = ""; }} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button onClick={() => mediaPick.current && mediaPick.current.click()} className="np-cond"
+              style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--yellow)", border: "1px solid var(--yellow)", color: "var(--ink)", padding: "7px 8px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>
+              <I.image style={{ fontSize: 14 }} /> Upload
+            </button>
+            <button onClick={insertImage} title="Add an empty image slot in the body to drop a photo onto" className="np-cond"
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, background: NR.field, border: "1px solid " + NR.line, color: NR.text, padding: "7px 10px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>
+              <I.plus style={{ fontSize: 13 }} /> Slot
+            </button>
+          </div>
+          {/* review — every image/embed in the piece; images open the viewer,
+              embeds jump to where they sit in the document. */}
+          {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 4 }}>No media yet. <b>Upload</b> a photo here — or paste / drag one straight onto the page. Everything you add collects in this panel.</div>}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {media.map(m => m.kind === "image"
+              ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
+                  <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                </button>
+              : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
+          </div>
+          {/* store — move the story's media-store images onto archive.org now,
+              so the publish boundary doesn't have to. */}
+          <div style={{ marginTop: 16 }}>
             {archiveStat && archiveStat.total > 0 && (() => {
               const running = !!(prearch && prearch.done != null && prearch.total != null);
               const r = prearch && prearch.result;
@@ -2933,37 +2947,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 </div>
               );
             })()}
-          </div>
-          {/* tags + column */}
-          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Column</div>
-            <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
-              {columns.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Tags</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
-              <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
-            </div>
-          </div>
-          {/* definitions — the piece's glossary, opened as a panel. eoreader4
-              suggests the terms (sized to the article); each draws from the
-              collective set of published definitions across the site. */}
-          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Definitions{definitions.length ? " · " + definitions.length : ""}</span>
-            </div>
-            {definitions.length > 0 &&
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
-                {definitions.slice(0, 8).map(d => <span key={d.id} title={d.def || "no definition yet"} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: d.def ? NR.text : NR.muted, padding: "2px 6px" }}>{d.term}</span>)}
-                {definitions.length > 8 && <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted }}>+{definitions.length - 8}</span>}
-              </div>}
-            <button onClick={() => setView("definitions")}
-              className="np-cond" style={{ width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: view === "definitions" ? "var(--yellow)" : NR.field, color: view === "definitions" ? "var(--ink)" : NR.text, cursor: "pointer", fontSize: 12, padding: "6px 8px" }}>
-              {definitions.length ? "Edit definitions →" : "Define key terms →"}
-            </button>
-            {definitions.length === 0 &&
-              <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5, marginTop: 6 }}>eoreader4 suggests the names &amp; terms a reader may need defined — about one per 130 words.</div>}
           </div>
         </div>
 
