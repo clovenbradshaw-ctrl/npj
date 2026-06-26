@@ -1278,6 +1278,16 @@ function ArticleRead(props) {
             style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
             <I.redo style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Refresh</span>
           </button>
+          {/* Export straight from the editor's preview — no need to publish first.
+             SubstackExport reads the SAME folded draft (A) the page renders, so the
+             copy carries every sourced claim with its footnote opening the
+             archive.org snapshot on the exact cited words. */}
+          {window.SubstackExport && (
+            <button className="btn btn-sm" onClick={() => setShowExport(true)} title="Export for Substack — copy the draft as rich text (images + sourcing intact) to paste into a Substack post; every source link opens its archive.org snapshot"
+              style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", color: "var(--ink)", fontWeight: 700 }}>
+              <I.ext style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Substack</span>
+            </button>
+          )}
           <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
         </div>
         <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
@@ -1300,6 +1310,7 @@ function ArticleRead(props) {
           onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
         <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
         {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
+        {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
       </div>
     );
   }

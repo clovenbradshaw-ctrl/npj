@@ -1,4 +1,10 @@
-/* SubstackExport.jsx — the reader's "Export for Substack" panel.
+/* SubstackExport.jsx — the "Export for Substack" panel.
+
+   Reachable two ways, both off the same folded article: from the published
+   reader's control bar, and from the editor's live Preview (so an author can
+   copy a draft into Substack without publishing first). Either way it resolves
+   cite keys against the article's own bound `sources`, so every footnote opens
+   the archive.org snapshot on the exact words cited.
 
    The work is in app/substack-export.js (window.NpjSubstack). This is the
    surface: a one-click rich copy (HTML + markdown on the clipboard, so a paste
@@ -37,23 +43,33 @@ function SubstackExport({ article, onClose }) {
   const [sourcesList, setSourcesList] = useState(true);
   const [format, setFormat] = useState("md"); // which the preview shows: "md" | "txt"
   const [copied, setCopied] = useState(null); // "rich" | "text" | "title" | "subtitle" | "md" | "plain" | "file" | "txtfile" | "html"
+  // The source ledger to resolve cite keys against. An article carries its own
+  // bound `sources` (the folded read model the reader AND the editor's preview
+  // produce); prefer those so a draft exported straight from the editor — before
+  // it's published into the global window.NPJ.SOURCES — still links every claim to
+  // the exact archive.org snapshot. Fall back to the global ledger for the
+  // published reader, whose window.NPJ.ARTICLE carries no inlined `sources`.
+  const sources = React.useMemo(
+    () => (article && article.sources && Object.keys(article.sources).length)
+      ? article.sources : ((window.NPJ && window.NPJ.SOURCES) || {}),
+    [article]);
   // hooks run unconditionally (before any early return) — guard inside instead.
   // Both serializations are kept live so the preview can switch and each Copy
   // button has its text ready; they're cheap pure string passes.
   const previewMd = React.useMemo(
-    () => (article && NS) ? NS.toMarkdown(article, { citations, sourcesList }) : "",
-    [article, NS, citations, sourcesList]);
+    () => (article && NS) ? NS.toMarkdown(article, { citations, sourcesList, sources }) : "",
+    [article, NS, citations, sourcesList, sources]);
   const previewTxt = React.useMemo(
-    () => (article && NS && NS.toPlainText) ? NS.toPlainText(article, { citations, sourcesList }) : "",
-    [article, NS, citations, sourcesList]);
+    () => (article && NS && NS.toPlainText) ? NS.toPlainText(article, { citations, sourcesList, sources }) : "",
+    [article, NS, citations, sourcesList, sources]);
   const preview = format === "txt" ? previewTxt : previewMd;
   const sourceCount = React.useMemo(
-    () => (article && NS) ? NS.indexSources(article.body, (window.NPJ && window.NPJ.SOURCES) || {}).ordered.length : 0,
-    [article, NS]);
+    () => (article && NS) ? NS.indexSources(article.body, sources).ordered.length : 0,
+    [article, NS, sources]);
   const flash = (key) => { setCopied(key); setTimeout(() => setCopied(c => (c === key ? null : c)), 1600); };
 
   if (!article || !NS) return null;
-  const opts = { citations, sourcesList };
+  const opts = { citations, sourcesList, sources };
 
   const copyText = (text, key) => {
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => flash(key)).catch(() => {});
