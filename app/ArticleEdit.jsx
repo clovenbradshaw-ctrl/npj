@@ -128,7 +128,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     const span = document.createElement("span");
     span.className = "eo-claim"; span.setAttribute("data-src", key); span.setAttribute("data-id", "cl-" + Date.now().toString(36));
     const r = sel.getRangeAt(0);
-    try { r.surroundContents(span); } catch (e) { const f = r.extractContents(); span.appendChild(f); r.insertNode(span); }
+    try { r.surroundContents(span); } catch (e) { const f = r.extractContents(); span.appendChild(f); r.insertNode(span); if (span.parentNode) span.parentNode.normalize(); }
     sel.removeAllRanges();
   };
 

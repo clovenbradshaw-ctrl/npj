@@ -483,6 +483,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           // Enter/paste/drag cloned a trailing marker) shows a stray number until
           // it's touched — fold/drop it now so the page opens clean, then renumber.
           if (destrandFootnotes()) renumberFootnotes();
+          // likewise, stitch any word cut across a paragraph break (an old draft
+          // saved mid-word) so the editor opens showing exactly what was written.
+          healSplitBlocks();
           // hydrate the explicit Subtitle field from the restored .nr-dek node
           const dekEl0 = ed.current.querySelector(".nr-dek");
           if (dekEl0) setDek((dekEl0.textContent || "").trim());
@@ -1359,7 +1362,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const wrapInline = (tag) => {
     const r = selRange.current; if (!r || r.collapsed) return;
     const el = document.createElement(tag);
-    try { r.surroundContents(el); } catch (e) { const frag = r.extractContents(); el.appendChild(frag); r.insertNode(el); }
+    try { r.surroundContents(el); } catch (e) { const frag = r.extractContents(); el.appendChild(frag); r.insertNode(el); if (el.parentNode) el.parentNode.normalize(); }
     window.getSelection().removeAllRanges(); setRev(v => v + 1); scheduleSave();
   };
   const applyHighlight = () => {
@@ -1667,6 +1670,42 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     });
     return changed;
   };
+  // ---- never let a word split across a paragraph break ----
+  // The live-DOM twin of articles.js mergeSplitWords, so the editor IS the source
+  // of truth instead of leaving the repair to the fold. Native contentEditable (an
+  // Enter or a paste that lands mid-word) or an older draft can leave a paragraph
+  // cut in two — "…public bench. B" then a fresh <p> "ut the incursion…" — which the
+  // fold would read as two blocks and the reader/Preview/export print with a blank
+  // line through "But". Stitch the lower block back onto the one above when the seam
+  // is unmistakably mid-word: the block above ends on a word character (no trailing
+  // space; footnote markers, which carry only a number, ignored) and the one below
+  // opens with a lowercase letter — prose never starts a new paragraph lower-case
+  // mid-word. Caret-safe: it leaves a pair alone while the caret is inside the lower
+  // block, so it never fights an Enter you're actively typing, and heals once the
+  // caret moves on (and on restore, so a saved draft opens clean). <p>→<p> only; a
+  // hard <br> at the seam is a real line break and is left untouched.
+  const healSplitBlocks = () => {
+    const root = ed.current; if (!root) return false;
+    const inNotes = (el) => !!(el && el.closest && el.closest("ol.nr-fnotes"));
+    const caretIn = (blk) => { try { const s = window.getSelection(); return !!(s && s.rangeCount && blk.contains(s.getRangeAt(0).commonAncestorContainer)); } catch (e) { return false; } };
+    // a block's text with footnote markers dropped, so a trailing "1" never reads
+    // as the word character that would trigger a merge
+    const prose = (blk) => { const c = blk.cloneNode(true); c.querySelectorAll("sup.md-cite").forEach(s => s.remove()); return c.textContent || ""; };
+    let changed = false;
+    const isField = (el) => !!el && el.classList && el.classList.contains("nr-dek");   // the Subtitle field, not prose
+    Array.from(root.querySelectorAll("p")).forEach(blk => {
+      if (inNotes(blk) || isField(blk)) return;
+      const prev = blk.previousElementSibling;
+      if (!prev || prev.tagName !== "P" || inNotes(prev) || isField(prev)) return;      // only stitch body <p> onto body <p>
+      if (!/[A-Za-z0-9]$/.test(prose(prev)) || !/^[a-z]/.test(prose(blk))) return;      // not a mid-word seam
+      if (prev.lastChild && prev.lastChild.nodeType === 1 && prev.lastChild.tagName === "BR") return; // a hard break is a real boundary
+      if (caretIn(blk)) return;                                                         // don't fight an active edit
+      while (blk.firstChild) prev.appendChild(blk.firstChild);                          // MOVE (not clone) so a saved range stays valid
+      blk.remove(); prev.normalize();                                                   // coalesce the seam text nodes → one word
+      changed = true;
+    });
+    return changed;
+  };
   // the span to bind: the live in-editor selection if there is one, else the
   // last one we saved — a collapsed caret is never a span
   const spanRange = () => {
@@ -1695,7 +1734,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
     const span = document.createElement("span"); span.className = "claim-src needs-quote";
     span.setAttribute("data-src", key); span.setAttribute("data-cid", cid); span.setAttribute("data-quote", "");
-    try { r.surroundContents(span); } catch (e) { const frag = r.extractContents(); span.appendChild(frag); r.insertNode(span); }
+    try { r.surroundContents(span); } catch (e) { const frag = r.extractContents(); span.appendChild(frag); r.insertNode(span); if (span.parentNode) span.parentNode.normalize(); }
     const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
     sup.setAttribute("data-cite", key); sup.setAttribute("data-cid", cid); sup.setAttribute("data-quote", ""); sup.title = key; sup.textContent = num;
     span.after(sup);
@@ -1937,7 +1976,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const wrapPlainClaim = (range) => {
     const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
     const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-cid", cid);
-    try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); }
+    try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); if (span.parentNode) span.parentNode.normalize(); }
     return span;
   };
   // Cite a VOID straight from the prose: wrap the highlighted words in a claim
@@ -2856,7 +2895,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
