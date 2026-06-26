@@ -1,7 +1,7 @@
 /* prop-graph.js — window.NpjPropGraph.
  *
  * Thin adapter between the editor's prose and eoreader4's reading core
- * (window.EOReader4, published by app/eoreader4-bridge.js). Given plain text it
+ * (window.EOReader4, published by app/graph/eoreader4-bridge.js). Given plain text it
  * returns a parsed `doc` whose `doc.projectGraph(frame)` is the proposition graph
  * (entities + subject-verb-object edges). Parsing is the expensive step, so docs
  * are cached by text; projectGraph itself is already memoized inside the engine.

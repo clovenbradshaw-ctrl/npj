@@ -13,9 +13,9 @@
  * ES modules need http(s); on file:// the import fails and the Graph view shows a
  * "serve over http" message instead of breaking the rest of the app.
  */
-import { ingestText } from "../vendor/eoreader4/src/organs/in/text.js";
-import { projectGraph, DEFAULT_PROJECTION_RULES } from "../vendor/eoreader4/src/core/index.js";
-import { extractGlossary, glossarySurface, glossarySize } from "../vendor/eoreader4/src/perceiver/glossary.js";
+import { ingestText } from "../../vendor/eoreader4/src/organs/in/text.js";
+import { projectGraph, DEFAULT_PROJECTION_RULES } from "../../vendor/eoreader4/src/core/index.js";
+import { extractGlossary, glossarySurface, glossarySize } from "../../vendor/eoreader4/src/perceiver/glossary.js";
 
 window.EOReader4 = {
   ingestText,                 // (textOrFile, opts?) -> Promise<doc>  (doc.projectGraph(frame), doc.sentences, doc.log, doc.mentions)

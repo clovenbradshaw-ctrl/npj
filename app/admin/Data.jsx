@@ -1,6 +1,6 @@
 /* NPJ — Data explorer, archive.org consent modal, and the editor's data picker.
    Patterns adapted from drafteo (sources.js): all-or-nothing archive consent.
-   The explorer + picker render live archive.org items: app/archive-sources.js
+   The explorer + picker render live archive.org items: app/sources/archive-sources.js
    pulls everything tagged `npj-source` into window.NPJ.DATASETS and fires
    "npj:datasets" — useArchiveData() below re-renders on that event. */
 

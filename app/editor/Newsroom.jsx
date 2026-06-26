@@ -46,7 +46,7 @@ const FIG_CAPS =
 // (so a drop still uploads to the media store and freezes to archive.org at
 // publish), plus the shared caption lines and a ✕ to drop the slide. The reader
 // renders the whole figure as a swipeable gallery (Splide) + fullscreen viewer;
-// blocksToHtml (app/articles.js) emits this very shape on re-edit.
+// blocksToHtml (app/record/articles.js) emits this very shape on re-edit.
 const CAROUSEL_SLIDE = (id) =>
   '<div class="cmp-slide"><image-slot id="' + id + '" conform fitcontrol shape="rect" placeholder="Drop a photo or an archive.org link" style="width:100%;height:240px;display:block"></image-slot>' +
   FIG_CAPS +
@@ -354,7 +354,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [sources, setSources] = useState([]);
   const [citeOrder, setCiteOrder] = useState([]);
   const citeOrderRef = useRef([]);
-  // stable per-sentence identity + provenance (app/sentences.js). Rides the draft
+  // stable per-sentence identity + provenance (app/record/sentences.js). Rides the draft
   // so a sentence's grounding follows it through edits, moves, reloads.
   const sentenceLedger = useRef(window.NpjSentences ? window.NpjSentences.newLedger() : { v: 1, seq: 0, entries: {} });
   const [armSrc, setArmSrc] = useState(null);       // source picked first; next selection binds to it
@@ -376,11 +376,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [column, setColumn] = useState(columns[0] || "");
   const [toc, setToc] = useState([]);
   // the piece's glossary (term → definition); extracted by eoreader4, drawn from
-  // the collective published record (app/definitions.js), published like tags.
+  // the collective published record (app/grounding/definitions.js), published like tags.
   const [definitions, setDefinitions] = useState([]);
   const [defsOpen, setDefsOpen] = useState(false);   // the Definitions panel overlay
   const [defsBody, setDefsBody] = useState("");      // editor plain text, snapshotted when the panel opens
-  // ---- editing-only post structure (app/structure.js) ----
+  // ---- editing-only post structure (app/record/structure.js) ----
   // the append-only event log is the source of truth; `structure` is its fold.
   // Stamped onto headings as data-sec (stable identity across renames/reorders),
   // persisted with the draft, NEVER published (stripped at build — Invariant I1).
@@ -417,7 +417,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
   // ---- durable drafts: restore on open, autosave on every change ----
   // localStorage = instant recovery on refresh; Matrix account data = the
-  // authoritative copy that survives a browser wipe / new device (app/drafts.js).
+  // authoritative copy that survives a browser wipe / new device (app/identity/drafts.js).
   const persist = useCallback(() => {
     if (!restored.current) return;
     const html = ed.current ? ed.current.innerHTML : htmlRef.current;
@@ -701,7 +701,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     }, 50);
   }, []);
 
-  // the api the structure rail (app/PostStructure.jsx) drives. Every mutation
+  // the api the structure rail (app/editor/PostStructure.jsx) drives. Every mutation
   // goes through dispatchStruct → append-only log → fold → (reflow) → persist.
   const structApi = useMemo(() => {
     const lib = window.NpjStructure; if (!lib) return null;
@@ -1120,7 +1120,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     walk(out, src);
     return { html: out.innerHTML, keys: Object.keys(keys) };
   };
-  // ---- composition provenance (app/composition.js) ----
+  // ---- composition provenance (app/record/composition.js) ----
   // Record how the body is assembled — typed vs. pasted, paste sizes, deletions
   // — as plain counts (never the words), so the preview + published footer can
   // show a reader how the piece came together. Guarded behind `restored` so the
@@ -1463,7 +1463,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
   const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
   const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
-  const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
+  const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/core/void-kinds.js)
   useEffect(() => {
     const onUp = (e) => {
       if (e && e.target && e.target.closest && e.target.closest(".sel-tb")) return;
@@ -1875,7 +1875,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // commit / cancel an inline source rename started from a rail card
   const commitSrcRename = (key) => { const t = renameSrcText.trim(); if (t) tableApi.renameSource(key, t); setRenameSrcKey(null); setRenameSrcText(""); };
   // The source-span ranking + paste flow now lives in the SourcePicker component
-  // (app/SourcePicker.jsx), rendered inside the pin popover and the table.
+  // (app/editor/SourcePicker.jsx), rendered inside the pin popover and the table.
   // Citey's grounding bridge — the popover's pin / own / unown act here so React
   // state (rev) and the autosave stay consistent. Owning a claim removes the
   // incomplete citation and records the author's stance; it publishes as prose.
@@ -1893,7 +1893,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         // an asserted absence (a "void") records the documented search/evidence it
         // rests on AND which of the six kinds it is — removed / withheld / silent /
         // inaccessible / unrecorded / ambient — so the reader knows whether the
-        // absence is shown, located, or only inferred (see app/void-kinds.js).
+        // absence is shown, located, or only inferred (see app/core/void-kinds.js).
         const VK = window.NpjVoidKinds;
         const vk = norm === "absence" && VK ? VK.norm(kind) : null;
         if (norm === "absence") {
@@ -3268,7 +3268,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       ); })()}
 
       {/* the definitions panel — the piece's glossary, extracted by eoreader4 and
-          drawn from the collective published record (app/DefinitionsRail.jsx) */}
+          drawn from the collective published record (app/editor/DefinitionsRail.jsx) */}
       {defsOpen && window.DefinitionsPanel &&
         <window.DefinitionsPanel NR={NR} definitions={definitions} onChange={setDefinitions}
           bodyText={defsBody} slug={fileSlug || (window.NpjArticles ? slugify(title) : "")} isMobile={isMobile}
@@ -3782,7 +3782,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
 }
 
 /* Serialize the contentEditable draft to plaintext markdown. LEGACY: publishing
-   now commits an EO event log (app/articles.js → genesisFromContent), not a .md
+   now commits an EO event log (app/record/articles.js → genesisFromContent), not a .md
    file — this serializer stays only for plaintext export/debugging.
    Bound source spans become numbered footnotes whose definitions point at the
    archived (or original) URL — so the markdown keeps every claim auditable. */

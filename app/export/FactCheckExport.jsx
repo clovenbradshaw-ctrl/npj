@@ -3,9 +3,9 @@
    Plain, paste-anywhere: one line per unsourced claim, each naming the TYPE of
    evidence that would ground it (the negative space), in a form that drops clean
    into an email or a text. The evidence types are mechanical by default
-   (app/evidence-needs.js, instant); a "Sharpen with local model" button upgrades
+   (app/grounding/evidence-needs.js, instant); a "Sharpen with local model" button upgrades
    them through a local LLM when one is reachable (Ollama / window.NPJ_OLLAMA_*),
-   falling back silently to the mechanical read. Shaping is app/fact-check-export.js
+   falling back silently to the mechanical read. Shaping is app/export/fact-check-export.js
    (window.NpjFactCheck).
 
    Props: { payload, onClose }.  payload = { title, items:[{sid,status,claim,need}] } */

@@ -12,7 +12,7 @@
    EVA deposit committed as a brand-new file in the document's folder —
    articles/<slug>/<stamp>-eva-<tail>.jsonl — so it is plaintext, auditable, and
    FOLDS AS A NO-OP for the article reader (EVA never touches article state). The
-   merge itself is an ordinary REC edit (app/articles.js appendEdit), so the
+   merge itself is an ordinary REC edit (app/record/articles.js appendEdit), so the
    privileged, already-authorized commit path is the only thing that can change
    the published words — a proposal can't.
 

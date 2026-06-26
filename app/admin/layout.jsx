@@ -23,13 +23,13 @@
 
    Durability (survives a browser wipe): roles are committed to GitHub inside
    layout.json (world-readable) and mirrored to a Matrix control-room state event
-   that only admins can write (app/matrix-auth.js → writePermissions). The browser
+   that only admins can write (app/identity/matrix-auth.js → writePermissions). The browser
    holds only a cache; on re-login every capability re-derives from those stores.
 
    Contributor profiles (the byline) — name + "About me" — ride the SAME public
    layout.json so a visitor reads them straight from GitHub (the requested public
    "variable"). A contributor edits their own profile in-app; it saves durably to
-   their Matrix account (app/profiles.js → press.npj.profile) and is published to
+   their Matrix account (app/identity/profiles.js → press.npj.profile) and is published to
    the public file by an admin (who already commits layout.json). Names default
    from the contributor's Matrix account (their displayname). A byline may credit
    editors (optional) or be "Unsigned" — that lives on the article, not here. */
@@ -71,7 +71,7 @@ const NAME_MAX = 80;
 // Length-clamp only — NOT a trim. This runs on every keystroke (the layout is
 // re-normalized on each edit), so trimming here would eat the trailing space you
 // need to type between words. Trimming for the committed file happens at the
-// explicit save points (app/profiles.js → clean()).
+// explicit save points (app/identity/profiles.js → clean()).
 function clampStr(v, max) { return String(v == null ? "" : v).slice(0, max); }
 
 // A contributor profile is { name, bio } keyed by mxid. Anything malformed is

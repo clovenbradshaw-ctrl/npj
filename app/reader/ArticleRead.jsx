@@ -1,6 +1,6 @@
 /* NPJ article reading experience — the spine.
    Clean Read / Audit Mode + 3 evidence layouts (Ledger / Receipts / Split).
-   Articles arrive as folded EO event logs (app/articles.js); the body block
+   Articles arrive as folded EO event logs (app/record/articles.js); the body block
    shapes rendered here are exactly what the log carries. */
 
 // The caption + photo credit under an image. The credit is markdown ([label](url))
@@ -44,7 +44,7 @@ function srcOf(key) {
 /* ---- the transparency lens: colour every grounded span by HOW it's grounded ----
    The reader (and the editor's Preview) can switch on a lens that tints each
    claim by its grounding kind, using the SAME vocabulary as the editor's
-   Grounding workspace (app/GroundingWorkspace.jsx — proseShade / pillFor): a
+   Grounding workspace (app/editor/GroundingWorkspace.jsx — proseShade / pillFor): a
    yellow fill for a grounded/cited claim (⊤, or ⊨ for more than one source),
    violet for a claim the author owns (analysis ⊢ / account ⊨ / position ⊩),
    orange + dashed for one that still needs a source (⊥), red for sources that
@@ -462,7 +462,7 @@ function MainStage({ stage, onClose, onJumpNote }) {
   );
 }
 
-// MediaImg / CropFrame / imageCandidates moved to app/shared.jsx (eager): the
+// MediaImg / CropFrame / imageCandidates moved to app/ui/shared.jsx (eager): the
 // front page renders cover photos through window.MediaImg before the reader
 // bundle loads, so the image components must exist in the always-loaded core.
 // They are referenced below as globals (same names), unchanged in behaviour.

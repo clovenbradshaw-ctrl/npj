@@ -1,7 +1,7 @@
 /* GraphView.jsx — window.GraphView.
  *
  * The "Graph" top-level view: the live document read into a proposition graph by
- * eoreader4 (window.EOReader4 via app/prop-graph.js) and drawn by the imperative
+ * eoreader4 (window.EOReader4 via app/graph/prop-graph.js) and drawn by the imperative
  * SVG renderer (window.NpjGraphRender). React owns only the lifecycle + status;
  * the physics/SVG live in a plain host element so React never re-renders per frame.
  *

@@ -99,7 +99,7 @@
     return (s === "analysis" || s === "testimony" || s === "voice" || s === "absence") ? s : null;
   }
   // The six kinds of void (an asserted absence), strongest → weakest. Kept in
-  // sync with app/void-kinds.js (the shared taxonomy the editor + reader use);
+  // sync with app/core/void-kinds.js (the shared taxonomy the editor + reader use);
   // duplicated here so the publish fold validates a kind without depending on the
   // browser-only module. A void carries WHICH kind it is so the reader knows
   // whether the absence is shown, located, or only inferred.
@@ -289,7 +289,7 @@
       tags: Array.isArray(state.tags) ? state.tags : [],
       // the piece's glossary — terms it leans on, each bound to a short
       // definition (extracted by eoreader4 or written by hand). Drawn into the
-      // collective glossary across the published record (app/definitions.js).
+      // collective glossary across the published record (app/grounding/definitions.js).
       definitions: Array.isArray(state.definitions) ? state.definitions : [],
       authors: Array.isArray(state.authors) ? state.authors : [],
       // editors credited in the byline (optional, separate from the authors line);
@@ -1102,7 +1102,7 @@
   //     ride on the body tokens, not here. So the transcript is stripped.
   //
   //   • HARD-REDACTED SOURCE: a source the author scrubbed PII from (Citey's
-  //     review, app/pii.js) has to reach the archive REDACTED FOR REAL. The █
+  //     review, app/redaction/pii.js) has to reach the archive REDACTED FOR REAL. The █
   //     scrub already lives in rec.text — but the ORIGINAL file's own bytes were
   //     never redacted, only its text shadow was, so every pointer back to that
   //     un-redacted original (file_url / mxc / original_url / archive_url) is
@@ -1228,7 +1228,7 @@
       sources
     };
     // composition provenance rides the genesis when the editor captured it
-    // (aggregate counts only — see app/composition.js); harmless when absent
+    // (aggregate counts only — see app/record/composition.js); harmless when absent
     if (o.composition && typeof o.composition === "object") operand.composition = o.composition;
     const line = genesisLine(operand, actor);
     const folded = foldLog(line);
@@ -1262,7 +1262,7 @@
     return { res, line, sha: lineSha(line), filename };
   }
   /* A generic event writer — one NEW version file carrying any EO op. Used by
-     the feedback layer (app/feedback.js) to land reader EVA deposits in the
+     the feedback layer (app/feedback/feedback.js) to land reader EVA deposits in the
      same auditable folder as the article's own events. `schema` overrides the
      event's `v` so feedback lines self-identify (npj/feedback-eo/1) while still
      folding harmlessly through the article reader (EVA never touches state). */

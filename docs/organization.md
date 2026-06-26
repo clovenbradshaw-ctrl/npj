@@ -3,6 +3,13 @@
 > What we can learn from **eoreader4** about turning a flat bag of modules
 > into a nest of swappable holons — *without copying any of its code.*
 
+> **Status — partly realized.** The *physical* holonization has shipped:
+> `app/`'s 64 feature files now live in 14 holon directories (see
+> [`app/README.md`](../app/README.md) for the map), the dead root `engine.js`
+> has been removed, and `index.html` + `boot.js` point at the new homes. What
+> remains is the *semantic* work — splitting the four god files (§5) and turning
+> each holon's `window.Npj*` surface into a real ES-module `index.js` (§6).
+
 npj and eoreader4 are the same family. Both treat an **append-only EO event
 log as the single source of truth** and recompute everything else as a
 projection of it. npj already proves this at the data layer: `articles/<slug>/`
@@ -74,7 +81,8 @@ is a candidate holon: one directory, one `index.js`, one global surface.
 
 | Holon `app/<dir>/` | Owns (global) | Files today | EO operators it speaks |
 |---|---|---|---|
-| **`core/`** | `window.NPJ`, `EOReader4` | `engine.js`*, `eoreader4-bridge.js`, `data.js`, `void-kinds.js` | `SYN` graph · `DEF` assert · `NUL` hold |
+| **`core/`** | `window.NPJ` | `data.js`, `void-kinds.js` | `SYN` graph · `DEF` assert · `NUL` hold |
+| **`graph/`** | `EOReader4`, `NpjPropGraph` | `eoreader4-bridge.js`, `prop-graph.js`, `graph-render.js`, `GraphView.jsx` | `SYN` synthesize |
 | **`record/`** | `NpjArticles`, `NpjStructure`, `NpjComposition`, `NpjSentences` | `articles.js`*, `structure.js`, `composition.js`, `sentences.js`, `versions.jsx` | `INS` publish · `REC` edit · `SEG` resplit |
 | **`sources/`** | `NpjSources`, `NpjCitations`, `NpjSourceView`, `NpjArchiveCDN`, `NpjSourceTitle` | `sources.js`, `citations.js`, `source-view.js`, `source-title.js`, `archive-sources.js`, `archive-cdn.js` | **`CON` the bond** · `SIG` attribute |
 | **`grounding/`** | `CiteyBrain`, `CiteyAssist`, `__citey`, `NpjDefinitions`, `__npjGround` | `CiteyBrain.js`, `citey-assist.js`, `citey-states.js`, `CiteyVoice.js`, `evidence-needs.js`, `definitions.js`, `Citey.jsx` | `EVA` evaluate · `DEF` define |

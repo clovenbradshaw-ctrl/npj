@@ -1,7 +1,7 @@
 // @ds-adherence-ignore -- standalone canvas editor (raw elements/hex/px by design)
 /* photo-editor.js — crop + HARD-redact a photo before it's archived.
  *
- * The same discipline as CiteyRedact (app/CiteyRedact.jsx) does for text, but for
+ * The same discipline as CiteyRedact (app/redaction/CiteyRedact.jsx) does for text, but for
  * pixels. On the way to archive.org — permanent, public, undeletable — a photo can
  * carry a face, a licence plate, a screen, an address. This editor lets the author
  * cut the photo down (crop) and paint hard black over anything that shouldn't be

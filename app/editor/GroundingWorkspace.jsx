@@ -33,7 +33,7 @@ const DOT = { grounded: "#1F9E76", multi: "#6ea8d8", owned: "#7C74DE", needs: "#
 const CONTEXT_TEAL = "#2E8B86";
 
 // The source adapter (treat-as-image + OCR on/off/edit) lives in its own READ-tier
-// file, window.SourceAdapter (app/SourceAdapter.jsx), so the file explorer can use
+// file, window.SourceAdapter (app/editor/SourceAdapter.jsx), so the file explorer can use
 // it too. It supersedes the old in-file OcrEditor. Rendered under the reader below.
 
 // Status pill (solid backgrounds read in both newsroom themes).
@@ -369,7 +369,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   // ---- the cite modal: the claim + the document, hero ----
   const [citeMode, setCiteMode] = useState("source"); // source | own | void — the three ways to ground a claim
   const [voidNote, setVoidNote] = useState("");        // the documented search/evidence behind an asserted absence
-  const [voidKind, setVoidKind] = useState("");        // which of the six kinds of void (see app/void-kinds.js)
+  const [voidKind, setVoidKind] = useState("");        // which of the six kinds of void (see app/core/void-kinds.js)
   const [reuseOpen, setReuseOpen] = useState(false);   // the "reuse a pinned quote" drawer (collapsed by default)
   const srcText = (key) => String((api.sourceRec(key) || {}).text || "");
   const openCite = (sid, srcKey, cid) => {

@@ -22,12 +22,12 @@
                               diverges from, or sees conflict among.
 
    Per-article storage rides the same append-only EO log as tags — a folded
-   field `definitions` on the article (see app/articles.js FOLD_FIELDS). Editing
+   field `definitions` on the article (see app/record/articles.js FOLD_FIELDS). Editing
    a definition is an ordinary REC; the collective index re-reads the record, so
    definitions change over time without any of them being thrown away.
 
    Plain script — publishes window.NpjDefinitions. Requires window.EOReader4
-   (app/eoreader4-bridge.js) for extraction and window.NpjArticles for the index.
+   (app/graph/eoreader4-bridge.js) for extraction and window.NpjArticles for the index.
    Best-effort throughout: a missing engine or a dead fetch degrades, never throws.
    ============================================================ */
 (function (root) {

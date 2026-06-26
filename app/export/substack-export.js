@@ -1,7 +1,7 @@
 /* substack-export.js — turn a folded NPJ article into something you can drop
    straight into Substack.
 
-   One source of truth: the read model app/articles.js folds (headline, dek,
+   One source of truth: the read model app/record/articles.js folds (headline, dek,
    byline + body blocks). Two outputs:
 
      • toMarkdown(article, opts) → a clean .md file (download / archive).

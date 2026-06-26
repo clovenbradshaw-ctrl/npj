@@ -477,7 +477,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     setStatusBusy(null);
   };
 
-  // drafts: both layers, newest first (app/drafts.js heals local vs Matrix).
+  // drafts: both layers, newest first (app/identity/drafts.js heals local vs Matrix).
   // Re-list whenever a background sync lands so "backing up…" flips to
   // "on your account" without a reload.
   useEffect(() => {

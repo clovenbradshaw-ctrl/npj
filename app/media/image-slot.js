@@ -51,7 +51,7 @@
  *   src          Optional initial/fallback image URL. A user drop overrides
  *                it; clearing the drop reveals src again.
  *
- * archive.org links (when window.NpjArchiveCDN is present — app/archive-cdn.js):
+ * archive.org links (when window.NpjArchiveCDN is present — app/sources/archive-cdn.js):
  *   Dropping or pasting an archive.org link (details page, download link, or
  *   wayback capture) resolves it to a direct image URL and writes it into the
  *   element's `src` attribute — so the image rides the host document's HTML
@@ -59,7 +59,7 @@
  *   element marks such srcs with `data-cdn` (Remove clears them) and fires a
  *   bubbling 'image-slot-change' event so hosts that persist HTML can save.
  *
- * media store (when window.NpjMedia is present — app/media-store.js):
+ * media store (when window.NpjMedia is present — app/media/media-store.js):
  *   Dropping or browsing to a LOCAL file uploads it to the configured media
  *   store (the Matrix homeserver) and writes the returned https URL into `src`
  *   exactly like an archive.org link — so local drops are durable, never base64,
@@ -297,7 +297,7 @@
     '.ctl .fitbtn{display:none}' +
     ':host([fitcontrol][data-filled]) .ctl .fitbtn{display:inline-block}' +
     // The Edit (crop + redact) button only appears when the photo editor is loaded
-    // and the slot is filled — it opens app/photo-editor.js to bake a cropped /
+    // and the slot is filled — it opens app/media/photo-editor.js to bake a cropped /
     // hard-redacted copy and re-upload it.
     '.ctl .editbtn{display:none}' +
     ':host([data-pe][data-filled]) .ctl .editbtn{display:inline-block}' +
@@ -791,7 +791,7 @@
     }
 
     // ── Edit (crop + hard redact) ───────────────────────────────────────────
-    // Open app/photo-editor.js on the slot's CURRENT image, get back a flattened
+    // Open app/media/photo-editor.js on the slot's CURRENT image, get back a flattened
     // copy (crop + redactions baked into the pixels), and re-upload it the same way
     // a fresh drop is uploaded. Because the edited bytes replace the slot's src,
     // publish's freeze can only ever move the redacted copy onto archive.org — the

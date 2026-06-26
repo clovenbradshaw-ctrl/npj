@@ -16,31 +16,31 @@ founding admin curates the site and grows the network from there.
 | `sw.js` | service worker — caches the app shell + pinned React/Babel for instant repeat loads (and offline) |
 | `articles/` | **the published record** — one folder per document (`<slug>/`) of timestamped version files, one EO event each; legacy single-file logs (`<slug>.jsonl`) still readable |
 | `app/` | the React (in-browser Babel) front end |
-| `app/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
-| `app/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
-| `app/data.js` | content layer — **framework only**, seeded empty |
-| `app/layout.jsx` | the editable site chrome, the **front-page lineup** model (slug ordering + layout templates), the permission model, and the public **contributor profiles** map |
-| `app/profiles.js` | contributor profiles — the byline **name + ≤250-char "About me"**, saved to the contributor's Matrix account (pulled from their account info) and folded into the public layout |
-| `app/Contributors.jsx` | the public **masthead** — every contributor with their role and About me |
-| `app/FrontPage.jsx` | the masthead + front page — renders each piece through the admin's chosen layout template (`FrontCard`) |
-| `app/AdminEditor.jsx` | the admin **Edit layout** panel — section nav, taglines, brand, roles, contributor profiles, and the front-page lineup editor |
-| `app/matrix-auth.js` | real Matrix client-server auth, roles, profile & room recovery |
-| `app/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
-| `app/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
-| `app/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
-| `app/citations.js` · `app/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation. One span can hold **several citations** (`data-cite-id`, one `md-cite` marker per source) |
-| `app/source-title.js` | best-effort **source identity** — guess a web source's title (URL slug) + outlet (host), and read the real ones off the page's own `<title>`/`og:` tags. No model; pure + tested |
-| `app/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
-| `app/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
-| `app/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩, or **⊪ in context** — continuing coverage that builds on prior articles), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
-| `app/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
-| `app/CiteyVoice.js` · `app/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
-| `app/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
-| `app/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing. Reads PDFs/scans in-browser (text layer / OCR) and, for a PDF, builds a **real redacted copy** (boxes burned into rasterized pages) that ships in place of the original |
-| `app/PdfRedactView.jsx` | **redact ON the PDF** — renders the real pages and lets the author drag black boxes over anything (name, face, signature, scanned line); shows redactions already on the record. Each box is normalized to the page and burned into the archived copy by `NpjSourceView.buildRedactedPdf` |
-| `app/versions.jsx` | article version history + word-level diff |
-| `app/feedback.js` | **span feedback** — readers suggest an edit (or comment) on any selected words; stored as EVA events in the article's folder + a local mirror; an editor **merges** (apply + commit a REC) or declines |
-| `app/SuggestionRail.jsx` | the review surface — PR-shaped cards (diff, rationale, 👍, threaded replies) with **Merge / Decline** for editors |
+| `app/record/articles.js` | the EO log store: lists `articles/` onto the front page, folds a document's version files into a readable article, publishes (INS) and commits edits (REC) — each as a brand-new file |
+| `app/reader/ArticleEdit.jsx` | edit-after-publish overlay — admin + the article's assignees |
+| `app/core/data.js` | content layer — **framework only**, seeded empty |
+| `app/admin/layout.jsx` | the editable site chrome, the **front-page lineup** model (slug ordering + layout templates), the permission model, and the public **contributor profiles** map |
+| `app/identity/profiles.js` | contributor profiles — the byline **name + ≤250-char "About me"**, saved to the contributor's Matrix account (pulled from their account info) and folded into the public layout |
+| `app/reader/Contributors.jsx` | the public **masthead** — every contributor with their role and About me |
+| `app/reader/FrontPage.jsx` | the masthead + front page — renders each piece through the admin's chosen layout template (`FrontCard`) |
+| `app/admin/AdminEditor.jsx` | the admin **Edit layout** panel — section nav, taglines, brand, roles, contributor profiles, and the front-page lineup editor |
+| `app/identity/matrix-auth.js` | real Matrix client-server auth, roles, profile & room recovery |
+| `app/identity/drafts.js` | durable drafts — localStorage + Matrix account-data sync (survive refresh & browser wipe) |
+| `app/editor/Newsroom.jsx` | the editor: manual span-bound sourcing, images, tags, invites — mobile-responsive |
+| `app/editor/GroundingWorkspace.jsx` | the grounding workspace — four pivoting views of the same draft (Prose / Grounding / Citations / Sources), the publish-gate strip, the cite modal and Citey's walkthrough |
+| `app/sources/citations.js` · `app/record/sentences.js` | the grounding model: reusable citation records (pinned spans of a source, multi-part supported) + live sentence segmentation. One span can hold **several citations** (`data-cite-id`, one `md-cite` marker per source) |
+| `app/sources/source-title.js` | best-effort **source identity** — guess a web source's title (URL slug) + outlet (host), and read the real ones off the page's own `<title>`/`og:` tags. No model; pure + tested |
+| `app/admin/Documents.jsx` | the **article** explorer — bucketed by **project**, each project a card with permission controls (invite by Matrix ID), its articles, and the **shared source shelf** (deduped + backtracked) |
+| `app/sources/sources.js` | source provenance — synthetic content **dedup** (one signature per document, linked across projects/articles, never deleted) + **backtracking** (source → every article that cites it) |
+| `app/grounding/Citey.jsx` | the drafting assistant — a margin mascot whose face is the mechanical grounding state (⊥ ungrounded → ⊤ grounded); offers **pin a source line** or **own it** (⊢/⊨/⊩, or **⊪ in context** — continuing coverage that builds on prior articles), reflects the publish gate, suggests **tags**. Sits small and quiet (idle bob + "boil" + blink), comes forward on hover/flag, and plays an **interstitial morph** each time he changes shape (motion-reduced for `prefers-reduced-motion`) |
+| `app/grounding/CiteyBrain.js` | the mechanical layer — reads the editor's live grounding (pinned / owned / undeclared) into Citey's states; **no model** |
+| `app/grounding/CiteyVoice.js` · `app/grounding/citey-assist.js` | leashed (templated) speech; mechanical tag-suggest + source-span ranking (never invents a citation) |
+| `app/redaction/pii.js` | the **pii-v2 pack** — mechanical recognizers (regex + checksum + context, **no model**) for data-shaped PII: phones, SSNs, cards, addresses, emails…; detects candidate spans and hard-redacts them |
+| `app/redaction/CiteyRedact.jsx` | **Citey's PII review** — the modal that gates a source on its way to archive.org: hard-redact or affirm each flagged span, plus broad document editing. Reads PDFs/scans in-browser (text layer / OCR) and, for a PDF, builds a **real redacted copy** (boxes burned into rasterized pages) that ships in place of the original |
+| `app/redaction/PdfRedactView.jsx` | **redact ON the PDF** — renders the real pages and lets the author drag black boxes over anything (name, face, signature, scanned line); shows redactions already on the record. Each box is normalized to the page and burned into the archived copy by `NpjSourceView.buildRedactedPdf` |
+| `app/record/versions.jsx` | article version history + word-level diff |
+| `app/feedback/feedback.js` | **span feedback** — readers suggest an edit (or comment) on any selected words; stored as EVA events in the article's folder + a local mirror; an editor **merges** (apply + commit a REC) or declines |
+| `app/reader/SuggestionRail.jsx` | the review surface — PR-shaped cards (diff, rationale, 👍, threaded replies) with **Merge / Decline** for editors |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
 
@@ -117,7 +117,7 @@ chrome.
 The record stays open to public suggestion — span by span. In the reader, select
 **any words** in a story and a small bubble offers **Suggest edit** (propose the
 exact replacement words) or **Comment** (pin a note to the span). Each lands as
-an **EVA deposit** in the article's own folder (`app/feedback.js`,
+an **EVA deposit** in the article's own folder (`app/feedback/feedback.js`,
 `articles/<slug>/…-eva-….jsonl`) and folds as a no-op for the article itself — so
 a proposal never changes a published word. Open suggestions are painted right
 into the prose (a soft dashed underline, the way a Google-Docs suggestion shows
@@ -167,7 +167,7 @@ public profile — a display **name** and a **≤250-character "About me."**
   and editors are stored on the article's EO event (`authors[]`, `editors[]`,
   `byline`), so the credit is part of the permanent, auditable log.
 - **Names pull from the contributor's account.** A byline name defaults to the
-  contributor's **Matrix display name** (`app/profiles.js` → the profile API) —
+  contributor's **Matrix display name** (`app/identity/profiles.js` → the profile API) —
   the byline is right without anyone typing it. Editor names are optional; a
   byline can be **Unsigned**.
 - **"About me" is the contributor's to set.** From **Documents → "Your byline &
@@ -220,7 +220,7 @@ author decides what's true.
 ## The Grounding Workspace — four pivoting views of one draft
 
 Next to **Prose** (the editor), the Newsroom's view switcher opens the
-**grounding workspace** (`app/GroundingWorkspace.jsx`): three more views of the
+**grounding workspace** (`app/editor/GroundingWorkspace.jsx`): three more views of the
 *same* draft, each a different cut of its grounding record, with a side panel
 that always shows a second view and **pivots** as you work:
 
@@ -247,7 +247,7 @@ that always shows a second view and **pivots** as you work:
   A web source no longer lands as a generic *"Web snapshot"* — it's named
   mechanically from its URL (the slug → a readable title, the host → the outlet),
   then **upgraded from the page's own `<title>`/`og:` tags** when the CORS-open
-  archived HTML is reachable (`app/source-title.js` parses, `archive-cdn.pageMeta`
+  archived HTML is reachable (`app/sources/source-title.js` parses, `archive-cdn.pageMeta`
   fetches — no model, best-effort, a manual Rename always wins). Pick a row to open
   the document as paper with a letterhead: search within it, see every cited span
   highlighted in place, and — from any "+ Cite" — go in **armed**: Citey shades the
@@ -269,12 +269,12 @@ desk, hand them off: the **Export for fact-check** action turns every blocker
 fact checks* — one line per claim, each naming the **type of evidence** that
 would ground it (the negative space), e.g. `… → an official document (court
 filing, permit, or ordinance)`. The evidence type is read **mechanically** from
-cues in the claim (`app/evidence-needs.js` — quotation marks, legal/governmental
+cues in the claim (`app/grounding/evidence-needs.js` — quotation marks, legal/governmental
 verbs, figures, attribution, dates → a coarse evidence category; no model, never
 prescriptive about the specific document). A **Sharpen with local model** button
 upgrades the types through a local LLM when one is reachable (Ollama, or any
 `setLLM` hook — the same ladder as Citey's voice), falling back silently to the
-mechanical read. `app/fact-check-export.js` shapes the plain text; nothing here
+mechanical read. `app/export/fact-check-export.js` shapes the plain text; nothing here
 judges a claim, only what would let someone else judge it.
 
 ## Citey — every claim grounded before it ships
@@ -369,8 +369,8 @@ draft and the committed file is named accordingly.
 ## Export to Substack — a paste that lands perfectly
 
 Any published piece carries an **Export** button (the reader's control bar)
-that opens the Substack panel (`app/SubstackExport.jsx`, over
-`app/substack-export.js`). The mechanic it leans on: Substack's editor honors
+that opens the Substack panel (`app/export/SubstackExport.jsx`, over
+`app/export/substack-export.js`). The mechanic it leans on: Substack's editor honors
 **pasted HTML** (headings, bold/italic, links, lists, blockquotes, `<img>`) but
 treats **pasted markdown syntax as literal text** — so the formatting has to
 travel as HTML, not as `#`/`*` characters. Two paths, both land formatted:
@@ -411,7 +411,7 @@ can't be edited or taken down. So **Citey's first real job** is a redaction gate
 on the way there. Upload a document and Citey opens a review (you can defer it,
 but a source can't be archived until you've been through it):
 
-- **He scans it mechanically.** `app/pii.js` is a small, Presidio-shaped
+- **He scans it mechanically.** `app/redaction/pii.js` is a small, Presidio-shaped
   `pii-v2` recognizer pack — regexes, checksums (Luhn for cards, the SSN
   never-issued ranges, IBAN mod-97) and context words — surfacing emails, phone
   numbers, SSNs, cards, IBANs, IPs, street addresses, PO boxes, birth dates and
@@ -432,9 +432,9 @@ but a source can't be archived until you've been through it):
   without un-withholding it. The archive consent now checks that **`✓ PII
   reviewed`** gate instead of a self-ticked "no private info" box.
 - **PDFs are read AND redacted on the document.** A PDF is no longer opaque to
-  Citey: `app/source-view.js` pulls its text layer (so the recognizers scan the
+  Citey: `app/sources/source-view.js` pulls its text layer (so the recognizers scan the
   real words) and the per-run geometry, and the review renders the actual pages
-  (`app/PdfRedactView.jsx`). Redact a flagged span and the black box is mapped
+  (`app/redaction/PdfRedactView.jsx`). Redact a flagged span and the black box is mapped
   onto the page; **drag a box over anything** — a name, a face, a signature, a
   scanned line — and it scrubs the words under it too. When the source is
   archived, `NpjSourceView.buildRedactedPdf` ships a **real redacted PDF**: every
@@ -456,7 +456,7 @@ Article images aren't committed to this repo or stuffed into drafts as data
 URLs. Upload the image at <https://archive.org/upload> (tag it `npj-media` if
 you want your media library greppable, same idea as `npj-source`), then drop
 the item's link onto any image slot in the Newsroom — a details page, a direct
-`/download/` link, or a wayback capture all work; `app/archive-cdn.js` resolves
+`/download/` link, or a wayback capture all work; `app/sources/archive-cdn.js` resolves
 them to the item's primary image file via the IA metadata API. The slot renders
 straight from archive.org, the URL travels inside the draft HTML (so it syncs
 to your Matrix account and other devices with the draft), and the published
@@ -467,7 +467,7 @@ stay out of the published article until they're on archive.org.
 
 ### Edit the photo before it's frozen — crop + hard redaction
 
-Hover a filled image slot and hit **Edit** (`app/photo-editor.js`) to crop the
+Hover a filled image slot and hit **Edit** (`app/media/photo-editor.js`) to crop the
 frame and paint hard black over anything that shouldn't be public — a face, a
 plate, a screen, an address. Both are **baked into a new image**: the editor
 flattens the crop and the redaction boxes onto a canvas, and `<image-slot>`
@@ -495,7 +495,7 @@ per-document grant needed. Documents (`#docs`) is where this lives: each project
 is a card with its invitees, an **Invite** control (a Matrix ID → an invite the
 homeserver authorizes), the project's articles, and the **shared source shelf**.
 
-Sources are **deduped synthetically** (`app/sources.js`): the same document
+Sources are **deduped synthetically** (`app/sources/sources.js`): the same document
 uploaded twice — to one article, one project, or across projects — collapses to
 one row by a content **signature**, and the copies are *linked* rather than
 thrown away (so a source's cross-project life is visible, and nothing is lost).
@@ -505,11 +505,11 @@ The grounding graph already points article → source; sources.js also walks it
 ## The Data explorer (`#explore`) — the archive behind the stories
 
 The Data page opens on **Published sources**: every source a *released* article
-rests on, folded out of the committed record (`app/sources.js` over
-`app/articles.js`), deduped by signature and **backtracked** — each card traces
+rests on, folded out of the committed record (`app/sources/sources.js` over
+`app/record/articles.js`), deduped by signature and **backtracked** — each card traces
 the trail back to the stories that cite it (open one straight from the source).
 A second tab, **All tagged items**, is the raw archive.org view: it queries the
-Internet Archive's search API on load (`app/archive-sources.js`) and lists every
+Internet Archive's search API on load (`app/sources/archive-sources.js`) and lists every
 item carrying the NPJ subject tag — each a searchable, previewable card and a
 citeable source in the composer's **Cite a dataset** picker.
 
@@ -526,7 +526,7 @@ Add tags at upload time (<https://archive.org/upload> → *Subject tags*) or
 afterwards from the item's **Edit metadata** page. New or re-tagged items appear
 once the archive.org search index refreshes — minutes up to about an hour.
 
-The query lives in `window.NPJ.ARCHIVE` (`app/archive-sources.js`): change `tag`
+The query lives in `window.NPJ.ARCHIVE` (`app/sources/archive-sources.js`): change `tag`
 to rename the convention, or set `extraQuery: 'uploader:"you@example.com"'` to
 pin the page to a single IA account so nobody else can tag their way in.
 
@@ -547,7 +547,7 @@ admin adds — can open the Newsroom and draft/edit; everyone else gets the emai
 path. That allowlist is the same role model above, so opening the network up later
 is just adding editors. **Drafts are durable:** they autosave to this browser
 *and*, once you sign in, to your Matrix account — so a refresh, a closed tab, or a
-switched/wiped device no longer loses work (see `app/drafts.js`).
+switched/wiped device no longer loses work (see `app/identity/drafts.js`).
 
 ## Backend
 

@@ -4,7 +4,7 @@
    a centered 2/3-width column: a one-up cover story, a 3-across row, then the
    rest as a single vertical feed. Each piece renders through its admin-chosen
    layout template (FrontCard); the lineup order + templates come from
-   layout.front (see app/layout.jsx, app/AdminEditor.jsx). */
+   layout.front (see app/admin/layout.jsx, app/admin/AdminEditor.jsx). */
 
 // Desktop front-page shell: a centered column 2/3 of the screen wide (capped so
 // it never runs away on ultra-wide displays). On phones every container goes

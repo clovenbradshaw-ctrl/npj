@@ -8,7 +8,7 @@
        • <the claim> → <what evidence is needed>
 
    The claim text comes from the draft; the evidence type comes from
-   app/evidence-needs.js (mechanical by default, optionally sharpened by a local
+   app/grounding/evidence-needs.js (mechanical by default, optionally sharpened by a local
    LLM). This module only shapes — no DOM, unit-tested in node. UMD:
    window.NpjFactCheck in the browser, module.exports in node.
 */

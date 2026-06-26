@@ -148,7 +148,7 @@ function npjPerson(mxid) {
 
 /* ---------- bio rich text ----------
    Render a contributor's "About me" with safe inline links. Tokenising +
-   URL-sanitising is headless in app/profiles.js (linkTokens/safeHref); here we
+   URL-sanitising is headless in app/identity/profiles.js (linkTokens/safeHref); here we
    only map tokens to React nodes. Labels and plain text are React children, so
    React escapes them; every href already cleared safeHref (http(s)/mailto only)
    and links carry rel="noopener noreferrer nofollow" + target=_blank. There is
@@ -641,7 +641,7 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
    (deferred) bundle has loaded. */
 // Two-source image: try the live Matrix media-store copy first, fall back to
 // the durable archive.org one (then any further candidates). Both URLs ride in
-// the img block — see freezeArticleMedia (app/media-store.js).
+// the img block — see freezeArticleMedia (app/media/media-store.js).
 //
 // A media-store URL can't be loaded by a bare <img>: authenticated-media
 // homeservers (Matrix 1.11+) reject an unauthenticated GET, so we resolve it

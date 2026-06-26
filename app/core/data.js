@@ -2,7 +2,7 @@
    All sample/demo content was removed for the public GitHub launch. The app
    now boots empty: no articles, sources, suggestions, datasets or feeds ship in
    the repo. Editors populate everything from the Newsroom + Submit flows, and
-   layout config is curated by a verified admin (see app/layout.jsx).
+   layout config is curated by a verified admin (see app/admin/layout.jsx).
 
    What stays here is structural and content-free:
    • the EO §2.2 operator table + eoEvent() — the notation the app is built on
@@ -16,7 +16,7 @@
   // ---- Citation records — a citation is a SPAN of a source (srcKey + the exact
   //      pinned words), a first-class reusable record keyed by id. One citation
   //      can back many sentences; deleting a sentence never destroys it. The live
-  //      registry + helpers live in app/citations.js (window.NpjCitations); this
+  //      registry + helpers live in app/sources/citations.js (window.NpjCitations); this
   //      map is the runtime store, persisted per-draft and rehydrated on restore.
   //      Shape: { id, srcKey, quote, loc:{start,end}|null, createdAt, label? }
   const CITATIONS = {};
@@ -57,7 +57,7 @@
 
   // Build the canonical event string for a suggestion (an EVA deposit).
   // Reads window.NPJ.ARTICLE (not the shipped null above) — articles are now
-  // loaded at runtime from their committed EO logs (app/articles.js).
+  // loaded at runtime from their committed EO logs (app/record/articles.js).
   function eoEvent(s) {
     const A = window.NPJ.ARTICLE;
     const slug = (A && A.slug) || "untitled";

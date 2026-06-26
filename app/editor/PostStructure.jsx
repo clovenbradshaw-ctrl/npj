@@ -1,6 +1,6 @@
 /* PostStructure.jsx — the editing-only structure rail + blank-page type picker.
  *
- * The ONLY UI for the post-structure layer (app/structure.js). The Newsroom owns
+ * The ONLY UI for the post-structure layer (app/record/structure.js). The Newsroom owns
  * the event log, the fold and the DOM section-span reflow, and hands this an
  * `api`; this renders:
  *   · the blank page — "Start a post": pick a post type (lay down its labeled,
@@ -175,7 +175,7 @@
       dropSection: (e, sec) => {
         if (!dragId || dragId === sec.id) return;
         e.preventDefault(); e.stopPropagation();
-        // same drop math the in-document block drag uses (app/structure.js) — the
+        // same drop math the in-document block drag uses (app/record/structure.js) — the
         // rail and the page can never disagree about where a section lands.
         const m = lib.sectionDropIndex(state, dragId, sec.id, (hint && hint.edge) || "before");
         if (m) api.moveSection(dragId, m.parentSlotId, m.index);

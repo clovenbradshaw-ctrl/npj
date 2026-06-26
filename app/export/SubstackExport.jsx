@@ -1,6 +1,6 @@
 /* SubstackExport.jsx — the reader's "Export for Substack" panel.
 
-   The work is in app/substack-export.js (window.NpjSubstack). This is the
+   The work is in app/export/substack-export.js (window.NpjSubstack). This is the
    surface: a one-click rich copy (HTML + markdown on the clipboard, so a paste
    into Substack keeps headings, images, links, blockquotes and the sourcing),
    a .md download, separate Title/Subtitle chips for Substack's own fields, and

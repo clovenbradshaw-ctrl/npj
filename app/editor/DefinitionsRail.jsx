@@ -2,7 +2,7 @@
    Contents rail. The terms a piece leans on that a reader might need defined:
    eoreader4 SUGGESTS them (mechanically, counted relative to the article's
    length), the writer keeps/edits/adds, and each term can ADOPT or DIVERGE from
-   the definitions the published record already carries (app/definitions.js).
+   the definitions the published record already carries (app/grounding/definitions.js).
 
    A term may hold CONFLICTING definitions across the site; this panel shows the
    alternates inline so a writer chooses with the disagreement in view. State

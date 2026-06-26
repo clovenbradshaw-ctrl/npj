@@ -422,7 +422,7 @@
      The inviter (signed in) mints a brand-new account on the homeserver, then
      hands the newcomer a single link that logs them in, lets them pick a display
      name and set their own password. Three pieces live here; the UI is in
-     app/Invite.jsx.
+     app/admin/Invite.jsx.
 
        register()        — create the account (runs in the inviter's browser)
        setDisplayName()  — the newcomer names themselves (step 1 of the link)

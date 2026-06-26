@@ -943,7 +943,7 @@ a { color: inherit; }
 
 /* ════════════════════════════════════════════════════════════════════════
    Image carousel + fullscreen viewer (Splide + GLightbox, vendored).
-   The reader renders a {type:'gallery'} block as <Carousel> (app/shared.jsx);
+   The reader renders a {type:'gallery'} block as <Carousel> (app/ui/shared.jsx);
    any single photo opens the same zoomable viewer via <ZoomImg>. We ship
    splide-core (no theme), so the arrows/dots are themed here to ink/paper.
    ════════════════════════════════════════════════════════════════════════ */
