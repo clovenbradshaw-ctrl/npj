@@ -122,6 +122,9 @@
 <!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
      the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
 <script src="app/feedback.js"></script>
+<!-- batched, throttled archive.org writes for public branches (one item per
+     article). Requires NpjArticles for the host; feedback.js drives it. -->
+<script src="app/branch-archive.js"></script>
 <!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
      (paste into Substack keeps headings, images, links & the sourcing). -->
 <script src="app/substack-export.js"></script>

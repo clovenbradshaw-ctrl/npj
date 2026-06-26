@@ -392,7 +392,7 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
             </div>
             {onContributeArticle && (
               <button className="btn btn-sm" onClick={onContributeArticle} style={{ width: "100%", marginTop: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "var(--data)", color: "#fff", borderColor: "var(--ink)" }}>
-                <I.doc style={{ fontSize: 14 }} /> Contribute to the whole article
+                <span style={{ fontFamily: "var(--mono)" }}>⑂</span> Fork the whole article
               </button>
             )}
             {!signedIn && (

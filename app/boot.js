@@ -48,7 +48,7 @@
   // front page paints. Gated behind window.__npjReady.read.
   var READ = [
     "app/PdfView.jsx", "app/PdfRedactView.jsx", "app/SourceViewer.jsx", "app/SourceAdapter.jsx", "app/SourceExplorer.jsx",
-    "app/versions.jsx", "app/Entities.jsx", "app/SuggestionRail.jsx", "app/ContributeOnboard.jsx",
+    "app/versions.jsx", "app/Entities.jsx", "app/SuggestionRail.jsx", "app/ContributeOnboard.jsx", "app/ForkEditor.jsx",
     "app/SubstackExport.jsx", "app/FactCheckExport.jsx", "app/ArticleRead.jsx",
     "app/ArticleEdit.jsx", "app/SourcePicker.jsx", "app/InterviewSource.jsx",
     "app/Standards.jsx", "app/Contributors.jsx", "app/Submit.jsx",

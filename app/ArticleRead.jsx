@@ -537,11 +537,15 @@ function ArticleRead(props) {
     setShowSugg(true); setHover(null); setBubble(null);
   };
 
-  // Open the composer for a contribution on the WHOLE article — not pinned to any
-  // span. Stored as a proposal an editor reads and applies (a PR description).
+  // Fork the WHOLE article: open the lightweight content editor. A fork with edits
+  // lands as a mergeable branch; with none, a note. Falls back to the rail's
+  // comment composer if the fork editor bundle isn't ready yet.
+  const [forkOpen, setForkOpen] = useState(false);
   const startArticleContribution = () => {
+    setHover(null); setBubble(null);
+    if (window.ForkEditor) { setForkOpen(true); return; }
     setCompose({ quote: "", scope: "article", anchor: { scope: "article", quote: "" }, kind: "comment" });
-    setShowSugg(true); setHover(null); setBubble(null);
+    setShowSugg(true);
   };
 
   // Toggle a BRANCH on before merge: render the article with this branch applied
@@ -1096,6 +1100,12 @@ function ArticleRead(props) {
       {branchPreview && window.ArticleRead && (
         <window.ArticleRead preview previewArticle={branchPreview.article} branchInfo={branchPreview.s}
           onClose={() => setBranchPreview(null)} me={me} />
+      )}
+
+      {forkOpen && window.ForkEditor && (
+        <window.ForkEditor article={A} me={me} signedIn={signedIn}
+          onSubmit={(d) => { onAddSuggestion(d); setForkOpen(false); setShowSugg(true); }}
+          onClose={() => setForkOpen(false)} />
       )}
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
         onRevert={revertTo} canRevert={canEditArticle} reverting={reverting} revertErr={revertErr} />}

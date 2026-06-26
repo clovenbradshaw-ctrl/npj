@@ -290,28 +290,37 @@
      and every reader folds them in. */
   function attachBranch(p) {
     var token = p.token;
-    var jobs = [];
-    // 1) the merge-request discussion room (needs a verified session + invitees)
+    var vis = (p.operand && p.operand.visibility) || "public";
+    // 1) the merge-request discussion room (needs a verified session + invitees).
+    //    Records roomId on the branch as soon as it's open.
     if (token && root.MatrixAuth && root.MatrixAuth.createMergeRequestRoom) {
       var label = (p.operand && p.operand.scope === "article") ? "whole article" : "a span";
-      jobs.push(
-        root.MatrixAuth.createMergeRequestRoom({
-          slug: p.slug, title: "Merge request · " + label + " · " + p.slug,
-          invite: p.authors || [], visibility: p.operand && p.operand.visibility
-        }).then(function (r) { return { roomId: r && r.roomId }; }).catch(function () { return {}; })
-      );
-    } else { jobs.push(Promise.resolve({})); }
-    // 2) the archive.org snapshot of the piece this branch forks from (best-effort;
-    //    the branch's own words are already on the permanent EO record)
-    if (p.shareUrl && root.NpjArchiveCDN && root.NpjArchiveCDN.ensureSnapshot) {
-      jobs.push(root.NpjArchiveCDN.ensureSnapshot(p.shareUrl).then(function (u) { return { archiveUrl: u || null }; }).catch(function () { return {}; }));
-    } else { jobs.push(Promise.resolve({})); }
+      root.MatrixAuth.createMergeRequestRoom({
+        slug: p.slug, title: "Merge request · " + label + " · " + p.slug,
+        invite: p.authors || [], visibility: vis
+      }).then(function (r) {
+        if (r && r.roomId) commitEva(p.slug, { id: newId("fbb"), ref: p.id, act: "branch", roomId: r.roomId, author: p.author || null }, p.author, token, "branch room: " + p.slug);
+      }).catch(function () {});
+    }
+    // 2) archive.org — PUBLIC branches only (private branches stay on the EVA
+    //    record + Matrix, never pushed to the public web). Batched + throttled by
+    //    NpjBranchArchive; the confirmed archiveUrl is written back via the
+    //    subscription below. A failure just leaves archiveUrl null.
+    if (vis !== "private" && root.NpjBranchArchive && root.NpjBranchArchive.enqueue) {
+      var title = "NPJ branch on " + p.slug + (p.author ? " by " + p.author : "");
+      root.NpjBranchArchive.enqueue({ slug: p.slug, branchId: p.id, branch: p.operand, title: title, author: p.author || null });
+    }
+  }
 
-    return Promise.all(jobs).then(function (res) {
-      var roomId = res[0] && res[0].roomId, archiveUrl = res[1] && res[1].archiveUrl;
-      if (!roomId && !archiveUrl) return;
-      return commitEva(p.slug, { id: newId("fbb"), ref: p.id, act: "branch", roomId: roomId || null, archiveUrl: archiveUrl || null, author: p.author || null }, p.author, token, "branch: " + p.slug);
-    }).catch(function () {});
+  // Write a confirmed archive.org URL back onto its branch (an additive "branch"
+  // follow-up EVA). Uses a live token at callback time; if there's none, the
+  // local mirror still records it so the reader shows the archived badge.
+  if (root.NpjBranchArchive && root.NpjBranchArchive.onResult) {
+    root.NpjBranchArchive.onResult(function (r) {
+      if (!r || !r.url) return;
+      var tok = (root.MatrixAuth && root.MatrixAuth.token && root.MatrixAuth.token()) || null;
+      commitEva(r.slug, { id: newId("fbb"), ref: r.branchId, act: "branch", archiveUrl: r.url, author: r.author || null }, r.author, tok, "branch archived: " + r.slug);
+    });
   }
 
   /* ---------------- branch visibility + preview ----------------
@@ -335,6 +344,41 @@
     if (s.scope === "article") return (s.forkBody && s.forkBody.length) ? s.forkBody : null; // the fork's edited copy
     if (s.kind === "comment") return null;
     return applyToBody(body, s); // null on conflict — never a wrong paint
+  }
+
+  /* ---------------- lightweight article fork: text-level editing ----------------
+     A fork edits the EXISTING blocks' text only (no new blocks, no formatting) —
+     the "just let them edit the content" surface. forkUnits flattens the body to
+     one editable text unit per text-bearing block; applyForkUnits maps the edited
+     text back, rebuilding only the blocks that actually changed (so untouched
+     paragraphs keep their citations). forkChanged gates the submit. */
+  function tokText(t) { if (t == null) return ""; if (typeof t === "string") return t; if (t.c != null) return t.c; if (t.text != null) return t.text; return ""; }
+  function blockText(b) {
+    if (!b || !b.type) return null;
+    if (b.type === "p" && b.tokens) return b.tokens.map(tokText).join("");
+    if ((b.type === "ul" || b.type === "ol") && b.items) return b.items.map(function (it) { return (it || []).map(tokText).join(""); }).join("\n");
+    if (["h2", "h3", "pull", "code", "verse"].indexOf(b.type) >= 0 && b.text != null) return b.text;
+    return null; // not a text block we let a fork touch (image, embed, footnotes…)
+  }
+  function forkUnits(body) {
+    var units = [];
+    (body || []).forEach(function (b, i) { var t = blockText(b); if (t !== null) units.push({ key: String(i), type: b.type, text: t }); });
+    return units;
+  }
+  function applyForkUnits(body, edits) {
+    var next = JSON.parse(JSON.stringify(body || []));
+    next.forEach(function (b, i) {
+      var k = String(i); if (!edits || !(k in edits)) return;
+      var nt = String(edits[k]); var orig = blockText(b);
+      if (orig === null || nt === orig) return; // unchanged → keep its rich tokens
+      if (b.type === "p") b.tokens = [nt];
+      else if (b.type === "ul" || b.type === "ol") b.items = nt.split("\n").map(function (line) { return [line]; });
+      else if (["h2", "h3", "pull", "code", "verse"].indexOf(b.type) >= 0) b.text = nt;
+    });
+    return next;
+  }
+  function forkChanged(body, edits) {
+    return forkUnits(body).some(function (x) { return edits && (x.key in edits) && String(edits[x.key]) !== x.text; });
   }
   // Toggle this browser's 👍 on a proposal; returns the new on/off state.
   function vote(p) {
@@ -413,6 +457,7 @@
     paintAnchors: paintAnchors, clearAnchors: clearAnchors, flash: flash, supportsHighlight: supportsHL,
     load: load, propose: propose, vote: vote, reply: reply, resolve: resolve,
     applyToBody: applyToBody, merge: merge,
-    canSee: canSee, previewBranch: previewBranch
+    canSee: canSee, previewBranch: previewBranch,
+    forkUnits: forkUnits, applyForkUnits: applyForkUnits, forkChanged: forkChanged
   };
 })(typeof window !== "undefined" ? window : this);
