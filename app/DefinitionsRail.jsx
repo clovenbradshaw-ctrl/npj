@@ -160,12 +160,24 @@ function DefinitionsView({ NR, definitions, onChange, getBodyText, slug, isMobil
     return Object.assign({}, e, { defs: base.concat([nd]) });
   }));
 
+  // the first definition for a new term — pre-filled from the published record
+  // when the site already defines it (adopted, fully editable), so a term the
+  // record knows arrives defined; else a blank row for the author to fill.
+  function seedDef(keyStr, origin) {
+    const grp = (index && index.get) ? index.get(keyStr) : null;
+    const canon = grp && grp.canonical;
+    if (canon && canon.def) {
+      return { id: D.newId("d"), text: canon.def, source: canon.source || null, sense: "", origin: "adopted", basedOn: { slug: canon.slug, defId: null }, author: "", ts: "" };
+    }
+    return { id: D.newId("d"), text: "", source: null, sense: "", origin: origin || "manual", basedOn: null, author: "", ts: "" };
+  }
+
   function addTerm(term) {
     const t = String(term || "").trim();
     if (!t || !D) return;
     const key = D.termKey(t);
     if (list.some(e => (e.termKey || D.termKey(e.term)) === key)) { setNote("“" + t + "” is already listed"); return; }
-    onChange(list.concat([{ id: D.newId("def"), term: t, termKey: key, kind: "term", acronym: null, defs: [{ id: D.newId("d"), text: "", source: null, sense: "", origin: "manual", basedOn: null, author: "", ts: "" }] }]));
+    onChange(list.concat([{ id: D.newId("def"), term: t, termKey: key, kind: "term", acronym: null, defs: [seedDef(key, "manual")] }]));
     setNote("");
   }
 
@@ -182,7 +194,7 @@ function DefinitionsView({ NR, definitions, onChange, getBodyText, slug, isMobil
       res.terms.forEach(t => {
         if (have[t.termKey]) return;
         have[t.termKey] = 1;
-        add.push({ id: D.newId("def"), term: t.term, termKey: t.termKey, kind: t.kind, acronym: t.acronym || null, contexts: t.contexts || [], defs: [{ id: D.newId("d"), text: "", source: null, sense: "", origin: "extracted", basedOn: null, author: "", ts: "" }] });
+        add.push({ id: D.newId("def"), term: t.term, termKey: t.termKey, kind: t.kind, acronym: t.acronym || null, contexts: t.contexts || [], defs: [seedDef(t.termKey, "extracted")] });
       });
       if (!add.length) { if (!silent) setNote(res.terms.length ? "No new terms — the draft's salient terms are already listed." : "No terms found — write a little more, then suggest again."); return; }
       onChange(list.concat(add));
