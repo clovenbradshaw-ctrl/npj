@@ -119,13 +119,19 @@ function CitedSpanList({ claims, onJump, currentId }) {
   );
 }
 
-/* Float a preview card BESIDE the reading column — out in the margin, never over
+// The docked preview panel sits at a fixed band below the sticky control bar,
+// so it holds its place on screen instead of riding up and down with each marker.
+const DOCK_TOP = 84;
+
+/* Dock a preview panel BESIDE the reading column — out in the margin, never over
    the prose — so it never covers what you're reading yet stays a short hop away.
-   Given the marker's rect and the article column's rect it pops to the gutter
-   nearest the marker (least pointer travel), skips a gutter an open rail has
-   already claimed (the ledger, the suggestions or figures rail), shrinks to fit
-   and clamps to the viewport. Returns null when neither margin has room (a narrow
-   window) — the caller then drops back to anchoring under the marker. */
+   It's a side panel that STAYS PUT: given the article column's rect it picks one
+   stable gutter (the roomier free margin, skipping a gutter an open rail has
+   already claimed — the ledger, the suggestions or figures rail) and pins itself
+   to a fixed band near the top, rather than hopping side to side and up and down
+   with the marker. Shrinks to fit and clamps to the viewport. Returns null when
+   neither margin has room (a narrow window) — the caller then drops back to
+   anchoring under the marker. */
 function besideColumn(mk, col, opts) {
   if (!mk || !col) return null;
   const { vw, vh, gap = 16, blockL, blockR } = opts;
@@ -140,15 +146,15 @@ function besideColumn(mk, col, opts) {
   const canL = !blockL && leftRoom >= w + gap + 12;
   const canR = !blockR && rightRoom >= w + gap + 12;
   if (!canL && !canR) return null;
-  // pop to whichever margin the marker sits closest to; fall to the other if
-  // that side is taken, so the card is the shortest reach from the word
-  const nearRight = (mk.left + mk.right) / 2 >= (col.left + col.right) / 2;
-  const side = (nearRight ? canR : canL) ? (nearRight ? "right" : "left") : (canR ? "right" : "left");
+  // dock to ONE stable gutter — the roomier of the two free margins, NOT the one
+  // nearest the marker — so the panel keeps its place instead of jumping sides as
+  // you move between markers (a side an open rail claimed is already ruled out)
+  const side = canR && (!canL || rightRoom >= leftRoom) ? "right" : "left";
   const left = side === "right" ? col.right + gap : col.left - gap - w;
-  // start the card at the marker's line so it reads as a margin note for it, but
-  // keep the whole card on-screen (it scrolls within maxHeight if the note is long)
-  const top = Math.max(12, Math.min(mk.top - 2, vh - 172));
-  return { left, top, width: w, maxHeight: vh - top - 12 };
+  // pin the panel to a fixed band rather than the marker's line, so it stays in
+  // place on screen as you scroll and read (it scrolls within maxHeight if long)
+  const top = Math.min(DOCK_TOP, vh - 220);
+  return { left, top, width: w, maxHeight: vh - top - 16, docked: true };
 }
 
 /* ---- source citation card ---- */
@@ -196,6 +202,14 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
           position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 14 }} /> Citation</span>
           <button onClick={onClose} aria-label="Close citation" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "2px 6px" }}><I.x /></button>
+        </div>
+      )}
+      {/* the panel stays put on a desktop too, so it carries a header with its own
+         dismiss (✕ or Esc) instead of fading when the pointer leaves */}
+      {!sheet && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1.5px solid var(--ink)" }}>
+          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 14 }} /> Citation</span>
+          <button onClick={onClose} aria-label="Close citation" style={{ background: "none", border: 0, fontSize: 20, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 4px" }}><I.x /></button>
         </div>
       )}
       {srcKeys.length > 1 && (
@@ -277,7 +291,8 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand }) {
             <I.expand style={{ fontSize: 13 }} /> Open
           </button>
         )}
-        {sheet && <button onClick={onClose} aria-label="Close note" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>}
+        {/* the panel stays put, so it always carries its own dismiss — ✕ (or Esc) */}
+        <button onClick={onClose} aria-label="Close note" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>
       </div>
       <div className="fnpop-b">
         {text ? (window.npjRichText ? window.npjRichText(text) : text) : <span style={{ color: "var(--ink-soft)" }}>—</span>}
@@ -307,10 +322,12 @@ function groundingDetail(tok) {
   const vk = (isAbsence && VK) ? VK.norm(tok.vkind) : null;
   const vdef = vk ? VK.get(vk) : null;
   const reader = (isAbsence && VK) ? VK.reader(vk) : null;   // shown | located | inferred
+  // names the void's STANDING — how an absence of this kind holds up — rather than
+  // asserting what was or wasn't found; that's the point of marking it a void.
   const standLine = {
-    shown: "Shown — you can point to the absence.",
-    located: "Located — the author cites the gap, or says where it's out of reach.",
-    inferred: "Inferred — no record; the author is arguing it."
+    shown: "Shown — the absence is there to point to.",
+    located: "Located — the gap is named, or placed out of reach.",
+    inferred: "Inferred — nothing to point to; the absence stands on reasoning."
   }[reader];
   return {
     isAbsence,
@@ -323,7 +340,7 @@ function groundingDetail(tok) {
     ariaLabel: isAbsence ? (vdef ? vdef.label + " void" : "Documented void") : gm.label,
     blurb: isAbsence ? (vdef ? vdef.blurb : gm.note) : gm.note,
     standLine,
-    noteLabel: isAbsence ? "What the author searched" : "In the author's words",
+    noteLabel: isAbsence ? "On this absence" : "In the author's words",
     note: tok.note || "",
     prompt: vdef ? vdef.prompt : ""
   };
@@ -371,7 +388,8 @@ function GroundingPop({ data, onEnter, onLeave, onClose, onExpand }) {
             <I.expand style={{ fontSize: 13 }} /> Open
           </button>
         )}
-        {sheet && <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>}
+        {/* the panel stays put, so it always carries its own dismiss — ✕ (or Esc) */}
+        <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 2px", marginLeft: 4 }}><I.x /></button>
       </div>
       <div className="gpop-b">
         <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12 }}>{headline}</div>
@@ -646,38 +664,37 @@ function ArticleRead(props) {
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    // one docked panel at a time — opening a citation clears any note/grounding
+    // panel so the side panel just swaps its contents instead of stacking cards
+    setFnPop(null); setGroundPop(null);
     setHover({ claim, x: r.left, y: r.bottom, srcKeys: claim.src,
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
     setActiveSrc(claim.src[0]);
   }, [previews, railBlockL, railBlockR]);
-  // a generous grace period — the card sits out in the margin and is a real
-  // surface to read and click into (expand to the full document, hop between
-  // passages), so it lingers well after the pointer leaves and only fades once
-  // you've clearly moved on. Moving onto the card cancels the timer entirely.
-  const scheduleLeave = useCallback(() => {
-    if (leaveTimer.current) clearTimeout(leaveTimer.current);
-    leaveTimer.current = setTimeout(() => { setHover(null); setActiveSrc(null); }, 600);
-  }, []);
+  // The citation panel is docked and STAYS IN PLACE: leaving the marker or the
+  // card no longer fades it. It swaps contents when you hover another marker and
+  // closes on its ✕ or Escape — so it holds still while you read what it shows.
+  const scheduleLeave = useCallback(() => {}, []);
   const cancelLeave = useCallback(() => { if (leaveTimer.current) clearTimeout(leaveTimer.current); }, []);
 
-  // footnote preview: hover (desktop) or tap (phone) a marker → the note floats
-  // up next to it; leaving hides it after a beat so a slide into the card keeps
-  // it open. A click still jumps down to the note's home in the endnotes.
+  // footnote preview: hover (desktop) or tap (phone) a marker → the note opens in
+  // the docked panel and stays there. A click still jumps down to the note's home
+  // in the endnotes.
   const enterFn = useCallback((e, key) => {
     if (!previews) return;
     const n = footnoteByKey[key]; if (!n) return;
     if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    // one docked panel at a time — clear any citation/grounding panel first
+    setHover(null); setActiveSrc(null); setGroundPop(null);
     setFnPop({ key, num: n.num, text: n.text, x: r.left, y: r.bottom,
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
   }, [footnoteByKey, previews, railBlockL, railBlockR]);
-  const scheduleFnLeave = useCallback(() => {
-    if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
-    fnLeaveTimer.current = setTimeout(() => setFnPop(null), 600);
-  }, []);
+  // docked and persistent: leaving no longer hides it (closes on ✕ or Escape)
+  const scheduleFnLeave = useCallback(() => {}, []);
   const cancelFnLeave = useCallback(() => { if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current); }, []);
   const jumpToFn = useCallback((key) => {
     setFnPop(null);
@@ -687,23 +704,35 @@ function ArticleRead(props) {
 
   // owned-claim / void preview — mirrors enterFn: hover (desktop) or tap (phone)
   // an assertion the author owns (analysis/account/position) or a documented void,
-  // and a card explaining HOW it's grounded floats up beside it; leaving hides it
-  // after a beat so a slide onto the card keeps it open. Gated on Previews, exactly
-  // like the citation and footnote cards.
+  // and the docked panel explains HOW it's grounded and stays put. Gated on
+  // Previews, exactly like the citation and footnote cards.
   const enterGround = useCallback((e, tok) => {
     if (!previews || !tok) return;
     if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
+    // one docked panel at a time — clear any citation/note panel first
+    setHover(null); setActiveSrc(null); setFnPop(null);
     setGroundPop({ tok, x: r.left, y: r.bottom,
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
   }, [previews, railBlockL, railBlockR]);
+  // docked and persistent: leaving no longer hides it (closes on ✕ or Escape)
   const scheduleGroundLeave = useCallback(() => {
-    if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
-    groundLeaveTimer.current = setTimeout(() => setGroundPop(null), 600);
   }, []);
   const cancelGroundLeave = useCallback(() => { if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current); }, []);
+
+  // The docked panel stays put until dismissed, so Escape is its global close —
+  // it shuts whichever preview is open from anywhere on the page (the markers'
+  // own handlers still swap its contents when you move between them).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape") return;
+      setHover(null); setActiveSrc(null); setFnPop(null); setGroundPop(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // every passage a given source backs (newest model: sourceList carries the
   // claim ids; claimById carries each span's text) — drives the click-to-jump

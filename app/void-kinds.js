@@ -57,7 +57,7 @@
     },
     unrecorded: {
       label: 'Unrecorded', group: 'assert', glyph: '∅', strength: 2,
-      blurb: "Nobody ever wrote it down. No document, no source — you can't cite it, only argue it probably happened. Highest risk.",
+      blurb: "No record stands behind it — nothing to cite or point to, so this kind of absence can only be reasoned, never shown. The weakest footing a void can have.",
       prompt: 'Argue why it probably happened, and why no record of it would exist.'
     },
     ambient: {
