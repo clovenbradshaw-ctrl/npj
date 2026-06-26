@@ -41,6 +41,9 @@ founding admin curates the site and grows the network from there.
 | `app/versions.jsx` | article version history + word-level diff |
 | `app/feedback.js` | **span feedback** — readers suggest an edit (or comment) on any selected words; stored as EVA events in the article's folder + a local mirror; an editor **merges** (apply + commit a REC) or declines |
 | `app/SuggestionRail.jsx` | the review surface — PR-shaped cards (diff, rationale, 👍, threaded replies) with **Merge / Decline** for editors |
+| `app/e2ee.js` | **end-to-end encryption** for the collaboration layer — Web Crypto group sessions (ECDH P-256 device keys + an AES-GCM room key delivered per-device), modelled on Element/Matrix's Olm/Megolm but dependency-free |
+| `app/collab.js` | **private collaboration transport** — e2ee chat (Matrix timeline) + Google-Docs-style comments & suggested edits (encrypted state events), with a live `/sync` watch loop |
+| `app/CollabRail.jsx` | the collaboration panel — Comments tab (anchored comments + suggested edits, reply / resolve / accept) and a live Chat tab; takes over the Newsroom's right panel when **Comments** is on |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
 
@@ -135,6 +138,41 @@ can already edit the piece. Everything is mirrored to `localStorage` so it
 survives a refresh, and rides the same auditable GitHub commit machinery as the
 article (see [`backend/README.md`](backend/README.md) for the EVA model + the one
 webhook rule that opens proposing to any verified reader).
+
+That public rail is for the record — proposals anyone can read. The *working*
+conversation between the people building a piece is a separate, **private** layer.
+
+## Private, end-to-end-encrypted collaboration (chat + comments)
+
+Every project is already a Matrix **room** whose members are the invited
+writers/editors, and the shared draft already lives in it. On top of that, the
+Newsroom's **Comments** toggle (🔒, in the editor toolbar) opens a private
+collaboration panel — it takes over the right panel — with two channels scoped to
+exactly those people:
+
+- **Comments & suggested edits**, Google-Docs style. Select words in the draft,
+  then **Comment** (pin a note to that span) or **Suggest edit** (propose the
+  exact replacement, shown as a word-level diff). They anchor to relocatable
+  spans (`app/feedback.js`'s anchoring, reused) so they keep pointing at the right
+  words as the draft moves, are painted into the prose with a dotted underline,
+  and are **resolved / declined / accepted** with threaded replies. Each is one
+  Matrix **state event** keyed by id, so every member converges on the same view.
+- **Chat** — a live message thread with the other writers/editors on the piece,
+  an ordinary Matrix timeline read over `/sync`.
+
+**It's genuinely end-to-end encrypted** (`app/e2ee.js`, `app/collab.js`). The
+design is the shape of Element/Matrix's Olm/Megolm, rebuilt on the browser's
+native Web Crypto so it needs no libolm/SDK and fits the no-build app: each
+browser mints a non-extractable **ECDH P-256 device key** (published into the
+room); a single **AES-GCM room key** encrypts the room's comments + chat and is
+delivered to each member device by wrapping it under an ECDH shared secret
+(written as a per-device `keyshare` state event). A new collaborator who joins is
+**re-shared** the key once they publish a device; removing someone **rotates** it
+so their old wrap can't read new traffic. The homeserver only ever stores
+ciphertext, public keys, and per-device wraps — never a room key or a plaintext,
+so a homeserver admin cannot read the team's comments or chat. It is *not* wire-
+compatible with Element (same threat model, our own primitives). The crypto's
+cross-member roundtrip + non-member exclusion are covered by `tests/e2ee.test.js`.
 
 ## Identity & permissions (rooted in Matrix)
 

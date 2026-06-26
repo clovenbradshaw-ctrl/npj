@@ -477,6 +477,19 @@ a { color: inherit; }
   background-color: var(--yellow);
   color: var(--ink);
 }
+/* the private, e2ee collaboration layer (CollabRail) marks its anchored comments
+   with a distinct registry so it never collides with the public feedback paint. */
+::highlight(npj-collab) {
+  background-color: color-mix(in srgb, var(--verified, #1f8a5b) 16%, transparent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--verified, #1f8a5b);
+  text-underline-offset: 3px;
+}
+::highlight(npj-collab-flash) {
+  background-color: var(--yellow);
+  color: var(--ink);
+}
 /* the floating selection bubble — Suggest edit / Comment on any span */
 .fb-bubble {
   position: fixed; z-index: 4200; display: flex; gap: 0;

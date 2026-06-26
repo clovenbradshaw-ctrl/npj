@@ -401,6 +401,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [rooms, setRooms] = useState(null);
   const [collabs, setCollabs] = useState(() => (session ? [session.user_id] : []));
   const [room, setRoom] = useState(null);            // the project this document belongs to
+  const [commentsOn, setCommentsOn] = useState(false); // when on, the right panel is the e2ee collaboration rail
   const [invite, setInvite] = useState(false);
   const [inviteVal, setInviteVal] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
@@ -2860,6 +2861,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <I.code style={{ fontSize: 14 }} /> <span className="npj-hide-sm">HTML</span>
           </button>
         )}
+        <Sep />
+        {/* comments + chat: an end-to-end-encrypted collaboration rail, private to
+            this project's members. When on, it takes over the right panel. */}
+        <button onMouseDown={e => e.preventDefault()} onClick={() => setCommentsOn(v => !v)} aria-pressed={commentsOn}
+          title={commentsOn ? "Hide comments & chat" : "Comments & chat — leave Google-Docs-style comments and suggested edits, and chat with the other writers/editors. End-to-end encrypted, private to this project's members."}
+          className="np-cond" style={{ background: commentsOn ? "var(--yellow)" : "transparent", border: 0, color: commentsOn ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <I.chat style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Comments</span> <I.lock style={{ fontSize: 11 }} />
+        </button>
         <span style={{ flex: 1 }} />
         <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source — then pin the words in the source</span>
       </div>
@@ -2867,7 +2876,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
         <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail, flexShrink: 0 }}>
-          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].map(([k, label]) => (
+          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].concat(commentsOn ? [["comments", "💬 Talk"]] : []).map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -3063,8 +3072,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
         )}
 
+        {/* collaboration rail — end-to-end-encrypted comments + chat, private to
+            this project's members. On desktop it TAKES OVER the right panel when
+            comments are on (so sources hides); on mobile it's its own tab. */}
+        {commentsOn && (!isMobile || mTab === "comments") && (
+          <div style={{ display: isMobile ? (mTab === "comments" ? "flex" : "none") : "flex", flexDirection: "column", flex: isMobile ? 1 : undefined, minHeight: 0, overflow: "hidden", borderLeft: isMobile ? 0 : "1.5px solid " + NR.line }}>
+            {window.CollabRail
+              ? <window.CollabRail roomId={room && room.roomId} me={me} getEditorEl={() => ed.current} theme={NR} onClose={() => setCommentsOn(false)} />
+              : <div className="np-mono" style={{ fontSize: 11, color: NR.muted, padding: 16 }}>Loading the encrypted collaboration layer…</div>}
+          </div>
+        )}
+
         {/* sources */}
-        <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
+        <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : (commentsOn ? "none" : "block"), flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
             <I.source style={{ fontSize: 14 }} /> Sources · {sources.length}
             <span style={{ flex: 1 }} />
