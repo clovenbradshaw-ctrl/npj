@@ -393,6 +393,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const reconcileTimer = useRef(null);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
   const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
+  const [archiveStat, setArchiveStat] = useState(null);  // { total, pending, archived } — media-store images vs. pre-archived
+  const [prearch, setPrearch] = useState(null);     // null | {done,total} in flight | {result} | {error} — proactive archive.org upload
   const [explorer, setExplorer] = useState(null);   // { key } — the source file explorer, open on a source
   const [showVersions, setShowVersions] = useState(false);
   const [showRooms, setShowRooms] = useState(false);
@@ -567,6 +569,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       else if (embed) found.push({ kind: "embed", url: embed, mid: f.dataset.mid, caption });
     });
     setMedia(found);
+    // census the draft's images for the proactive archive.org affordance: how many
+    // are still on the media store (and so cost a freeze at publish) vs. already
+    // carry a durable archive.org copy.
+    if (window.NpjMedia && window.NpjMedia.prearchiveCensus) setArchiveStat(window.NpjMedia.prearchiveCensus(ed.current));
     // keep the structure layer in step with the headings — debounced, so a burst
     // of typing coalesces into one reconcile instead of an event per keystroke.
     clearTimeout(reconcileTimer.current);
@@ -1024,6 +1030,38 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return '<figure contenteditable="false" class="cmp-embed cmp-carousel" data-carousel="1"><div class="cmp-carousel-track">' + slides + '</div>' + CAROUSEL_ADD + CAROUSEL_CAP + '</figure><p><br/></p>';
   };
   const insertCarousel = () => insertBlock(carouselFigure());
+
+  // ---- proactively push the story's media to archive.org, before publish ----
+  // Walks the live draft and uploads every image still on the media store to
+  // archive.org now, recording the durable URL in each slot's data-alt. The
+  // publish boundary then has nothing left to freeze, so the commit is instant
+  // instead of "up to a minute per image." A deliberate, outward-facing step:
+  // the photos become public on archive.org the moment this runs.
+  const prearchiveMedia = useCallback(async () => {
+    if (!ed.current || !window.NpjMedia || !window.NpjMedia.prearchiveSlots) return;
+    if (prearch && prearch.done != null && prearch.total != null && prearch.done < prearch.total) return; // already running
+    if (window.NpjMedia.canUpload && !window.NpjMedia.canUpload()) {
+      setPrearch({ error: "Sign in with Matrix to upload to archive.org." });
+      return;
+    }
+    const census = window.NpjMedia.prearchiveCensus(ed.current);
+    if (!census.pending) { setPrearch({ result: { total: 0, archived: 0, failed: 0 } }); return; }
+    setPrearch({ done: 0, total: census.pending });
+    let res = null, err = null;
+    try {
+      res = await window.NpjMedia.prearchiveSlots(ed.current, {
+        slug: fileSlug || slugify(title) || draftId,
+        title: title || "NPJ media",
+        onProgress: (done, total) => setPrearch({ done, total })
+      });
+    } catch (e) { err = e; }
+    // the data-alt URLs we just wrote live in the editor DOM — refresh the census
+    // and persist them into the draft so they survive a reload and ride to publish.
+    setArchiveStat(window.NpjMedia.prearchiveCensus(ed.current));
+    scheduleSave();
+    if (err) setPrearch({ error: (err && err.message) || "archive.org upload failed." });
+    else setPrearch({ result: res });
+  }, [prearch, fileSlug, title, draftId, scheduleSave]);
 
   // ---- images come in by paste/drop too ----
   // A figure can't live inside the headline or the dek — if the caret is in
@@ -2859,6 +2897,42 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   </button>
                 : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
             </div>
+            {/* proactive archive.org upload — move the story's media-store images
+                onto archive.org now, so the publish boundary doesn't have to. */}
+            {archiveStat && archiveStat.total > 0 && (() => {
+              const running = !!(prearch && prearch.done != null && prearch.total != null);
+              const r = prearch && prearch.result;
+              const pending = archiveStat.pending;
+              return (
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed " + NR.line }}>
+                  <div className="np-mono" style={{ fontSize: 10, color: pending ? NR.text : NR.muted, lineHeight: 1.5, marginBottom: 6 }}>
+                    {pending
+                      ? <span><b style={{ color: "var(--yellow)" }}>{pending}</b> of {archiveStat.total} image{archiveStat.total === 1 ? "" : "s"} still on the media store. Save them to archive.org now and publishing won't have to wait.</span>
+                      : <span>✓ All {archiveStat.total} image{archiveStat.total === 1 ? "" : "s"} already on archive.org — publishing is instant.</span>}
+                  </div>
+                  {pending > 0 && (
+                    <button onClick={prearchiveMedia} disabled={running} className="np-cond"
+                      style={{ width: "100%", background: running ? NR.field : "var(--yellow)", border: "1px solid " + (running ? NR.line : "var(--yellow)"), color: running ? NR.soft : "var(--ink)", padding: "6px 10px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: running ? "default" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                      {running
+                        ? <React.Fragment><span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> Saving {prearch.done}/{prearch.total}…</React.Fragment>
+                        : <React.Fragment><I.archive style={{ fontSize: 13 }} /> Pre-archive to archive.org</React.Fragment>}
+                    </button>
+                  )}
+                  {!running && r && (r.archived > 0 || r.failed > 0) && (
+                    <div className="np-mono" style={{ fontSize: 10, color: r.failed ? "var(--reject)" : "var(--verified, #1f8a5b)", lineHeight: 1.5, marginTop: 6 }}>
+                      {r.archived > 0 ? "Saved " + r.archived + " to archive.org. " : ""}
+                      {r.failed > 0 ? r.failed + " couldn't be saved — " + ((r.failReasons && r.failReasons.join("; ")) || "they'll be retried at publish.") : ""}
+                    </div>
+                  )}
+                  {!running && prearch && prearch.error && (
+                    <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", lineHeight: 1.5, marginTop: 6 }}>{prearch.error}</div>
+                  )}
+                  {pending > 0 && !running && (
+                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, lineHeight: 1.45, marginTop: 5 }}>Uploads the photo to archive.org publicly, now — the same move publish makes, done early.</div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           {/* tags + column */}
           <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>

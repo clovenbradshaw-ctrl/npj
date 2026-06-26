@@ -32,13 +32,19 @@
  * Wayback path uses window.NpjArchiveCDN. Both are optional — absent them the
  * helpers degrade and <image-slot> falls back to a session-only preview.
  *
+ * Proactive pre-archiving (prearchiveSlots): the same move, run from the
+ * composer BEFORE publish. It walks the draft's live <image-slot>s, uploads any
+ * still on the media store to archive.org, and records the durable URL in each
+ * slot's data-alt — so publish's freezeArticleMedia finds nothing left to move
+ * and the boundary is instant instead of "up to a minute each."
+ *
  * Exposed as window.NpjMedia.
  */
-(function () {
+(function (root) {
   'use strict';
 
-  const MA = () => window.MatrixAuth;
-  const CDN = () => window.NpjArchiveCDN;
+  const MA = () => root.MatrixAuth;
+  const CDN = () => root.NpjArchiveCDN;
   const sess = () => { const m = MA(); return (m && m.current && m.current()) || null; };
   const encPath = (n) => String(n).split("/").map(encodeURIComponent).join("/");
 
@@ -207,7 +213,7 @@
      { ok, url }. The endpoint mirrors the publish webhook's host. */
   function mediaEndpoint() {
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.mediaEndpoint) return c.mediaEndpoint; } catch (e) {}
-    const base = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
+    const base = (root.NpjArticles && root.NpjArticles.publishEndpoint && root.NpjArticles.publishEndpoint()) || "";
     if (base) return base.replace(/\/[^/]+$/, "/media-npj");
     return "https://n8n.intelechia.com/webhook/site/media-npj";
   }
@@ -217,7 +223,7 @@
   // mediaEndpoint — it mirrors the publish webhook's host.
   function archiveEndpoint() {
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.archiveEndpoint) return c.archiveEndpoint; } catch (e) {}
-    const base = (window.NpjArticles && window.NpjArticles.publishEndpoint && window.NpjArticles.publishEndpoint()) || "";
+    const base = (root.NpjArticles && root.NpjArticles.publishEndpoint && root.NpjArticles.publishEndpoint()) || "";
     if (base) return base.replace(/\/[^/]+$/, "/media-archive-npj");
     return "https://n8n.intelechia.com/webhook/site/media-archive-npj";
   }
@@ -335,6 +341,79 @@
     return await freeze(srcUrl);
   }
 
+  /* ---- proactive pre-archiving (composer, before publish) ----
+     freezeArticleMedia runs at the publish boundary, on the EO body blocks, and
+     can stall the commit ("up to a minute each"). These helpers do the same move
+     EARLY, on the draft's live <image-slot> elements, so the author can pay that
+     cost while they keep writing and publish stays instant.
+
+     A draft slot carries TWO urls (see articles.js htmlToBlocks): the live
+     media-store copy rides `src` (matrix-first, fast in the editor) and the
+     durable archive.org copy rides `data-alt`. Pre-archiving fills that data-alt.
+     At publish, htmlToBlocks promotes the data-alt to the block's canonical src
+     and freezeArticleMedia's freezeOne skips it (its src is no longer a store
+     URL) — nothing left to move. */
+
+  // Does this slot still owe an archive.org upload? True only when its `src` is a
+  // media-store URL AND it doesn't already carry an archive.org copy in data-alt.
+  // Empty, external, or already-archived slots return false — never re-uploaded.
+  function slotNeedsArchive(slot) {
+    if (!slot || !slot.getAttribute) return false;
+    if (!isStoreUrl(slot.getAttribute("src"))) return false;
+    const alt = slot.getAttribute("data-alt");
+    const c = CDN();
+    return !(alt && c && c.isMediaUrl(alt));
+  }
+
+  /* prearchiveCensus(rootEl) → { total, pending, archived }. Cheap, DOM-only:
+     counts the draft's filled image-slots, how many still owe an archive.org
+     upload (pending), and how many already have a durable copy (archived). Backs
+     the composer's "Pre-archive media" affordance without uploading anything. */
+  function prearchiveCensus(rootEl) {
+    const out = { total: 0, pending: 0, archived: 0 };
+    if (!rootEl || !rootEl.querySelectorAll) return out;
+    const c = CDN();
+    Array.from(rootEl.querySelectorAll("image-slot")).forEach(slot => {
+      const src = slot.getAttribute("src");
+      if (!src) return;
+      out.total++;
+      if (slotNeedsArchive(slot)) out.pending++;
+      else if ((c && c.isMediaUrl(src)) || (c && c.isMediaUrl(slot.getAttribute("data-alt")))) out.archived++;
+    });
+    return out;
+  }
+
+  /* prearchiveSlots(rootEl, {slug, title, onProgress}) → Promise<{total, archived, failed, failReasons}>.
+     Walks the draft's image-slots and moves every one still on the media store
+     onto archive.org, writing the durable URL into data-alt (the live media-store
+     src is left untouched, so the editor keeps rendering the fast copy). Only the
+     pending slots are touched; external / already-archived ones are skipped.
+     onProgress(done, total) fires after each slot for a live count. Never throws
+     for a single failed image — it records the reason and moves on, so one
+     unreachable photo can't sink the rest. */
+  async function prearchiveSlots(rootEl, opts) {
+    const o = opts || {};
+    const out = { total: 0, archived: 0, failed: 0, failReasons: [] };
+    if (!rootEl || !rootEl.querySelectorAll) return out;
+    const idSlug = String(o.slug || "media").replace(/[^A-Za-z0-9._-]/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "media";
+    const ctx = { identifier: "npj-" + idSlug, title: o.title || o.slug || "NPJ media" };
+    const slots = Array.from(rootEl.querySelectorAll("image-slot")).filter(slotNeedsArchive);
+    out.total = slots.length;
+    let done = 0;
+    for (const slot of slots) {
+      let arch = null, reason = null;
+      try {
+        arch = await toArchive(slot.getAttribute("src"), ctx);
+        if (!arch) reason = "archive.org upload returned no URL (n8n endpoint unreachable or IA keys missing)";
+      } catch (e) { reason = (e && e.message) || "unknown error"; }
+      if (arch) { slot.setAttribute("data-alt", arch); out.archived++; }
+      else { out.failed++; if (reason && out.failReasons.indexOf(reason) < 0) out.failReasons.push(reason); }
+      done++;
+      if (typeof o.onProgress === "function") { try { o.onProgress(done, out.total, slot); } catch (e) {} }
+    }
+    return out;
+  }
+
   /* freezeArticleMedia(body, {slug, title}) → Promise<{ frozen, failed, failReasons, method }>.
      Walks the EO article body blocks and moves every img still on the media
      store onto archive.org, rewriting its src in place. On failure the block
@@ -378,9 +457,13 @@
     return out;
   }
 
-  window.NpjMedia = {
+  root.NpjMedia = {
     canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint,
     upload, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
-    freeze, freezeArticleMedia
+    freeze, freezeArticleMedia, slotNeedsArchive, prearchiveCensus, prearchiveSlots
   };
-})();
+
+  // node tests require() the pure DOM helpers (slotNeedsArchive / prearchiveCensus);
+  // the browser path is unchanged (root === window). No DOM/network runs at load.
+  if (typeof module !== "undefined" && module.exports) module.exports = root.NpjMedia;
+})(typeof window !== "undefined" ? window : globalThis);
