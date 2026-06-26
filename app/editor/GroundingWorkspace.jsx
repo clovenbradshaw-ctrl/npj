@@ -406,6 +406,30 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     hits.sort((a, b) => a.loc.start - b.loc.start);
     return hits;
   })();
+  // Score EVERY source against the armed claim — not just to auto-pick a default.
+  // The picker then leads with the documents most likely to back this claim
+  // (strongest word-overlap first) and badges how many likely passages each
+  // holds, so you choose the right SOURCE first instead of scanning a flat,
+  // order-of-appearance wall and then hunting for the words. Mechanical overlap
+  // (CiteyAssist, no model); memoised on the claim + each source's text length
+  // so seeding a source's text (or editing the claim) refreshes the ranking.
+  const srcSig = srcList.map(s => s.key + ":" + srcText(s.key).length).join("|");
+  const rankedSrc = useMemo(() => {
+    const list = srcList.map(({ key }) => {
+      const t = srcText(key);
+      let score = 0, nHits = 0;
+      if (t.trim() && window.CiteyAssist && armedRow) {
+        try {
+          const h = window.CiteyAssist.rankSpans(armedRow.text, t) || [];
+          nHits = h.filter(x => x.hit >= 2 || x.score >= 0.3).length;
+          score = h.length ? h[0].score : 0;
+        } catch (e) {}
+      }
+      return { key, score, nHits, hasText: !!t.trim() };
+    });
+    list.sort((a, b) => b.score - a.score);
+    return list;
+  }, [armedRow && armedRow.text, srcSig]); // eslint-disable-line
   const scrollReaderTo = (attr, j) => {
     setTimeout(() => {
       [srcRefMain, srcRefPanel, srcRefModal].forEach(ref => {
@@ -961,6 +985,52 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       )}
     </div>
   );
+
+  // The cite modal's source picker, ranked. Same chips as srcTabs, but ordered by
+  // how strongly each source backs the ARMED claim and badged with the count of
+  // likely passages — pick the right document first, then grab the words. Sources
+  // with no obvious match sink below a divider (still one click away); sources with
+  // no text yet are dimmed. Falls back to plain draft order when nothing scores.
+  const srcPalette = (() => {
+    const ranked = rankedSrc;
+    const likely = ranked.filter(s => s.nHits > 0);
+    const rest = ranked.filter(s => s.nHits === 0);
+    const srcChip = ({ key, nHits, hasText }) => {
+      const on = selSrc === key, hot = nHits > 0;
+      return (
+        <button key={key} onClick={() => pickSource(key)}
+          title={hot ? nHits + " likely passage" + (nHits === 1 ? "" : "s") + " for this claim — open it and grab the words"
+            : hasText ? "No obvious match — open it to read and check" : "No text loaded yet — open it to pull the text"}
+          style={chipBtn({ background: on ? "var(--yellow)" : "transparent", color: on ? "var(--ink)" : (hasText ? NR.text : NR.muted), borderColor: on ? "var(--yellow)" : (hot ? "rgba(31,138,85,.55)" : NR.line), fontWeight: (on || hot) ? 700 : 500, display: "inline-flex", alignItems: "center", gap: 5, opacity: hasText ? 1 : 0.7 })}>
+          {hot && !on && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1f8a55", flexShrink: 0 }} />}
+          {clip(srcShort(key), 26)}
+          {hot && <sup className="np-mono" style={{ fontSize: 8.5, fontWeight: 700, color: on ? "var(--ink)" : "#1f8a55", marginLeft: 1 }}>{nHits}</sup>}
+        </button>
+      );
+    };
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <span className="np-mono" style={{ fontSize: 9, letterSpacing: ".06em", textTransform: "uppercase", color: NR.muted, fontWeight: 600 }}>
+            {srcList.length + " source" + (srcList.length === 1 ? "" : "s")}
+          </span>
+          {likely.length > 0 && <span className="np-mono" style={{ fontSize: 9, color: "#1f8a55", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1f8a55" }} /> sorted by likely support — strongest first</span>}
+          <span style={{ flex: 1 }} />
+          {canIngest && (
+            <button onClick={() => setAddSrcOpen(o => !o)} title="Add a new source — a URL or a file — without leaving this claim"
+              style={chipBtn({ border: "1px dashed " + (addSrcOpen ? NR.text : NR.line), color: addSrcOpen ? NR.text : NR.soft, background: addSrcOpen ? NR.field : "transparent", fontWeight: 700 })}>
+              {addSrcOpen ? "× Close" : "+ Add source"}
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+          {likely.map(srcChip)}
+          {likely.length > 0 && rest.length > 0 && <span style={{ width: 1, alignSelf: "stretch", background: NR.line, margin: "0 3px" }} />}
+          {rest.map(srcChip)}
+        </div>
+      </div>
+    );
+  })();
 
   const hitNav = armHits.length > 0 && (
     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7 }}>
@@ -1594,8 +1664,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                 {addSourceForm}
               </React.Fragment>)
             : (<React.Fragment>
-                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Open the source and <strong style={{ color: NR.text }}>select the exact words</strong> that support the claim — that becomes the citation. Support in two places? Grab them one after another.</div>
-                {srcTabs}
+                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Pick the source that backs this — <strong style={{ color: NR.text }}>likely matches lead</strong> — then <strong style={{ color: NR.text }}>select the exact words</strong> in it. That selection becomes the citation. Support in two places? Grab them one after another.</div>
+                {srcPalette}
                 {addSrcOpen && addSourceForm}
                 {searchRow("Search this source for the supporting words…")}
                 {readerBody(srcRefModal, false)}
