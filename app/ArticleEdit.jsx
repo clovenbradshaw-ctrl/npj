@@ -39,6 +39,11 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
   const bodyRef = useRef(null);
+  // Clean-text view: hide every citation/sourcing marker (the dotted claim
+  // underlines, the ⊥ source glyphs) so the body reads as plain prose. Purely
+  // visual — the <span class="eo-claim" data-src> spans stay in the DOM, so the
+  // bindings round-trip through htmlToBlocks on save exactly as before.
+  const [cleanView, setCleanView] = useState(false);
   const seedHtml = useMemo(() => window.NpjArticles.blocksToHtml(A.body), [A]);
   const signedIn = !!(window.MatrixAuth && window.MatrixAuth.token && window.MatrixAuth.token());
 
@@ -225,6 +230,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
       <style>{`
         .eo-edit-body .eo-claim { border-bottom: 2px dotted var(--yellow-deep); background: color-mix(in srgb, var(--yellow) 16%, transparent); }
         .eo-edit-body .eo-claim::after { content: "⊥"; font-family: var(--mono); font-size: 10px; vertical-align: super; color: var(--yellow-deep); padding-left: 1px; }
+        .eo-edit-body.eo-clean .eo-claim { border-bottom: 0; background: transparent; }
+        .eo-edit-body.eo-clean .eo-claim::after { content: ""; padding-left: 0; }
         .eo-edit-body figure[data-eo-img] img { max-width: 100%; border: 1.5px solid var(--ink); }
         .eo-edit-body figure { margin: 14px 0; }
         .eo-edit-body image-slot { max-width: 100%; }
@@ -265,9 +272,10 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addBanner}>▤ Banner</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addEmbed}>▶ Embed</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={bindSourceUrl}>⊥ Source</button>
-            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>select text → ⊥ Source to cite it · drop a photo to add an image · dotted spans are existing claims</span>
+            <button style={{ ...tb, ...(cleanView ? { background: "var(--ink)", color: "var(--paper)" } : null) }} onMouseDown={e => e.preventDefault()} onClick={() => setCleanView(v => !v)} title="Hide every citation and source marker; the body reads as clean text. Bindings are untouched.">{cleanView ? "⊥ Show sourcing" : "◻ Clean text"}</button>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", alignSelf: "center" }}>{cleanView ? "sourcing hidden — clean-text view; bindings are intact and still save" : "select text → ⊥ Source to cite it · drop a photo to add an image · dotted spans are existing claims"}</span>
           </div>
-          <div ref={bodyRef} className="eo-edit-body np-scroll" contentEditable suppressContentEditableWarning
+          <div ref={bodyRef} className={"eo-edit-body np-scroll" + (cleanView ? " eo-clean" : "")} contentEditable suppressContentEditableWarning
             dangerouslySetInnerHTML={{ __html: seedHtml }}
             style={{ minHeight: 320, maxHeight: "46vh", overflowY: "auto", border: "1.5px solid var(--ink)", background: "var(--card)",
               padding: "16px 18px", fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.6, outline: "none" }} />
