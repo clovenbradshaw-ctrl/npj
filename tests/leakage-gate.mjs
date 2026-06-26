@@ -52,10 +52,10 @@ for (const file of jsonl) {
 }
 
 // 2 — the reader must not know structure exists.
-const reader = join(ROOT, "app", "ArticleRead.jsx");
+const reader = join(ROOT, "app", "reader", "ArticleRead.jsx");
 if (existsSync(reader)) {
   const src = readFileSync(reader, "utf8");
-  if (/NpjStructure|\.structure\//.test(src)) violations.push("app/ArticleRead.jsx references the structure layer — the reader must stay structure-blind");
+  if (/NpjStructure|\.structure\//.test(src)) violations.push("app/reader/ArticleRead.jsx references the structure layer — the reader must stay structure-blind");
 }
 
 // 3 — .structure/ is build-ignored.

@@ -1,4 +1,4 @@
-/* definitions.test.js — the glossary model (app/definitions.js).
+/* definitions.test.js — the glossary model (app/grounding/definitions.js).
  *
  * Pure logic only: term identity, npj-side ranking off an eoreader4 doc, the
  * multi-definition + sourced model, the cross-article collective index, conflict
@@ -7,7 +7,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const D = require("../app/definitions.js");
+const D = require("../app/grounding/definitions.js");
 
 test("termKey folds case, leading articles and punctuation to one key", () => {
   assert.equal(D.termKey("Qualified Immunity"), "qualified immunity");

@@ -1,5 +1,5 @@
 /* e2ee.test.js — the real cross-user roundtrip for the collaboration layer's
- * end-to-end encryption (app/e2ee.js).
+ * end-to-end encryption (app/identity/e2ee.js).
  *
  * e2ee.js is a browser singleton (window/indexedDB/MatrixAuth), so we load its
  * SOURCE into an isolated function scope per "user", giving each its own window +
@@ -20,7 +20,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { webcrypto } = require("node:crypto");
 
-const SRC = fs.readFileSync(path.join(__dirname, "..", "app", "e2ee.js"), "utf8");
+const SRC = fs.readFileSync(path.join(__dirname, "..", "app", "identity", "e2ee.js"), "utf8");
 
 // —— a faithful-enough async in-memory IndexedDB (open → get/put on one store) ——
 function makeIDB() {

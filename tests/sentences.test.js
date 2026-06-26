@@ -1,4 +1,4 @@
-/* sentences.test.js — the live sentence segmenter (app/sentences.js).
+/* sentences.test.js — the live sentence segmenter (app/record/sentences.js).
  *
  * Focus: the grounding table shows one row per SENTENCE, but an inline citation
  * marker (<sup class="md-cite">1</sup>) lands in block.textContent between a
@@ -13,7 +13,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const S = require("../app/sentences.js");
+const S = require("../app/record/sentences.js");
 
 test("splitOffsets splits a paragraph into one record per sentence", () => {
   const out = S.splitOffsets("First sentence. Second sentence.");

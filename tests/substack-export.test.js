@@ -1,5 +1,5 @@
 /* substack-export.test.js — the folded-article → Substack serializers
- * (app/substack-export.js). Pure shaping, no DOM: we hand toMarkdown/toHtml a
+ * (app/export/substack-export.js). Pure shaping, no DOM: we hand toMarkdown/toHtml a
  * body-block article + a sources map (opts.sources) exactly like the one the
  * reader folds, and check the bits that make a paste land right in Substack —
  * headings, images from the durable URL, links, lists, blockquotes, and the
@@ -7,7 +7,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const NS = require("../app/substack-export.js");
+const NS = require("../app/export/substack-export.js");
 
 const SOURCES = {
   s1: { id: "s1", outlet: "Reuters", title: "City budget passes",

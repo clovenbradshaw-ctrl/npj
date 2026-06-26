@@ -1,10 +1,10 @@
 /* structure.test.js — folds, flattens and stress-tests the structure engine
- * (app/structure.js) against the spec's invariants. Pure data, no DOM, no
+ * (app/record/structure.js) against the spec's invariants. Pure data, no DOM, no
  * browser: `node --test`. Run from the repo root with `npm test`.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const S = require("../app/structure.js");
+const S = require("../app/record/structure.js");
 
 // fold a fresh log built by appending the events each op produces.
 function build(steps) {

@@ -5,7 +5,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const S = require("../app/structure.js");
+const S = require("../app/record/structure.js");
 
 // ---- minimal DOM: element nodes with an ordered children list ----
 class N {

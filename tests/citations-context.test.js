@@ -1,4 +1,4 @@
-/* citations-context.test.js — the context-link span plumbing (app/citations.js).
+/* citations-context.test.js — the context-link span plumbing (app/sources/citations.js).
  * Context links are sources a claim cites for CONTEXT (prior coverage), not proof.
  * They live on a span's `data-context` attribute, deliberately apart from the
  * proof attributes (data-src / data-quote / data-cite-id) so the publish gate and
@@ -7,7 +7,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const C = require("../app/citations.js");
+const C = require("../app/sources/citations.js");
 
 // a minimal element stub — just the attribute API the helpers use
 function stubSpan(attrs) {

@@ -1,4 +1,4 @@
-/* changelog.test.js — the edit log's revert engine (app/articles.js).
+/* changelog.test.js — the edit log's revert engine (app/record/articles.js).
  *
  * A document is an append-only log of EO events; foldLog replays them into the
  * current article + a per-version history. A REVERT is not a delete or a rewrite
@@ -10,7 +10,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 const ACTOR = "@reporter:hyphae.social";
 const FORBIDDEN = ["slots", "sections", "structure", "appliedTypeId", "parentSlotId", "typeSlotKey", "structureLog"];

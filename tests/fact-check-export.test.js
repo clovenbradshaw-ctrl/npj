@@ -1,12 +1,12 @@
 /* fact-check-export.test.js — the "outstanding fact checks" shaper
- * (app/fact-check-export.js). Pure, no DOM: hand it a payload of {claim, need}
+ * (app/export/fact-check-export.js). Pure, no DOM: hand it a payload of {claim, need}
  * items exactly like the GroundingWorkspace assembles, and check the output is a
  * clean plain-text list — a title line and one "• claim → evidence needed" line
  * per claim, nothing else — safe to paste into an email or a text. `node --test`.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const FC = require("../app/fact-check-export.js");
+const FC = require("../app/export/fact-check-export.js");
 
 const PAYLOAD = {
   title: "Metro Removes More Benches",

@@ -3,6 +3,15 @@
 > What we can learn from **eoreader4** about turning a flat bag of modules
 > into a nest of swappable holons — *without copying any of its code.*
 
+> **Status (done): the physical holonization landed.** The feature files
+> below now live in 14 `app/<holon>/` directories this doc proposed, and the
+> dead root `engine.js` (the standalone Cleon extractor, referenced nowhere in
+> the live app — the shipping reading core is the vendored eoreader4 reached via
+> `app/graph/eoreader4-bridge.js`) was deleted. See [`../app/README.md`](../app/README.md)
+> for the as-built map. The §6 migration to native ES modules (collapsing the two
+> hand-maintained orderings) is the remaining, still-incremental work — the moves
+> were git renames, so nothing was rewritten yet.
+
 npj and eoreader4 are the same family. Both treat an **append-only EO event
 log as the single source of truth** and recompute everything else as a
 projection of it. npj already proves this at the data layer: `articles/<slug>/`

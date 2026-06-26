@@ -9,8 +9,8 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
-const SV = require("../app/source-view.js");
+const A = require("../app/record/articles.js");
+const SV = require("../app/sources/source-view.js");
 
 // ---- minimal faithful DOM: just what htmlToBlocks' walk reads ----
 const tnode = (s) => ({ nodeType: 3, nodeValue: s, textContent: s });

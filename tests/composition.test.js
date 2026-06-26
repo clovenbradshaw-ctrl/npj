@@ -1,4 +1,4 @@
-/* composition.test.js — the writing-process ledger (app/composition.js). It
+/* composition.test.js — the writing-process ledger (app/record/composition.js). It
  * records the SHAPE of a drafting session — typed vs. pasted characters, paste
  * sizes, deletions, timeline — as plain counts so the preview/published footer
  * can show how a piece came together, WITHOUT ever keeping the words. These
@@ -8,7 +8,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const C = require("../app/composition.js");
+const C = require("../app/record/composition.js");
 
 test("typing is counted by positive length delta; deletion by negative", () => {
   const id = "t-type";

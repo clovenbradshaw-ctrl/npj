@@ -21,9 +21,9 @@ const assert = require("node:assert/strict");
 // the PII pack on a global `window` the way the browser has it, so the defensive
 // re-scrub can run. publishableSource reads `window` at call time, so assigning
 // it after require is enough.
-const NpjArticles = require("../app/articles.js");
-const NpjPII = require("../app/pii.js");
-const NpjSourceView = require("../app/source-view.js");
+const NpjArticles = require("../app/record/articles.js");
+const NpjPII = require("../app/redaction/pii.js");
+const NpjSourceView = require("../app/sources/source-view.js");
 global.window = { NpjPII, NpjSourceView };
 
 const BLOCK = NpjPII.BLOCK; // █

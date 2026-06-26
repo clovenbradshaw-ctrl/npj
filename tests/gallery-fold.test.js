@@ -1,4 +1,4 @@
-/* gallery-fold.test.js — the carousel/gallery block round-trip in app/articles.js
+/* gallery-fold.test.js — the carousel/gallery block round-trip in app/record/articles.js
  * (htmlToBlocks ⇄ blocksToHtml).
  *
  * A carousel is a single <figure class="cmp-carousel"> holding several
@@ -16,7 +16,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 // ---- tiny faithful DOM ----------------------------------------------------
 function parseGroup(sel) {

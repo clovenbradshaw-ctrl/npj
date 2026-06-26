@@ -6,7 +6,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const SV = require("../app/source-view.js");
+const SV = require("../app/sources/source-view.js");
 
 test("kindOf detects an uploaded screenshot as an image (→ OCR path)", () => {
   assert.equal(SV.kindOf({ id: "doc-1", mime: "image/png", filename: "Screenshot 2026-06-22 at 11.26.43 PM.png" }), "image");

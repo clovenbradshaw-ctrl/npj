@@ -1,5 +1,5 @@
 /* grounding-absence.test.js — the "asserted absence" grounding kind, on the
- * publish side (app/articles.js). An asserted absence grounds a NEGATIVE claim
+ * publish side (app/record/articles.js). An asserted absence grounds a NEGATIVE claim
  * ("X has not been documented appearing elsewhere") not with a citation but with
  * a documented search that found nothing — carried as the owned token's `note`.
  * These assert the published body preserves the stance + the search note through
@@ -7,7 +7,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 const ACTOR = "@reporter:hyphae.social";
 const CLAIM = "the phrase “FUCK PISSREAL” has not been documented appearing in other places in Nashville than on the community benches";

@@ -16,7 +16,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const SV = require("../app/source-view.js");
+const SV = require("../app/sources/source-view.js");
 
 // one page, three runs laid left-to-right; coords normalized to the page
 const PAGE = {

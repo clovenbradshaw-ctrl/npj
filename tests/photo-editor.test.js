@@ -8,7 +8,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const PE = require("../app/photo-editor.js");
+const PE = require("../app/media/photo-editor.js");
 
 const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
 

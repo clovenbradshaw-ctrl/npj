@@ -1,4 +1,4 @@
-/* grounding-void.test.js — a "void" on the publish side (app/articles.js).
+/* grounding-void.test.js — a "void" on the publish side (app/record/articles.js).
  * A void is an asserted absence (data-stance="absence") that ALSO carries which
  * of the six kinds it is (data-void-kind) — so the published record, and the
  * reader, know whether the absence is shown, located, or only inferred. These
@@ -7,7 +7,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 const ACTOR = "@reporter:hyphae.social";
 const CLAIM = "no permit for the removal was ever filed with Metro";

@@ -1,5 +1,5 @@
-/* embed.test.js — URL → embeddable player (app/embed.js NpjEmbed) plus the
- * embed block's round trip through app/articles.js (blocksToHtml / htmlToBlocks).
+/* embed.test.js — URL → embeddable player (app/media/embed.js NpjEmbed) plus the
+ * embed block's round trip through app/record/articles.js (blocksToHtml / htmlToBlocks).
  *
  * Covers the two services the newsroom needs to embed by link — a Google Drive
  * file and an archive.org upload — alongside the existing YouTube / Vimeo /
@@ -13,7 +13,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const E = require("../app/embed.js");
+const E = require("../app/media/embed.js");
 
 // ---------------- resolve(): url → descriptor ----------------
 test("resolve maps a Google Drive share/preview link to its /preview iframe", () => {
@@ -86,7 +86,7 @@ test("innerHtml falls back to a link for an unrecognized URL", () => {
 // resolves to global.window, so install the real resolver there for the suite.
 global.window = global.window || {};
 global.window.NpjEmbed = E;
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 test("blocksToHtml renders an embed block as a live iframe figure", () => {
   const html = A.blocksToHtml([{ type: "embed", url: "https://archive.org/details/item", height: 480 }]);
