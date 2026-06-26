@@ -171,6 +171,36 @@ test("a blockquote footnote round-trips through blocksToHtml (idempotent, marker
   assert.match(html, /^<blockquote>Utilise the cracks\.<sup class="md-cite"[^>]*data-cite="fn21"[^>]*>\d+<\/sup><\/blockquote>$/, "the marker re-emits inside the blockquote, editable");
 });
 
+test("an inline CITATION marker inside a blockquote never glues its number into the quote text", () => {
+  // the cite-broken pull shape from the editor: a sourced claim-src inside the
+  // quote, trailed by one or more <sup class="md-cite"> citation markers (NO
+  // data-fn). The quote text is a plain string with no source apparatus, so the
+  // markers' digits used to ride along — surfacing as "…pariatur.86". They must
+  // be dropped from the text (and they are NOT footnotes, so never become marks).
+  const claim = enode("span", { class: "claim-src", "data-src": "doc-x" },
+    [tnode("Quis autem vel eum iure reprehenderit, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.")]);
+  const blocks = foldBlocks([
+    enode("blockquote", {}, [enode("span", {}, [claim, cite({ "data-cite": "doc-y" }, "8"), cite({ "data-cite": "doc-x" }, "6")])]),
+  ]);
+  const pull = blocks.find((b) => b.type === "pull");
+  assert.equal(pull.text, "Quis autem vel eum iure reprehenderit, vel illum qui dolorem eum fugiat quo voluptas nulla pariatur.",
+    "no citation digits (8/6) leaked into the quote text");
+  assert.ok(!/\d/.test(pull.text), "the quote text carries no stray number at all");
+  assert.ok(!(pull.marks || []).length, "an inline citation marker is not a footnote — it becomes no `marks` entry");
+});
+
+test("a citation marker NESTED inside a sourced claim-src in a <p> never leaks its number (regression for '…doloribus.11')", () => {
+  // the torture-test nested shape: inner sourced claim-src, then a <sup>11</sup>
+  // INSIDE the outer claim-src, then a sibling <sup>10</sup> outside it.
+  const inner = enode("span", { class: "claim-src", "data-src": "doc-lorem09" }, [tnode("Nested claim: ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus.")]);
+  const outer = enode("span", { class: "claim-src", "data-src": "web-lorem10" }, [inner, cite({ "data-cite": "doc-lorem09" }, "11")]);
+  const toks = foldParagraph([outer, cite({ "data-cite": "web-lorem10" }, "10")]);
+  const claims = toks.filter((t) => t && typeof t === "object" && t.c != null);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].c, "Nested claim: ut aut reiciendis voluptatibus maiores alias consequatur aut perferendis doloribus.", "no '11' baked into the claim text");
+  assert.ok(!toks.some((t) => typeof t === "string" && /\d/.test(t)), "no stray citation number leaked as plain text");
+});
+
 test("a marker stranded in a <p> below a blockquote folds onto the quote, leaving no lone line", () => {
   // an older draft saved before the marker was tucked into the quote: <blockquote/>
   // then <p><sup/></p>. It must fold onto the pull above, not the paragraph below.

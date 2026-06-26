@@ -825,10 +825,18 @@
             if (!c) return;
             if (c.nodeType === 3) { s += c.nodeValue || ""; return; }
             if (c.nodeType !== 1) return;
-            if (c.tagName && c.tagName.toLowerCase() === "sup" && c.classList && c.classList.contains("md-cite") && c.hasAttribute && c.hasAttribute("data-fn")) {
-              const fk = (c.getAttribute("data-cite") || c.textContent || "").trim();
-              if (fk) marks.push({ t: "sup", key: fk, text: String(c.textContent || "").trim() });
-              return;   // the marker leaves the quote text — it becomes a `marks` entry
+            if (c.tagName && c.tagName.toLowerCase() === "sup" && c.classList && c.classList.contains("md-cite")) {
+              // A footnote marker (data-fn) lifts onto `marks` and renders as a
+              // trailing superscript. An inline CITATION marker (no data-fn) is
+              // source chrome with no home in a pull — the quote text is a plain
+              // string, with no claim/source apparatus to merge it onto — so it is
+              // dropped from the text entirely. Either way the marker's printed
+              // number must never ride into the quote as a stray "…pariatur.86".
+              if (c.hasAttribute && c.hasAttribute("data-fn")) {
+                const fk = (c.getAttribute("data-cite") || c.textContent || "").trim();
+                if (fk) marks.push({ t: "sup", key: fk, text: String(c.textContent || "").trim() });
+              }
+              return;   // the marker leaves the quote TEXT (a sup is never prose)
             }
             s += quoteText(c);
           });
