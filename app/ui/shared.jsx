@@ -126,13 +126,23 @@ function npjArticleLogUrl(slugOrArticle) {
   return "https://github.com/clovenbradshaw-ctrl/npj/tree/main/articles/" + slug;
 }
 
+// Parse a date that may be a bare "YYYY-MM-DD" (article dates) OR a full ISO
+// timestamp (chat/comment ts from new Date().toISOString()). Only the bare form
+// needs the "T00:00:00" suffix to read as local midnight instead of UTC; adding
+// it to a real timestamp produces an Invalid Date.
+function parseNpjDate(iso) {
+  if (!iso) return null;
+  const s = String(iso);
+  const d = new Date(/[T\s]/.test(s) ? s : s + "T00:00:00");
+  return isNaN(d.getTime()) ? null : d;
+}
 function fmtDate(iso) {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const d = parseNpjDate(iso);
+  return d ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "";
 }
 function shortDate(iso) {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  const d = parseNpjDate(iso);
+  return d ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
 }
 
 /* ---------- contributor lookup ---------- */
