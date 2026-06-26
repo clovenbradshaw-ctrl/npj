@@ -805,6 +805,13 @@ a { color: inherit; }
 .md-preview.nr-no-cites .claim-src::after { display: none !important; }
 .md-preview.nr-no-cites .md-cite { display: none; }
 .md-preview.nr-no-cites ol.nr-fnotes { display: none; }
+/* A manual highlight (the highlighter pen — an inline background-color baked onto
+   the span) shares the citation yellow, so on a clean read it reads as a citation
+   that failed to turn off. Treat it as part of the annotation layer and suppress it
+   too. Inline styles only yield to !important; match the highlighter's yellow in
+   either serialization. Toggling citations back shows it again, untouched. */
+.md-preview.nr-no-cites [style*="255, 236, 1"],
+.md-preview.nr-no-cites [style*="255,236,1"] { background-color: transparent !important; }
 /* "armed" — a source is picked and waiting for you to select the words it
    backs; the page invites a text selection */
 .md-preview.nr-arming { cursor: text; box-shadow: inset 0 0 0 2px var(--yellow); }

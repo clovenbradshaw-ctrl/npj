@@ -393,6 +393,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const reconcileTimer = useRef(null);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
   const [viewer, setViewer] = useState(null);       // index into the image list — the media viewer
+  const mediaPick = useRef(null);                   // hidden <input type=file> behind the Media panel's Upload button
   const [archiveStat, setArchiveStat] = useState(null);  // { total, pending, archived } — media-store images vs. pre-archived
   const [prearch, setPrearch] = useState(null);     // null | {done,total} in flight | {result} | {error} — proactive archive.org upload
   const [explorer, setExplorer] = useState(null);   // { key } — the source file explorer, open on a source
@@ -2635,6 +2636,80 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // overflow:hidden caps the container (the old minHeight:100vh was a floor, so
   // a tall draft grew the page and scrolled the whole header away). The body's
   // columns already scroll internally (overflowY:auto, minHeight:0).
+
+  // The citation explorer for a cited span — the source, its pinned passage and
+  // the in-source picker. Clicking a cited span turns the right Sources panel into
+  // this (inPanel=true, a self-contained dark card filling the column) so it never
+  // covers the prose; on a phone there's no side column, so it stays a bottom sheet
+  // over the page (inPanel=false). Same content and logic either way.
+  const renderPinCard = (inPanel) => {
+    if (!pinTarget) return null;
+    const rec = window.NPJ.SOURCES[pinTarget.key] || {};
+    const ready = !!String(pinQuote || "").trim();
+    const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
+    const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
+    const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;
+    const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
+    const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
+    const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
+    const outer = inPanel
+      ? { background: "var(--ink)", color: "var(--paper)", padding: "12px 14px", minHeight: "100%", boxSizing: "border-box" }
+      : { position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" };
+    return (
+      <div className={inPanel ? "" : "fade-in"} style={outer}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
+          <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
+          <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
+        </div>
+        {pinTarget.claimText && (
+          <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
+            “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
+          </div>
+        )}
+        {onSpan.length > 1 && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
+            <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
+            {onSpan.map(k => {
+              const cur = k === pinTarget.key;
+              return (
+                <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
+                  <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
+                    style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
+                  <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
+                    style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
+                </span>
+              );
+            })}
+          </div>
+        )}
+        <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
+        <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
+          style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
+        {window.SourcePicker && (
+          <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
+            onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+          {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
+            className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
+          {others.length > 0 && (
+            <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
+              title="Add another source to this same span — one claim can rest on several"
+              className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
+              <option value="">+ add a source…</option>
+              {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
+            </select>
+          )}
+          <span style={{ flex: 1 }} />
+          <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
+          <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {/* top bar — pinned: never shrinks or scrolls with the body */}
@@ -2876,7 +2951,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
         <div style={{ display: "flex", borderBottom: "1px solid " + NR.line, background: NR.rail, flexShrink: 0 }}>
-          {[["write", "Write"], ["contents", "Contents" + (toc.length ? " · " + toc.length : "")], ["sources", "⊥ Sources · " + sources.length]].concat(commentsOn ? [["comments", "💬 Talk"]] : []).map(([k, label]) => (
+          {[["write", "Write"], ["contents", "Media" + (media.length ? " · " + media.length : "")], ["sources", "⊥ Sources · " + sources.length]].concat(commentsOn ? [["comments", "💬 Talk"]] : []).map(([k, label]) => (
             <button key={k} onClick={() => setMTab(k)} className="np-cond" style={{ flex: 1, background: mTab === k ? "var(--yellow)" : "transparent", color: mTab === k ? "var(--ink)" : NR.text, border: 0, borderRight: "1px solid " + NR.line, padding: "11px 6px", fontSize: 13, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -2884,30 +2959,43 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
 
       {/* body: contents · editor · sources (stacks to one tabbed column on mobile) */}
       <div style={{ flex: 1, minHeight: 0, display: isMobile ? "flex" : "grid", flexDirection: isMobile ? "column" : undefined, gridTemplateColumns: isMobile ? undefined : "200px 1fr 340px", gridTemplateRows: isMobile ? undefined : "minmax(0, 1fr)" }}>
-        {/* contents / jumplinks */}
+        {/* media — upload · review · store (replaces the old contents/structure rail) */}
         <div className="np-scroll" style={{ display: isMobile ? (mTab === "contents" ? "block" : "none") : "block", flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 12px 30px", background: NR.rail, borderRight: isMobile ? 0 : "1.5px solid " + NR.line }}>
-          <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Contents</div>
-          {/* the structure rail IS the editor TOC: the top-level Item list — slots
-              (labeled containers showing their prompt when empty) + orphan
-              sections, draggable. Editing-only; none of it reaches a reader. */}
-          {structApi && window.StructureRail
-            ? <window.StructureRail api={structApi} NR={NR} isMobile={isMobile} mode={structMode} setMode={setStructMode} graphText={graphText} onSelectSentence={jumpToProse} onExpand={() => setView("graph")} activeId={activeId} />
-            : (toc.length === 0
-                ? <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Add H1/H2/H3 headings and they'll show here as jump-links.</div>
-                : toc.map(h => <button key={h.id} onClick={() => scrollToId(h.id)} className="np-cond" style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: 0, color: h.level === 1 ? NR.text : NR.soft, padding: "4px 0 4px " + ((h.level - 1) * 10) + "px", fontSize: h.level === 1 ? 14 : 13, fontWeight: h.level === 1 ? 700 : 500, cursor: "pointer", lineHeight: 1.2 }}>{h.text}</button>))}
-          {/* media census — every image/embed in the piece; images open the viewer */}
-          <div style={{ marginTop: 18, paddingTop: 12, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Media · {media.length}</div>
-            {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5 }}>Images and embeds in the piece collect here. Click <b>Image</b> in the toolbar to drop an image into the body where you're writing — or paste / drag a photo straight onto the page.</div>}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {media.map(m => m.kind === "image"
-                ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
-                    <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-                  </button>
-                : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
-            </div>
-            {/* proactive archive.org upload — move the story's media-store images
-                onto archive.org now, so the publish boundary doesn't have to. */}
+          {/* ── Media ──────────────────────────────────────────────────────
+              The left rail was a grab-bag (contents/structure, column, tags,
+              definitions); it's now one focused job: the piece's media. Upload
+              a photo, review every image/embed in a thumbnail grid, and store
+              them durably on archive.org before publish. Media lives in the
+              article body as <figure> blocks, so uploading drops one in at the
+              caret and the grid below is just a live census of those figures. */}
+          <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 10 }}>Media{media.length ? " · " + media.length : ""}</div>
+          {/* upload — a real file picker that ingests through the same media-store
+              path as a drag/drop or paste (NpjMedia.upload → durable URL). */}
+          <input ref={mediaPick} type="file" accept="image/*" multiple style={{ display: "none" }}
+            onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) insertImageFiles(fs, null); e.target.value = ""; }} />
+          <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+            <button onClick={() => mediaPick.current && mediaPick.current.click()} className="np-cond"
+              style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--yellow)", border: "1px solid var(--yellow)", color: "var(--ink)", padding: "7px 8px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>
+              <I.image style={{ fontSize: 14 }} /> Upload
+            </button>
+            <button onClick={insertImage} title="Add an empty image slot in the body to drop a photo onto" className="np-cond"
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 5, background: NR.field, border: "1px solid " + NR.line, color: NR.text, padding: "7px 10px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>
+              <I.plus style={{ fontSize: 13 }} /> Slot
+            </button>
+          </div>
+          {/* review — every image/embed in the piece; images open the viewer,
+              embeds jump to where they sit in the document. */}
+          {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 4 }}>No media yet. <b>Upload</b> a photo here — or paste / drag one straight onto the page. Everything you add collects in this panel.</div>}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {media.map(m => m.kind === "image"
+              ? <button key={m.mid} title={(m.caption || "image") + " — open the viewer"} onClick={() => setViewer(Math.max(0, mediaImages.findIndex(x => x.mid === m.mid)))} style={{ width: 44, height: 44, padding: 0, border: "1px solid " + NR.line, background: NR.field, cursor: "zoom-in", overflow: "hidden" }}>
+                  <NrMediaImg url={m.url} alt={m.caption || ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                </button>
+              : <button key={m.mid} title={(m.caption || m.url) + " — show in document"} onClick={() => scrollToFigure(m.mid)} style={{ width: 44, height: 44, border: "1px solid " + NR.line, background: NR.field, color: NR.soft, cursor: "pointer", fontSize: 16, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><I.play /></button>)}
+          </div>
+          {/* store — move the story's media-store images onto archive.org now,
+              so the publish boundary doesn't have to. */}
+          <div style={{ marginTop: 16 }}>
             {archiveStat && archiveStat.total > 0 && (() => {
               const running = !!(prearch && prearch.done != null && prearch.total != null);
               const r = prearch && prearch.result;
@@ -2942,37 +3030,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 </div>
               );
             })()}
-          </div>
-          {/* tags + column */}
-          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Column</div>
-            <select value={column} onChange={e => setColumn(e.target.value)} className="np-cond" style={{ width: "100%", background: NR.field, color: NR.text, border: "1px solid " + NR.line, padding: "6px", fontSize: 13, marginBottom: 12 }}>
-              {columns.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8 }}>Tags</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {tags.map(t => <span key={t} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: NR.text, padding: "2px 4px 2px 6px", display: "inline-flex", alignItems: "center", gap: 4 }}>#{t}<button onClick={() => setTags(l => l.filter(x => x !== t))} style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 12, lineHeight: 1 }}>×</button></span>)}
-              <input placeholder="+tag" onKeyDown={e => { if (e.key === "Enter") { const t = slugify(e.target.value); if (t) setTags(l => l.includes(t) ? l : [...l, t]); e.target.value = ""; } }} className="np-mono" style={{ width: 56, border: "1px dashed " + NR.line, background: "transparent", color: NR.text, padding: "3px 5px", fontSize: 11, outline: "none" }} />
-            </div>
-          </div>
-          {/* definitions — the piece's glossary, opened as a panel. eoreader4
-              suggests the terms (sized to the article); each draws from the
-              collective set of published definitions across the site. */}
-          <div style={{ marginTop: 22, paddingTop: 14, borderTop: "1px solid " + NR.line }}>
-            <div className="np-eyebrow" style={{ color: NR.muted, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-              <span>Definitions{definitions.length ? " · " + definitions.length : ""}</span>
-            </div>
-            {definitions.length > 0 &&
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
-                {definitions.slice(0, 8).map(d => <span key={d.id} title={d.def || "no definition yet"} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: d.def ? NR.text : NR.muted, padding: "2px 6px" }}>{d.term}</span>)}
-                {definitions.length > 8 && <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted }}>+{definitions.length - 8}</span>}
-              </div>}
-            <button onClick={() => setView("definitions")}
-              className="np-cond" style={{ width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: view === "definitions" ? "var(--yellow)" : NR.field, color: view === "definitions" ? "var(--ink)" : NR.text, cursor: "pointer", fontSize: 12, padding: "6px 8px" }}>
-              {definitions.length ? "Edit definitions →" : "Define key terms →"}
-            </button>
-            {definitions.length === 0 &&
-              <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5, marginTop: 6 }}>eoreader4 suggests the names &amp; terms a reader may need defined — about one per 130 words.</div>}
           </div>
         </div>
 
@@ -3084,7 +3141,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         )}
 
         {/* sources */}
-        <div className="np-scroll" style={{ display: isMobile ? (mTab === "sources" ? "block" : "none") : (commentsOn ? "none" : "block"), flex: isMobile ? 1 : undefined, overflowY: "auto", padding: "16px 16px 40px", background: NR.panel }}>
+        <div className="np-scroll" style={{ position: "relative", display: isMobile ? (mTab === "sources" ? "block" : "none") : (commentsOn ? "none" : "block"), flex: isMobile ? 1 : undefined, overflowY: (pinTarget && !isMobile) ? "hidden" : "auto", padding: "16px 16px 40px", background: NR.panel }}>
+          {/* a cited span was clicked — the panel turns into that span's citation
+              explorer (the source + its pinned passage), filling the column over the
+              sources list until dismissed. On a phone this is a bottom sheet instead. */}
+          {pinTarget && !isMobile && (
+            <div className="np-scroll fade-in" style={{ position: "absolute", inset: 0, zIndex: 6, overflowY: "auto", background: "var(--ink)" }}>
+              {renderPinCard(true)}
+            </div>
+          )}
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
             <I.source style={{ fontSize: 14 }} /> Sources · {sources.length}
             <span style={{ flex: 1 }} />
@@ -3355,73 +3420,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </div>
       )}
 
-      {/* pin the source-span: the exact words IN the source that back the claim.
-          A page is not a citation — this is what makes it one. */}
-      {pinTarget && (() => {
-        const rec = window.NPJ.SOURCES[pinTarget.key] || {};
-        const ready = !!String(pinQuote || "").trim();
-        const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + pinTarget.cid + '"]');
-        const spanKeys = span ? (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean) : [];
-        const onSpan = spanKeys.indexOf(pinTarget.key) < 0 ? [pinTarget.key, ...spanKeys] : spanKeys;   // include the one being added
-        const others = sources.filter(s => s.key !== pinTarget.key && onSpan.indexOf(s.key) < 0);
-        const clipT = (s) => { s = String(s || ""); return s.length > 22 ? s.slice(0, 21) + "…" : s; };
-        const srcName = (k) => { const r = window.NPJ.SOURCES[k] || {}; return r.title || k; };
-        return (
-        <div className="fade-in" style={{ position: "fixed", left: "50%", bottom: 22, transform: "translateX(-50%)", zIndex: 4400, width: 560, maxWidth: "94vw", background: "var(--ink)", color: "var(--paper)", border: "1px solid var(--yellow)", boxShadow: "0 16px 40px rgba(0,0,0,.55)", padding: "12px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-            <span className="np-mono" style={{ fontSize: 11, color: "var(--yellow)", flex: "0 0 auto" }}><I.source style={{ fontSize: 13, verticalAlign: "-2px" }} /> Pin the source-span</span>
-            <span className="np-mono" style={{ fontSize: 10.5, opacity: .7, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rec.title || pinTarget.key}{rec.outlet ? " · " + rec.outlet : ""}</span>
-            <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
-          </div>
-          {pinTarget.claimText && (
-            <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
-              <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
-              “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
-            </div>
-          )}
-          {/* every source on this span — one claim can rest on several. Click to edit
-              that one's pinned words; × drops it. The right-hand picker adds more. */}
-          {onSpan.length > 1 && (
-            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginBottom: 9 }}>
-              <span className="np-mono" style={{ fontSize: 9, color: "rgba(255,255,255,.5)", letterSpacing: ".08em" }}>ON THIS SPAN</span>
-              {onSpan.map(k => {
-                const cur = k === pinTarget.key;
-                return (
-                  <span key={k} style={{ display: "inline-flex", alignItems: "center", borderRadius: 999, border: "1px solid " + (cur ? "var(--yellow)" : "rgba(255,255,255,.28)"), background: cur ? "rgba(255,236,1,.14)" : "transparent" }}>
-                    <button onClick={() => { if (!cur) openPin(pinTarget.cid, k, pinTarget.claimText); }} title={cur ? "Editing this source's pinned words" : "Edit this source's pinned words"}
-                      style={{ background: "none", border: 0, color: "var(--paper)", cursor: cur ? "default" : "pointer", fontFamily: "var(--cond)", fontSize: 12, padding: "2px 4px 2px 9px" }}>{clipT(srcName(k))}</button>
-                    <button onClick={() => removeSrcFromSpan(span, k)} title="Remove this source from the span"
-                      style={{ background: "none", border: 0, color: "rgba(255,255,255,.6)", cursor: "pointer", fontSize: 13, lineHeight: 1, padding: "0 6px 0 3px" }}>×</button>
-                  </span>
-                );
-              })}
-            </div>
-          )}
-          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
-          <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
-            style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
-          {/* render the source and select-to-cite (+ Citey's smarter ranking) */}
-          {window.SourcePicker && (
-            <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
-              onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
-          )}
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9 }}>
-            {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
-              className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
-            {others.length > 0 && (
-              <select value="" onChange={e => { const k = e.target.value; if (k) openPin(pinTarget.cid, k, pinTarget.claimText); }}
-                title="Add another source to this same span — one claim can rest on several"
-                className="np-cond" style={{ flex: "0 0 auto", maxWidth: 190, background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.3)", fontSize: 12, padding: "6px 7px", cursor: "pointer" }}>
-                <option value="">+ add a source…</option>
-                {others.map(s => <option key={s.key} value={s.key}>{clipT(srcName(s.key))}</option>)}
-              </select>
-            )}
-            <span style={{ flex: 1 }} />
-            <button onClick={closePin} className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: "var(--paper)", border: "1px solid rgba(255,255,255,.3)", padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Later</button>
-            <button onClick={() => savePin(pinLoc.current)} disabled={!ready} className="np-cond" style={{ flex: "0 0 auto", background: ready ? "var(--paper)" : "rgba(255,255,255,.15)", color: ready ? "var(--ink)" : "rgba(255,255,255,.5)", border: "1px solid " + (ready ? "var(--paper)" : "rgba(255,255,255,.2)"), padding: "6px 13px", fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: ready ? "pointer" : "default" }}>Pin span</button>
-          </div>
-        </div>
-      ); })()}
+      {/* pin the source-span — the exact words IN the source that back the claim.
+          On desktop this lives in the right Sources panel (see renderPinCard above);
+          a phone has no side column, so there it's a bottom sheet over the prose. */}
+      {pinTarget && isMobile && renderPinCard(false)}
 
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
