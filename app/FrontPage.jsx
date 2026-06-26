@@ -120,7 +120,8 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
             <div className="npj-nav-cols" style={{ display: "flex", alignItems: "stretch", minWidth: 0 }}>
               {[
                 { label: "Latest", active: route === "home", go: onHome },
-                { label: "Sources Archive", active: route === "explore", go: () => (window.__nav && window.__nav.explore ? window.__nav.explore() : onHome()) }
+                { label: "Sources Archive", active: route === "explore", go: () => (window.__nav && window.__nav.explore ? window.__nav.explore() : onHome()) },
+                { label: "Merge Requests", active: route === "merges", go: () => (window.__nav && window.__nav.merges ? window.__nav.merges() : onHome()) }
               ].map((t) => (
                 <button key={t.label} onClick={t.go} style={{
                   flexShrink: 0, display: "flex", alignItems: "center", padding: "0 26px",

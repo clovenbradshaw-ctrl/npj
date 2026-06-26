@@ -528,7 +528,10 @@ function App() {
   const goSubmit = () => { setRoute("submit"); window.scrollTo(0, 0); };
   const goExplore = () => { setRoute("explore"); window.scrollTo(0, 0); };
   const goContributors = () => { setRoute("contributors"); window.scrollTo(0, 0); };
+  const goMerges = () => { setRoute("merges"); window.scrollTo(0, 0); };
   const goDocs = () => { setRoute("docs"); window.scrollTo(0, 0); };
+  // open an article from the dashboard with its merge-request rail already up
+  const openArticleMR = (slug) => { setShowSugg(true); openArticle(slug); };
   const openDoc = (id) => {
     const did = id || "working";
     setDraftId(did);
@@ -555,7 +558,7 @@ function App() {
     setSession(null);
   };
 
-  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, docs: goDocs,
+  window.__nav = { standards: goStandards, submit: goSubmit, explore: goExplore, contributors: goContributors, merges: goMerges, docs: goDocs,
     account: () => (session ? signOut() : goSubmit()), user: session && session.user_id, role, isAdmin, isEditor: isEditorRole };
 
   // gate routes whose code is still streaming in after first paint (the front
@@ -602,6 +605,7 @@ function App() {
       {route === "contributors" && (ready.read ? <ContributorsPage onHome={goHome} onNewsroom={goNewsroom} /> : <BootLoading />)}
       {route === "submit" && (ready.read ? <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} /> : <BootLoading />)}
       {route === "explore" && (ready.read ? <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} /> : <BootLoading />)}
+      {route === "merges" && (ready.read && window.MergeDashboard ? <window.MergeDashboard onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticleMR} /> : <BootLoading />)}
       {route === "docs" && (ready.read ? <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} /> : <BootLoading />)}
 
       <TweaksPanel title="Tweaks">

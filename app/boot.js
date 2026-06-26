@@ -52,7 +52,7 @@
     "app/SubstackExport.jsx", "app/FactCheckExport.jsx", "app/ArticleRead.jsx",
     "app/ArticleEdit.jsx", "app/SourcePicker.jsx", "app/InterviewSource.jsx",
     "app/Standards.jsx", "app/Contributors.jsx", "app/Submit.jsx",
-    "app/Data.jsx", "app/Documents.jsx", "app/Invite.jsx", "app/AdminEditor.jsx"
+    "app/Data.jsx", "app/Documents.jsx", "app/Invite.jsx", "app/AdminEditor.jsx", "app/MergeDashboard.jsx"
   ];
 
   // EDITOR: the newsroom + its heavy companions. Compiled last (after READ).
