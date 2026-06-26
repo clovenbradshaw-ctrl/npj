@@ -16,6 +16,23 @@ function defSpinner(NR) {
   return <span style={{ display: "inline-block", width: 9, height: 9, border: "1.5px solid " + NR.muted, borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite" }} />;
 }
 
+// A textarea that grows to fit its content, so definitions are never clipped.
+function AutoTextarea({ value, onChange, minRows = 2, style, ...rest }) {
+  const ref = useRef(null);
+  const fit = () => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  };
+  useEffect(() => { fit(); }, [value]);
+  return (
+    <textarea ref={ref} value={value} rows={minRows}
+      onChange={e => { onChange(e); fit(); }}
+      style={Object.assign({ overflow: "hidden", resize: "none", boxSizing: "border-box" }, style)} {...rest} />
+  );
+}
+
 function SourceControl({ source, onSet, onClear, NR }) {
   const D = window.NpjDefinitions;
   const [url, setUrl] = useState("");
@@ -35,7 +52,7 @@ function SourceControl({ source, onSet, onClear, NR }) {
         <span title={ok ? "preserved on archive.org" : "archiving"} style={{ color: ok ? NR.ok : NR.warn, fontSize: 12 }}>{archiving ? defSpinner(NR) : (ok ? "🔒" : "◌")}</span>
         <a href={link} target="_blank" rel="noopener noreferrer" style={{ flex: 1, minWidth: 120, color: NR.text, fontSize: 12.5, textDecoration: "underline", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{source.title || source.url}</a>
         <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>
-          {source.outlet ? source.outlet : ""}{source.outlet && source.preserved ? " · " : ""}{source.preserved ? "preserved " + source.preserved : (archiving ? "archiving…" : (source.status === "snapshot-pending" ? "snapshot requested" : "not archived"))}
+          {[source.outlet || "", source.preserved ? "preserved " + source.preserved : (archiving ? "archiving…" : (source.status === "snapshot-pending" ? "snapshot requested" : "not archived"))].filter(Boolean).join(" · ")}
         </span>
         <button onClick={onClear} title="remove source" style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 13, lineHeight: 1 }}>×</button>
       </div>
@@ -57,8 +74,8 @@ function DefRow({ def, onPatch, onRemove, canRemove, NR }) {
   return (
     <div style={{ borderLeft: "2px solid " + NR.line, padding: "2px 0 2px 9px", marginTop: 8 }}>
       <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
-        <textarea value={def.text} onChange={e => onPatch({ text: e.target.value })} placeholder="Define this term — a sentence or two"
-          rows={2} style={{ flex: 1, border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 13, lineHeight: 1.45, padding: "6px 7px", outline: "none", resize: "vertical", fontFamily: "var(--serif)" }} />
+        <AutoTextarea value={def.text} onChange={e => onPatch({ text: e.target.value })} placeholder="Define this term — a sentence or two"
+          minRows={2} style={{ flex: 1, minHeight: "3em", border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 13, lineHeight: 1.5, padding: "6px 8px", outline: "none", fontFamily: "var(--serif)" }} />
         {canRemove && <button onClick={onRemove} title="remove this definition" style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 15, lineHeight: 1, marginTop: 2 }}>×</button>}
       </div>
       <div style={{ display: "flex", gap: 6, marginTop: 4, alignItems: "center" }}>
