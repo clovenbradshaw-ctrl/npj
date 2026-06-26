@@ -186,6 +186,10 @@
       by[o.id] = {
         id: o.id,
         kind: o.kind,
+        // "span" (pinned to selected words) or "article" (a contribution on the
+        // whole piece — read like a PR description, resolved by an editor, never
+        // auto-merged since it isn't bound to a quote)
+        scope: (o.anchor && o.anchor.scope) || "span",
         claimId: (o.anchor && o.anchor.claimId) || null,
         anchor: o.anchor || null,
         proposed: o.proposed || "",

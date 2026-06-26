@@ -335,7 +335,7 @@ function EmbedFigure({ url, caption, height, reload }) {
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions = [], onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
-          me, onHome, onNewsroom, onEdited,
+          me, signedIn, onHome, onNewsroom, onEdited,
           // Preview mode: render a draft EXACTLY as the public reader will, from a
           // prebuilt article object (the editor's live content folded through the
           // very same publish pipeline). Same Header + Body the reader uses, just
@@ -531,6 +531,13 @@ function ArticleRead(props) {
     const claim = claimById[claimId];
     if (!claim) return;
     setCompose({ quote: claim.text, anchor: window.NpjFeedback.anchorFromClaim(claim), kind: kind || "suggestion" });
+    setShowSugg(true); setHover(null); setBubble(null);
+  };
+
+  // Open the composer for a contribution on the WHOLE article — not pinned to any
+  // span. Stored as a proposal an editor reads and applies (a PR description).
+  const startArticleContribution = () => {
+    setCompose({ quote: "", scope: "article", anchor: { scope: "article", quote: "" }, kind: "comment" });
     setShowSugg(true); setHover(null); setBubble(null);
   };
 
@@ -1004,6 +1011,7 @@ function ArticleRead(props) {
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
+        onContribute: startArticleContribution,
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
@@ -1050,7 +1058,8 @@ function ArticleRead(props) {
         canReview={canEditArticle} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onShow={showInText}
         composeDraft={compose}
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
-        onCancelCompose={() => setCompose(null)} me={me} />
+        onCancelCompose={() => setCompose(null)} me={me} signedIn={signedIn}
+        onContributeArticle={startArticleContribution} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
         onRevert={revertTo} canRevert={canEditArticle} reverting={reverting} revertErr={revertErr} />}
       {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
@@ -1119,7 +1128,7 @@ function GroundingLegend({ tally, onClose }) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, onContribute, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -1175,6 +1184,13 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, previews, 
           <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>●</span> Figures
           {entityCount != null && <span className="np-mono" style={{ fontSize: 11, background: "var(--data)", color: "#fff", padding: "0 5px", border: "1px solid var(--ink)" }}>{entityCount}</span>}
         </button>
+
+        {onContribute && (
+          <button className="btn btn-sm" onClick={onContribute} title="Propose a change — a span edit or a contribution on the whole article, reviewed like a pull request"
+            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊨</span> Contribute
+          </button>
+        )}
 
         <button className="btn btn-sm" onClick={() => setShowSugg(!showSugg)} style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: showSugg ? "var(--ink)" : "var(--card)", color: showSugg ? "var(--yellow)" : "var(--ink)" }}>

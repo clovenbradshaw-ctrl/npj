@@ -36,8 +36,17 @@ function DiffText({ before, after }) {
   );
 }
 
-/* the span this feedback is pinned to — its quote, with a jump-to-text action */
+/* the span this feedback is pinned to — its quote, with a jump-to-text action.
+   A whole-article contribution isn't pinned to any words, so it reads as a
+   plain "on the whole article" banner instead of a jump-to-span button. */
 function AnchorLine({ s, claim, onShow }) {
+  if (s.scope === "article") {
+    return (
+      <div className="np-mono" style={{ display: "flex", gap: 6, alignItems: "center", background: "var(--paper-2)", borderLeft: "3px solid var(--yellow-deep)", padding: "6px 9px", marginBottom: 9, fontSize: 11, color: "var(--ink-soft)" }}>
+        <I.doc style={{ fontSize: 13 }} /> On the whole article
+      </div>
+    );
+  }
   const quote = (claim && claim.text) || (s.anchor && s.anchor.quote) || "";
   if (!quote) return null;
   return (
@@ -105,8 +114,8 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 12,
       opacity: s.stale && open ? .94 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: "1px solid var(--rule)", flexWrap: "wrap" }}>
-        <span className="chip" style={{ background: s.kind === "comment" ? "var(--paper-2)" : "var(--yellow)", borderColor: "var(--ink)" }}>
-          {s.kind === "comment" ? "💬 Comment" : "✎ Suggestion"}
+        <span className="chip" style={{ background: s.scope === "article" ? "var(--data)" : s.kind === "comment" ? "var(--paper-2)" : "var(--yellow)", color: s.scope === "article" ? "#fff" : undefined, borderColor: "var(--ink)" }}>
+          {s.scope === "article" ? "📄 Contribution" : s.kind === "comment" ? "💬 Comment" : "✎ Suggestion"}
         </span>
         <StatusChip status={s.status} merged={s.merged} />
         {s.stale && <span className="chip chip-stale" title={"Proposed against v." + s.base_sha + " — the article has since advanced"}>⚠ Stale</span>}
@@ -121,7 +130,7 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
 
         {s.rationale && (
           <div style={{ marginTop: 10, paddingLeft: 9, borderLeft: "2px solid var(--rule)", fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
-            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>{s.kind === "comment" ? "Note" : "Rationale"}</span>
+            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>{s.scope === "article" ? "Contribution" : s.kind === "comment" ? "Note" : "Rationale"}</span>
             <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", marginTop: 2, color: "var(--ink)" }}>{s.rationale}</div>
           </div>
         )}
@@ -166,34 +175,48 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
   );
 }
 
-/* compose a new suggestion or comment, pinned to the selected span */
-function Compose({ draft, onSubmit, onCancel, me }) {
+/* compose a new contribution. Two modes:
+   - span:    pinned to selected words → a suggested edit (auto-mergeable) or a
+              comment on that span.
+   - article: a contribution on the whole piece — a written proposal/correction,
+              like a PR description, that an editor reads and acts on. */
+function Compose({ draft, onSubmit, onCancel, me, signedIn }) {
+  const article = draft.scope === "article" || (draft.anchor && draft.anchor.scope === "article");
   const quote = draft.quote || "";
-  const [kind, setKind] = useState(draft.kind || "suggestion");
+  const [kind, setKind] = useState(article ? "comment" : (draft.kind || "suggestion"));
   const [proposed, setProposed] = useState(quote);
   const [rationale, setRationale] = useState("");
-  const isSugg = kind === "suggestion";
+  const isSugg = !article && kind === "suggestion";
   const valid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
-    : rationale.trim().length >= 2;
-  const submit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+    : rationale.trim().length >= (article ? 8 : 2);
+  const submit = () => onSubmit({ kind, scope: article ? "article" : "span", anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  const submitLabel = article ? "Submit contribution" : isSugg ? "Propose edit" : "Post comment";
   return (
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 14, boxShadow: "5px 5px 0 rgba(22,20,13,.14)" }}>
-      <div style={{ background: "var(--yellow)", borderBottom: "1.5px solid var(--ink)", padding: "8px 11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <span style={{ fontFamily: "var(--display)", fontSize: 16 }}>{isSugg ? "SUGGEST AN EDIT" : "LEAVE A COMMENT"}</span>
-        <button onClick={onCancel} style={{ background: "none", border: 0, fontSize: 15 }}><I.x /></button>
+      <div style={{ background: article ? "var(--data)" : "var(--yellow)", color: article ? "#fff" : "var(--ink)", borderBottom: "1.5px solid var(--ink)", padding: "8px 11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontFamily: "var(--display)", fontSize: 16 }}>{article ? "CONTRIBUTE TO THE ARTICLE" : isSugg ? "SUGGEST AN EDIT" : "LEAVE A COMMENT"}</span>
+        <button onClick={onCancel} style={{ background: "none", border: 0, fontSize: 15, color: "inherit" }}><I.x /></button>
       </div>
       <div style={{ padding: "11px" }}>
-        <div style={{ display: "flex", gap: 0, marginBottom: 11, border: "1.5px solid var(--ink)" }}>
-          {[["suggestion", "✎ Suggest edit"], ["comment", "💬 Comment"]].map(([k, l]) => (
-            <button key={k} onClick={() => setKind(k)} className="np-cond" style={{ flex: 1, padding: "6px", border: 0, cursor: "pointer",
-              borderRight: k === "suggestion" ? "1.5px solid var(--ink)" : 0, fontWeight: 700, fontSize: 13,
-              background: kind === k ? "var(--ink)" : "transparent", color: kind === k ? "var(--yellow)" : "var(--ink)" }}>{l}</button>
-          ))}
-        </div>
+        {!article && (
+          <div style={{ display: "flex", gap: 0, marginBottom: 11, border: "1.5px solid var(--ink)" }}>
+            {[["suggestion", "✎ Suggest edit"], ["comment", "💬 Comment"]].map(([k, l]) => (
+              <button key={k} onClick={() => setKind(k)} className="np-cond" style={{ flex: 1, padding: "6px", border: 0, cursor: "pointer",
+                borderRight: k === "suggestion" ? "1.5px solid var(--ink)" : 0, fontWeight: 700, fontSize: 13,
+                background: kind === k ? "var(--ink)" : "transparent", color: kind === k ? "var(--yellow)" : "var(--ink)" }}>{l}</button>
+            ))}
+          </div>
+        )}
 
-        <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 5 }}>On this span</div>
-        <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "7px 9px", background: "var(--paper-2)", borderLeft: "3px solid var(--yellow-deep)", marginBottom: 11 }}>{quote || "(the selected words)"}</div>
+        {article ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontFamily: "var(--cond)", fontSize: 13, color: "var(--ink-soft)", padding: "7px 9px", background: "var(--paper-2)", borderLeft: "3px solid var(--yellow-deep)", marginBottom: 11 }}>
+            <I.doc style={{ fontSize: 14 }} /> A proposal on the whole article — an editor reviews and applies it.
+          </div>
+        ) : (<>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 5 }}>On this span</div>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "7px 9px", background: "var(--paper-2)", borderLeft: "3px solid var(--yellow-deep)", marginBottom: 11 }}>{quote || "(the selected words)"}</div>
+        </>)}
 
         {isSugg && (<React.Fragment>
           <label className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Proposed text</label>
@@ -202,9 +225,9 @@ function Compose({ draft, onSubmit, onCancel, me }) {
               padding: "8px 9px", border: "1.5px solid var(--ink)", background: "var(--paper)", resize: "vertical", boxSizing: "border-box" }} />
         </React.Fragment>)}
 
-        <label className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>{isSugg ? "Rationale" : "Comment"} <span style={{ color: "var(--reject)" }}>· required</span></label>
-        <textarea value={rationale} onChange={e => setRationale(e.target.value)} rows={2}
-          placeholder={isSugg ? "Why should this change? Cite a source if you can." : "What's off, or what would help?"}
+        <label className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>{article ? "Your contribution" : isSugg ? "Rationale" : "Comment"} <span style={{ color: "var(--reject)" }}>· required</span></label>
+        <textarea value={rationale} onChange={e => setRationale(e.target.value)} rows={article ? 4 : 2}
+          placeholder={article ? "What would you change about this piece, and why? Cite a source if you can — corrections, missing context, a framing problem…" : isSugg ? "Why should this change? Cite a source if you can." : "What's off, or what would help?"}
           style={{ width: "100%", marginTop: 4, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4,
             padding: "8px 9px", border: "1.5px solid var(--ink)", background: "var(--paper)", resize: "vertical", boxSizing: "border-box" }} />
 
@@ -214,15 +237,15 @@ function Compose({ draft, onSubmit, onCancel, me }) {
           </div>
         )}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
-          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>as {me}</span>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{signedIn ? "as " + me : "you'll sign in next"}</span>
           <div style={{ display: "flex", gap: 7 }}>
             <button className="btn btn-sm" onClick={onCancel}>Cancel</button>
             <button className="btn btn-sm btn-primary" disabled={!valid} style={{ opacity: valid ? 1 : .45, cursor: valid ? "pointer" : "not-allowed" }}
-              onClick={submit}>{isSugg ? "Propose edit" : "Post comment"}</button>
+              onClick={submit}>{signedIn ? submitLabel : "Continue →"}</button>
           </div>
         </div>
         <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.4 }}>
-          → kept on the record as an EVA deposit in this article's folder. An editor reviews it for merge.
+          → kept on the record as an EVA deposit in this article's folder. An editor reviews it{article ? " and applies it by hand." : " for merge."}
         </div>
       </div>
     </div>
@@ -230,7 +253,8 @@ function Compose({ draft, onSubmit, onCancel, me }) {
 }
 
 function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, canReview,
-                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me }) {
+                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me,
+                         signedIn, onContributeArticle }) {
   const TRUST_RANK = { editor: 3, preferred: 2, open: 1 };
   const filtered = list.filter(s => {
     if (filter === "editor") return s.trust === "editor";
@@ -266,15 +290,27 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
       </div>
 
       <div style={{ padding: "14px 16px 40px", flex: 1 }}>
-        {composeDraft && <Compose draft={composeDraft} me={me} onSubmit={onSubmit} onCancel={onCancelCompose} />}
+        {composeDraft && <Compose draft={composeDraft} me={me} signedIn={signedIn} onSubmit={onSubmit} onCancel={onCancelCompose} />}
 
         {!composeDraft && (
-          <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "12px 13px", marginBottom: 16, display: "flex", gap: 11, alignItems: "center" }}>
-            <I.plus style={{ fontSize: 22, color: "var(--ink-soft)" }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, lineHeight: 1.1 }}>See something off?</div>
-              <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>Select any words in the story, then “Suggest edit” or “Comment.”</div>
+          <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "13px 13px 12px", marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 11, alignItems: "center" }}>
+              <I.plus style={{ fontSize: 22, color: "var(--ink-soft)" }} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, lineHeight: 1.1 }}>See something off?</div>
+                <div style={{ fontSize: 12, color: "var(--ink-soft)" }}>Select any words in the story, then “Suggest edit” or “Comment.”</div>
+              </div>
             </div>
+            {onContributeArticle && (
+              <button className="btn btn-sm" onClick={onContributeArticle} style={{ width: "100%", marginTop: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, background: "var(--data)", color: "#fff", borderColor: "var(--ink)" }}>
+                <I.doc style={{ fontSize: 14 }} /> Contribute to the whole article
+              </button>
+            )}
+            {!signedIn && (
+              <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.4, textAlign: "center" }}>
+                No account needed to start — you'll sign your contribution at the end.
+              </div>
+            )}
           </div>
         )}
 
