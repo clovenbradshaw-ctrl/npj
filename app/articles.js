@@ -181,6 +181,49 @@
     return out;
   }
 
+  /* ---------------- never split a word across a paragraph break ----
+     A paragraph is the unit the author wrote; the reader, the live Preview
+     and the Substack export each render it as its own <p>. An accidental
+     block split — a stray Enter/paste inside the contentEditable, or an
+     older record saved that way — can cut a paragraph mid-WORD: "…public
+     bench. B" then a fresh paragraph "ut the incursion…", which prints as
+     two paragraphs with a blank line wedged into the middle of "But". The
+     seam is unmistakable: the paragraph above ends on a word character with
+     NO trailing space and the one below OPENS with a lowercase letter —
+     prose never starts a new paragraph lower-case mid-word. Stitch those
+     two blocks back into one so the preview shows exactly what was written.
+
+     Conservative by design: it fires ONLY on that lowercase-into-word-char
+     seam, so a real paragraph break (the next opens with a capital, or the
+     previous ended on a space, punctuation or a hard <br>) is never touched.
+     Idempotent and non-mutating — the merged block is a fresh clone, the two
+     seam strings are joined with NO separator (it's one word), and the read
+     model + export can each run it without corrupting a shared body. */
+  function mergeSplitWords(blocks) {
+    const src = Array.isArray(blocks) ? blocks : [];
+    const isBr = (t) => !!t && typeof t === "object" && t.t === "br";
+    const fullText = (b) => (b.tokens || []).map(tokenText).join("");
+    const out = [];
+    src.forEach(b => {
+      const prev = out[out.length - 1];
+      const pTok = prev && prev.tokens, bTok = b && b.tokens;
+      if (prev && prev.type === "p" && b && b.type === "p" &&
+          pTok && pTok.length && bTok && bTok.length &&
+          !isBr(pTok[pTok.length - 1]) && !isBr(bTok[0]) &&
+          /[A-Za-z0-9]$/.test(fullText(prev)) && /^[a-z]/.test(fullText(b))) {
+        const merged = pTok.slice(), add = bTok.slice();
+        // join the two seam tokens into one string when both are plain text, so
+        // the rebuilt word ("B" + "ut" → "But") is a single token; otherwise the
+        // tokens simply sit adjacent (rendering concatenates them all the same).
+        if (typeof merged[merged.length - 1] === "string" && typeof add[0] === "string") merged[merged.length - 1] += add.shift();
+        out[out.length - 1] = Object.assign({}, prev, { tokens: merged.concat(add) });
+        return;
+      }
+      out.push(b);
+    });
+    return out;
+  }
+
   /* ---------------- standardized article metadata ----------------
      The fields every published piece should carry so the front page renders
      consistently no matter which layout template it lands in. `required` ones
@@ -314,8 +357,9 @@
         local: !!bannerBlock.local
       } : null,
       // normalize on read too, so a draft already saved with a stranded marker
-      // renders right for every consumer (reader + Substack export) without a re-save
-      body: mergeStrandedFootnotes(Array.isArray(state.body) ? state.body : []),
+      // or a word cut across a paragraph break renders right for every consumer
+      // (reader + live Preview + Substack export) without needing a re-save
+      body: mergeSplitWords(mergeStrandedFootnotes(Array.isArray(state.body) ? state.body : [])),
       // how the piece was assembled (typed vs. pasted, paste sizes, timeline) —
       // aggregate counts only, never the words; absent on pieces published before
       // this shipped, so the reader's footer simply omits it for them
@@ -964,8 +1008,9 @@
       }
       defStripped.push(b);
     });
-    // a marker that landed alone in its own paragraph attaches to the text above
-    const kept = mergeStrandedFootnotes(defStripped);
+    // a marker that landed alone in its own paragraph attaches to the text above;
+    // a word cut across a paragraph break (a stray Enter/paste) is stitched back
+    const kept = mergeSplitWords(mergeStrandedFootnotes(defStripped));
     const fnNum = {}; let fnSeq = 0;   // key → number, in first-reference order
     const numberMarker = (t) => {
       if (!t || t.t !== "sup") return;
@@ -1332,7 +1377,7 @@
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle, primeFront, saveFront,
-    htmlToBlocks, blocksToHtml, tokensToHtml,
+    htmlToBlocks, blocksToHtml, tokensToHtml, mergeSplitWords,
     genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
   };

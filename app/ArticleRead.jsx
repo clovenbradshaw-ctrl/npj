@@ -1341,7 +1341,7 @@ function ArticleRead(props) {
       <ControlBar {...{ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
-        canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
+        canEdit: canEditArticle, onEdit: () => setEditing(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
@@ -1397,7 +1397,6 @@ function ArticleRead(props) {
         onCancelCompose={() => setCompose(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
         onRevert={revertTo} canRevert={canEditArticle} reverting={reverting} revertErr={revertErr} />}
-      {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
       {editing && window.ArticleEdit && (
         <window.ArticleEdit article={A} me={me} isAdmin={isAdmin}
           onClose={() => setEditing(false)}
@@ -1532,17 +1531,17 @@ function TransparencyControl({ level, setLevel }) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
         {!isPhone && <span style={{ flex: 1 }} />}
 
-        <button className="btn btn-sm" onClick={onExport} title="Export & copy — the whole article as plain text or Markdown, a rich copy for Substack (images + sourcing intact), or a .html/.md/.txt file"
-          style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-          <I.ext style={{ fontSize: 14 }} /> Export
-        </button>
+        {/* Export lives only in the editor's live Preview (the Substack button on
+           the preview toolbar), where it serializes the byte-for-byte folded draft.
+           Keeping it off the published reader's bar means there's a single, canonical
+           place to export from, so a copy never disagrees with what the author sees. */}
 
         {canEdit && (
           <button className="btn btn-sm" onClick={onEdit} title="Edit this published article — your change is appended to its EO event log" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
