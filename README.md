@@ -369,11 +369,11 @@ draft and the committed file is named accordingly.
 ## Export to Substack — a paste that lands perfectly
 
 The Substack panel (`app/SubstackExport.jsx`, over `app/substack-export.js`)
-opens from two places: the **Export** button on any published piece (the
-reader's control bar), and a **Substack** button in the editor's live
-**Preview** — so an author can copy a draft into Substack without publishing
-first. Both run off the same folded article and resolve each cite against the
-article's own bound sources. The mechanic it leans on: Substack's editor honors
+opens from one place: a **Substack** button in the editor's live **Preview** —
+so an author copies a draft into Substack from the byte-for-byte folded draft,
+without publishing first, and there's a single canonical place to export from
+(a copy can never disagree with what the author sees). It resolves each cite
+against the article's own bound sources. The mechanic it leans on: Substack's editor honors
 **pasted HTML** (headings, bold/italic, links, lists, blockquotes, `<img>`) but
 treats **pasted markdown syntax as literal text** — so the formatting has to
 travel as HTML, not as `#`/`*` characters. Two paths, both land formatted:
