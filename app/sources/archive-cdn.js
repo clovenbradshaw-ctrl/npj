@@ -97,8 +97,11 @@
       const id = decodeURIComponent(m[1]);
       const path = m[2] ? decodeURIComponent(m[2]) : "";
       if (path && IMG_EXT.test(path)) return downloadUrl(id, path);
-      // bare item (or a non-image file path) → the item's primary image
-      const res = await fetch("https://archive.org/metadata/" + encodeURIComponent(id), { headers: { Accept: "application/json" } });
+      // bare item (or a non-image file path) → the item's primary image.
+      // Bounded like every other archive.org call (see fetchT below) so a stalled
+      // metadata lookup can't hang whatever is resolving the image — the file's
+      // no-hang guarantee must hold here too. fetchT is hoisted, so it's in scope.
+      const res = await fetchT("https://archive.org/metadata/" + encodeURIComponent(id), 8000, { headers: { Accept: "application/json" } });
       if (!res.ok) throw new Error("archive.org metadata lookup failed (HTTP " + res.status + ").");
       const j = await res.json();
       const name = pickImage(j && j.files);
