@@ -1031,6 +1031,30 @@ function ArticleRead(props) {
     : { marginTop: top, marginBottom: bottom };
   const hasHero = !!((A.image && A.image.src && A.image.banner) || (A.body || []).some(b => b.type === "img" && b.banner));
   const topInlineImgIdx = hasHero ? -1 : (A.body || []).findIndex(b => b.type === "img");
+  // the opening paragraph (the lede) carries a drop cap on its first letter
+  const firstParaIdx = (A.body || []).findIndex(b => b.type === "p");
+  // Lift the lede's first character into the boxed drop cap, leaving the rest of
+  // the prose to flow beside it. Works whether that character sits in a bare
+  // string or inside a styled/claim token — we keep the wrapper on the remainder
+  // (so a grounded first sentence keeps its id/citation), and the lifted letter
+  // stays first in the DOM, so screen readers still read "The…", not "he…".
+  const splitLede = (tokens) => {
+    const list = tokens || [];
+    for (let i = 0; i < list.length; i++) {
+      const t = list[i];
+      let text = null, rebuild = null;
+      if (typeof t === "string") { text = t; rebuild = s => s; }
+      else if (t && typeof t.text === "string") { text = t.text; rebuild = s => Object.assign({}, t, { text: s }); }
+      else if (t && typeof t.c === "string") { text = t.c; rebuild = s => Object.assign({}, t, { c: s }); }
+      if (text == null) continue;            // a <br>/sup with no text — try the next token
+      const at = text.search(/\S/);          // first non-space character
+      if (at < 0) continue;                  // this token is all whitespace
+      const remainder = list.slice();
+      remainder[i] = rebuild(text.slice(0, at) + text.slice(at + 1));
+      return [text[at], remainder];
+    }
+    return [null, list];
+  };
 
   const Body = (
     <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}
@@ -1096,6 +1120,14 @@ function ArticleRead(props) {
         if (b.type === "hr") return <hr key={i} style={{ border: 0, borderTop: "2.5px solid var(--ink)", width: 110, margin: "30px auto" }} />;
         if (b.type === "code") return <pre key={i} className="np-mono np-scroll" style={{ fontSize: 13, lineHeight: 1.55, background: "var(--paper-2)", border: "1.5px solid var(--ink)", padding: "12px 14px", overflowX: "auto", margin: "0 0 20px" }}>{b.text}</pre>;
         if (b.type === "verse") return <pre key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 17.5, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: "0 0 20px", padding: "0 0 0 20px", borderLeft: "3px solid var(--rule-strong, var(--ink))" }}>{b.text}</pre>;
+        if (i === firstParaIdx) {
+          const [cap, rest] = splitLede(b.tokens);
+          if (cap) return (
+            <p key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>
+              <span className="np-dropcap-box">{cap}</span>{renderTokens(rest)}
+            </p>
+          );
+        }
         return <p key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>{renderTokens(b.tokens)}</p>;
       })}
     </article>
