@@ -114,58 +114,116 @@
     return range;
   }
 
+  // Tags whose text belongs to THEIR OWN row (or to no row), never to a
+  // containing block's "direct text" — so a wrapper that holds them contributes
+  // only its own loose prose and they're each captured on their own pass.
+  var SEG_BLOCK = { P: 1, LI: 1, H1: 1, H2: 1, H3: 1, BLOCKQUOTE: 1, DIV: 1, UL: 1, OL: 1, PRE: 1, FIGURE: 1, TABLE: 1 };
+  function isSegBlock(el) { return !!(el && el.nodeType === 1 && el.tagName && SEG_BLOCK[el.tagName]); }
+
+  // Character ranges (block.textContent coords) covered by DESCENDANT block-level
+  // elements — text that belongs to THOSE blocks' rows. Mirrors markerRanges'
+  // position walk: a block element's whole text is one range and we don't recurse
+  // into it (anything deeper is already inside that range).
+  function nestedBlockRanges(block) {
+    var out = [], pos = 0;
+    (function walk(n) {
+      for (var c = n.firstChild; c; c = c.nextSibling) {
+        if (c.nodeType === 3) pos += c.nodeValue.length;
+        else if (c.nodeType === 1) {
+          if (isSegBlock(c)) { var len = (c.textContent || '').length; if (len) out.push([pos, pos + len]); pos += len; }
+          else walk(c);
+        }
+      }
+    })(block);
+    return out;
+  }
+
+  // A block's OWN direct-text windows: [0,total] minus the ranges its nested block
+  // children occupy. A leaf block (no nested block) yields ONE window over the whole
+  // text — byte-for-byte the old behaviour. A pure wrapper yields none. A mixed
+  // block (lead-in prose, then a pasted list, say) yields its loose prose — which
+  // the old "skip any container" rule dropped on the floor, losing those sentences
+  // from the grounding table entirely.
+  function directRuns(block, total) {
+    var br = nestedBlockRanges(block);
+    if (!br.length) return [{ start: 0, end: total }];
+    br.sort(function (a, b) { return a[0] - b[0]; });
+    var runs = [], cur = 0;
+    br.forEach(function (r) { if (r[0] > cur) runs.push({ start: cur, end: r[0] }); cur = Math.max(cur, r[1]); });
+    if (cur < total) runs.push({ start: cur, end: total });
+    return runs;
+  }
+
+  // Does an element hold prose directly (a bare text node or an inline element),
+  // outside any block child? Loose text typed/pasted at the contentEditable root
+  // (wrapped in no <p>) lives here and would otherwise never be segmented.
+  function hasBareText(el) {
+    for (var c = el.firstChild; c; c = c.nextSibling) {
+      if (c.nodeType === 3 && c.nodeValue && c.nodeValue.trim()) return true;
+      if (c.nodeType === 1 && !isSegBlock(c) && (c.textContent || '').trim()) return true;
+    }
+    return false;
+  }
+
   // Walk the editor's block elements and return one record per sentence.
-  // Blocks: p / li / h2 / h3 / blockquote AND div — a contentEditable emits a
-  // <div> per Enter-separated paragraph (no defaultParagraphSeparator is set), so
-  // typed prose lives in <div>s. These are exactly the blocks the publish walker
-  // (articles.js htmlToBlocks) treats as prose, so the table sees the same prose
-  // it will ship. A hard <br> inside a block ends a line — and a sentence — even
-  // with no trailing space, mirroring the {t:'br'} tokens in the published body.
+  // Blocks: p / li / h2 / h3 / blockquote AND div — the composer sets
+  // defaultParagraphSeparator=p, so typed paragraphs are <p>s, but pasted markup
+  // can still arrive as <div>s or nested containers. These are exactly the blocks
+  // the publish walker (articles.js htmlToBlocks) treats as prose, so the table
+  // sees the same prose it will ship. A hard <br> inside a block ends a line — and
+  // a sentence — even with no trailing space, mirroring the {t:'br'} published
+  // tokens. Each block contributes only its OWN direct text (directRuns); nested
+  // blocks are captured on their own pass, so a mixed container no longer drops its
+  // loose prose, and bare text at the root is picked up too.
   function segment(rootEl) {
     if (!rootEl) return [];
     var doc = rootEl.ownerDocument || root.document;
     var blocks = Array.prototype.slice.call(rootEl.querySelectorAll('p, li, h2, h3, blockquote, div'));
+    // the root itself is a candidate when it holds loose prose of its own, so text
+    // pasted/typed as bare nodes under the contentEditable (wrapped in no block) is
+    // still captured; a normal article's root is all block children, so it adds none.
+    if (hasBareText(rootEl)) blocks.unshift(rootEl);
     var rows = [], seen = {};
     blocks.forEach(function (block, bi) {
       if (block.classList && block.classList.contains('nr-dek')) return;          // the dek isn't body prose
       if (block.closest && (block.closest('figure') || block.closest('pre') || block.closest('.cmp-widget'))) return;
-      // a blockquote/div that wraps its own block children (pasted <blockquote><p>…,
-      // or a wrapper <div> around real blocks) is just a container — its inner
-      // blocks are captured on their own pass; only leaf prose blocks become rows
-      if ((block.tagName === 'BLOCKQUOTE' || block.tagName === 'DIV') &&
-          block.querySelector('p, li, h2, h3, blockquote, div, ul, ol, pre, figure, table')) return;
       var text = block.textContent || '';
       if (!text.trim()) return;
       var marks = markerRanges(block);                                             // sup.md-cite spans → masked out of boundary detection
+      var lines = lineSpans(block, text.length);
       var si = 0;
-      lineSpans(block, text.length).forEach(function (ln) {
-        if (!text.slice(ln.start, ln.end).trim()) return;                          // empty line (e.g. <br><br>)
-        var lineMask = marks.length ? marks.map(function (m) { return [m[0] - ln.start, m[1] - ln.start]; }) : null;
-        splitOffsets(text.slice(ln.start, ln.end), lineMask).forEach(function (p) {
-          var start = ln.start + p.start, end = ln.start + p.end;
-          var range = rangeForBlock(block, start, end, doc);
-          var claimSpans = [], disp = p.text;
-          if (range) {
-            Array.prototype.slice.call(block.querySelectorAll('.claim-src')).forEach(function (el) {
-              try { if (range.intersectsNode(el)) claimSpans.push(el); } catch (e) {}
+      directRuns(block, text.length).forEach(function (run) {
+        lines.forEach(function (ln) {
+          var ls = Math.max(ln.start, run.start), le = Math.min(ln.end, run.end);  // this line, clipped to the direct-text window
+          if (le <= ls) return;
+          if (!text.slice(ls, le).trim()) return;                                  // empty line (e.g. <br><br>)
+          var lineMask = marks.length ? marks.map(function (m) { return [m[0] - ls, m[1] - ls]; }) : null;
+          splitOffsets(text.slice(ls, le), lineMask).forEach(function (p) {
+            var start = ls + p.start, end = ls + p.end;
+            var range = rangeForBlock(block, start, end, doc);
+            var claimSpans = [], disp = p.text;
+            if (range) {
+              Array.prototype.slice.call(block.querySelectorAll('.claim-src')).forEach(function (el) {
+                try { if (range.intersectsNode(el)) claimSpans.push(el); } catch (e) {}
+              });
+              // display text without the citation-number markers (sup.md-cite) so the
+              // table shows clean prose; the id hashes the clean text so pinning a
+              // citation (which adds a marker) doesn't change a sentence's identity
+              try {
+                var tmp = doc.createElement('div'); tmp.appendChild(range.cloneContents());
+                Array.prototype.slice.call(tmp.querySelectorAll('sup.md-cite')).forEach(function (s) { s.remove(); });
+                disp = (tmp.textContent || '').trim() || p.text;
+              } catch (e) {}
+            }
+            var nm = norm(disp);
+            var hsh = djb2(nm);
+            var sid = 'se-' + hsh;                      // provisional, content-derived
+            if (seen[sid]) { seen[sid]++; sid = sid + '-' + seen[sid]; } else seen[sid] = 1;
+            rows.push({
+              sid: sid, hash: hsh, norm: nm, blockIndex: bi, sentenceIndex: si++,
+              text: disp.trim(), block: block, start: start, end: end,
+              claimSpans: claimSpans
             });
-            // display text without the citation-number markers (sup.md-cite) so the
-            // table shows clean prose; the id hashes the clean text so pinning a
-            // citation (which adds a marker) doesn't change a sentence's identity
-            try {
-              var tmp = doc.createElement('div'); tmp.appendChild(range.cloneContents());
-              Array.prototype.slice.call(tmp.querySelectorAll('sup.md-cite')).forEach(function (s) { s.remove(); });
-              disp = (tmp.textContent || '').trim() || p.text;
-            } catch (e) {}
-          }
-          var nm = norm(disp);
-          var hsh = djb2(nm);
-          var sid = 'se-' + hsh;                      // provisional, content-derived
-          if (seen[sid]) { seen[sid]++; sid = sid + '-' + seen[sid]; } else seen[sid] = 1;
-          rows.push({
-            sid: sid, hash: hsh, norm: nm, blockIndex: bi, sentenceIndex: si++,
-            text: disp.trim(), block: block, start: start, end: end,
-            claimSpans: claimSpans
           });
         });
       });
@@ -325,6 +383,7 @@
   root.NpjSentences = {
     segment: segment, rangeFor: rangeFor, djb2: djb2,
     splitOffsets: splitOffsets, markerRanges: markerRanges,
+    nestedBlockRanges: nestedBlockRanges, directRuns: directRuns, hasBareText: hasBareText,
     track: track, reconcile: reconcile, newLedger: newLedger,
     serializeLedger: serializeLedger, hydrateLedger: hydrateLedger
   };
