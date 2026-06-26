@@ -489,9 +489,27 @@ function MainStage({ stage, onClose, onJumpNote }) {
 // rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
 // <audio> for direct media files, or (for anything we don't recognize) the
 // link card, since the committed artifact is always the URL itself.
-function EmbedFigure({ url, caption, height, reload }) {
+function EmbedFigure({ url, caption, height, reload, previews = true }) {
   const u = String(url || "");
   let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
+  // In the Clean transparency setting the inline preview collapses to a citation
+  // chip — the committed artifact is the URL, so we name what it points to and
+  // let the reader open the player on demand. Standard/Full embed it inline.
+  const [forceShow, setForceShow] = useState(false);
+  if (!previews && !forceShow) {
+    return (
+      <div style={{ border: "1.5px solid var(--ink)", margin: "14px 0", overflow: "hidden" }}>
+        <button type="button" onClick={() => setForceShow(true)} className="np-mono"
+          title="Show this embed inline"
+          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
+            padding: "13px 16px", cursor: "pointer", border: 0, background: "var(--card)", color: "var(--ink)",
+            fontSize: 12, letterSpacing: ".05em", textTransform: "uppercase", fontWeight: 600 }}>
+          <I.caretRight style={{ fontSize: 12 }} /> Embed · {caption || host || "media"}
+          <span style={{ marginLeft: "auto", padding: "5px 9px", background: "var(--yellow)", border: "1.5px solid var(--ink)", fontWeight: 700 }}>Show preview</span>
+        </button>
+      </div>
+    );
+  }
   // one resolver (window.NpjEmbed) maps the stored permalink to a player, the
   // same one the composer used — YouTube/Vimeo (16:9), Google Drive/Docs &
   // archive.org files (a fixed-height frame), or a direct <video>/<audio>.
@@ -539,10 +557,27 @@ function ArticleRead(props) {
   const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);
-  // the transparency lens — colour each claim by how it's grounded. Local to this
-  // reader instance, so the live page and the editor's Preview each carry their
-  // own. Off by default: a clean read.
-  const [transparency, setTransparency] = useState(false);
+  // The transparency layer is ONE control with three escalating settings, so
+  // there's a single mental model — "how much of NPJ's transparency layer do I
+  // want to see" — instead of two overlapping toggles:
+  //   clean    — just the article (no inline previews, no assertion lens)
+  //   standard — inline photo/social previews on; the assertion lens hidden
+  //   full     — everything: previews + the grounding lens (sources & provenance)
+  // `previews` and `transparency` derive from the level, so every downstream
+  // reader of them keeps working unchanged. The choice sticks (per browser);
+  // we migrate the old standalone Previews switch (npj.previews) on first read.
+  const [transLevel, setTransLevel] = useState(() => {
+    try {
+      const v = localStorage.getItem("npj.transparency");
+      if (v === "clean" || v === "standard" || v === "full") return v;
+      return localStorage.getItem("npj.previews") === "0" ? "clean" : "standard";
+    } catch (e) { return "standard"; }
+  });
+  const previews = transLevel !== "clean";
+  const transparency = transLevel === "full";
+  useEffect(() => {
+    try { localStorage.setItem("npj.transparency", transLevel); } catch (e) {}
+  }, [transLevel]);
   // Preview's "Refresh" bumps this. It re-keys every embed (forcing a brand-new
   // iframe element) and rides along as a throwaway cache-buster on the frame src,
   // so an embed that failed or got cached on its first load is fetched fresh —
@@ -592,15 +627,9 @@ function ArticleRead(props) {
   // Opening it dismisses the floating cards so nothing lingers behind the panel.
   const [stage, setStage] = useState(null);
   const openStage = useCallback((s) => { setStage(s); setGroundPop(null); setFnPop(null); setHover(null); }, []);
-  // Source & note previews — the margin cards that float up when you hover a claim
-  // or a footnote. On by default (that's the point of a grounded read), but a
-  // reader who wants nothing popping up can switch them off, and the choice sticks.
-  const [previews, setPreviews] = useState(() => {
-    try { return localStorage.getItem("npj.previews") !== "0"; } catch (e) { return true; }
-  });
+  // Dropping below Standard (to Clean) turns off the margin/sheet previews —
+  // dismiss anything currently floating so nothing lingers.
   useEffect(() => {
-    try { localStorage.setItem("npj.previews", previews ? "1" : "0"); } catch (e) {}
-    // turning them off dismisses anything currently floating
     if (!previews) { setHover(null); setFnPop(null); setGroundPop(null); setActiveSrc(null); }
   }, [previews]);
   const footnoteByKey = React.useMemo(() => {
@@ -1116,7 +1145,7 @@ function ArticleRead(props) {
           if (!imgs.length) return null;
           return <Carousel key={i} images={imgs} caption={b.caption} style={wideFig(26, 26)} />;
         }
-        if (b.type === "embed") return <EmbedFigure key={i + ":" + reloadTick} url={b.url} caption={b.caption} height={b.height} reload={reloadTick} />;
+        if (b.type === "embed") return <EmbedFigure key={i + ":" + reloadTick} url={b.url} caption={b.caption} height={b.height} reload={reloadTick} previews={previews} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
@@ -1260,16 +1289,7 @@ function ArticleRead(props) {
             <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
-          <button className="btn btn-sm" onClick={() => setPreviews(v => !v)} aria-pressed={previews}
-            title="Previews — hover a claim or footnote and its citation/note floats up in the margin. On by default; turn off for a clean read."
-            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: previews ? "var(--ink)" : "var(--card)", color: previews ? "var(--yellow)" : "var(--ink)" }}>
-            {previews ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} Previews
-          </button>
-          <button className="btn btn-sm" onClick={() => setTransparency(v => !v)} aria-pressed={transparency}
-            title="Transparency — colour each claim by how it's grounded: cited (⊤/⊨), the author's own (⊢/⊨/⊩), or needs a source (⊥)"
-            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
-            <I.swatches style={{ fontSize: 14 }} /> Transparency
-          </button>
+          <TransparencyControl level={transLevel} setLevel={setTransLevel} />
           {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
              with a fresh cache-buster (reloadTick) — so an embed that's in the draft
              but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
@@ -1283,7 +1303,7 @@ function ArticleRead(props) {
         <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
           {Main}
         </div>
-        {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
+        {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransLevel("standard")} />}
         {/* Grounding receipts on hover — the SAME citation card the public reader
            shows. Hover (or tap, on a phone) a claim and its source card floats
            up, so the author can audit the grounding in the preview exactly as a
@@ -1307,7 +1327,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg,
+      <ControlBar {...{ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
@@ -1346,7 +1366,7 @@ function ArticleRead(props) {
 
       <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
 
-      {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransparency(false)} />}
+      {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransLevel("standard")} />}
 
       <EntityRail open={entityOpen} onClose={() => { setEntityOpen(false); setActiveEntity(null); }}
         entityData={entityData} active={activeEntity} setActive={setActiveEntity} />
@@ -1431,8 +1451,77 @@ function GroundingLegend({ tally, onClose }) {
   );
 }
 
+/* ---- the transparency layer: one control, three escalating settings ----
+   PREVIEWS and TRANSPARENCY used to be two separate toggles and it was never
+   clear how they related. They're now a single control with three levels, so
+   there's one dimension to think in — "how much of NPJ's transparency layer do
+   I want to see". Each level maps to the reader's previews + grounding-lens
+   switches (see transLevel in ArticleRead). */
+const TRANS_LEVELS = [
+  { id: "clean",    label: "Clean",    desc: "Just the article. No inline previews or assertion highlights." },
+  { id: "standard", label: "Standard", desc: "Inline photo & social previews. The assertion lens stays hidden." },
+  { id: "full",     label: "Full",     desc: "Every assertion highlighted, with its sources & provenance." }
+];
+
+/* One toolbar button that names the current level (a pill) and drops down a
+   menu of the three settings — a radio dot, label and one-line description each.
+   Replaces the old pair of Transparency / Previews toggles. */
+function TransparencyControl({ level, setLevel }) {
+  const [open, setOpen] = useState(false);
+  const cur = TRANS_LEVELS.find(l => l.id === level) || TRANS_LEVELS[1];
+  const on = level !== "clean";
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+  return (
+    <div style={{ position: "relative" }}>
+      <button className="btn btn-sm" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}
+        title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance)."
+        style={{ display: "inline-flex", alignItems: "center", gap: 7,
+          background: on ? "var(--ink)" : "var(--card)", color: on ? "var(--yellow)" : "var(--ink)" }}>
+        <I.swatches style={{ fontSize: 14 }} /> Transparency
+        <span className="np-mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase",
+          padding: "2px 6px", border: "1.5px solid currentColor", borderRadius: 2, lineHeight: 1 }}>{cur.label}</span>
+        <I.caretDown style={{ fontSize: 11 }} />
+      </button>
+      {open && (
+        <React.Fragment>
+          <div onClick={() => setOpen(false)} aria-hidden="true" style={{ position: "fixed", inset: 0, zIndex: 1600 }} />
+          <div role="menu" aria-label="Transparency layer" className="fade-in"
+            style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 296, maxWidth: "calc(100vw - 32px)",
+              background: "var(--card)", border: "1.5px solid var(--ink)", boxShadow: "0 14px 36px rgba(8,7,5,.24)", zIndex: 1601, overflow: "hidden" }}>
+            <div className="np-eyebrow" style={{ padding: "10px 13px", borderBottom: "1.5px solid var(--ink)", color: "var(--ink-soft)" }}>Transparency layer</div>
+            {TRANS_LEVELS.map((l, i) => {
+              const sel = l.id === level;
+              return (
+                <button key={l.id} role="menuitemradio" aria-checked={sel}
+                  onClick={() => { setLevel(l.id); setOpen(false); }}
+                  style={{ display: "flex", gap: 11, alignItems: "flex-start", width: "100%", textAlign: "left",
+                    padding: "12px 13px", cursor: "pointer", border: 0,
+                    borderBottom: i < TRANS_LEVELS.length - 1 ? "1px solid var(--rule)" : 0,
+                    background: sel ? "color-mix(in srgb, var(--ink) 6%, transparent)" : "var(--card)" }}>
+                  <span aria-hidden="true" style={{ width: 13, height: 13, borderRadius: "50%", flex: "none", marginTop: 2,
+                    border: "1.5px solid var(--ink)", background: sel ? "var(--ink)" : "transparent",
+                    boxShadow: sel ? "inset 0 0 0 2px var(--card)" : "none" }} />
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ display: "block", fontFamily: "var(--mono)", fontWeight: 700, fontSize: 12, letterSpacing: ".06em", textTransform: "uppercase" }}>{l.label}</span>
+                    <span style={{ display: "block", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.42, color: "var(--ink-soft)", marginTop: 4 }}>{l.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </React.Fragment>
+      )}
+    </div>
+  );
+}
+
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -1469,19 +1558,7 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, previews, 
           <I.shield style={{ fontSize: 14 }} /> Auditability
         </button>
 
-        <button className="btn btn-sm" onClick={() => setTransparency(!transparency)} aria-pressed={transparency}
-          title="Transparency — colour every claim by how it's grounded: cited (⊤ grounded / ⊨ multiple sources), owned by the author (⊢ analysis / ⊨ account / ⊩ position), or still needs a source (⊥). Off: a clean read."
-          style={{ display: "inline-flex", alignItems: "center", gap: 7,
-            background: transparency ? "var(--ink)" : "var(--card)", color: transparency ? "var(--yellow)" : "var(--ink)" }}>
-          <I.swatches style={{ fontSize: 14 }} /> Transparency
-        </button>
-
-        <button className="btn btn-sm" onClick={() => setPreviews(!previews)} aria-pressed={previews}
-          title="Previews — hover a claim or a footnote and its citation or note floats up in the margin, beside the text. On by default; turn off for a clean read with nothing popping up."
-          style={{ display: "inline-flex", alignItems: "center", gap: 7,
-            background: previews ? "var(--ink)" : "var(--card)", color: previews ? "var(--yellow)" : "var(--ink)" }}>
-          {previews ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} Previews
-        </button>
+        <TransparencyControl level={transLevel} setLevel={setTransLevel} />
 
         <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
           background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
