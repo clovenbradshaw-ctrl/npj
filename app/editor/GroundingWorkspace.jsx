@@ -192,6 +192,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const [walk, setWalk] = useState(null);          // { cur, n } — the "cite everything" stepper
   const [modal, setModal] = useState(null);        // { sid } — the cite modal; its sid is the ARMED claim
   const [pending, setPending] = useState(null);    // { spans: [{ quote, loc }] } — staged, author-grabbed
+  const [srcStage, setSrcStage] = useState(null);  // { spans } — grabbed while READING a source (claim chosen after); the source-first inverse of the claim-first cite modal
+  const [claimQuery, setClaimQuery] = useState(""); // filter the claim picker the staged span attaches to
   const [armIdx, setArmIdx] = useState(0);
   const [srcQuery, setSrcQuery] = useState("");
   const [srcFindIdx, setSrcFindIdx] = useState(0);
@@ -223,10 +225,13 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   const blockers = counts.needs + counts.conflict;
 
   // refs mirror state so DOM-time handlers (Esc, walk advance) never act on stale layers
-  const layers = useRef({}); layers.current = { pending, modal, walk };
+  const layers = useRef({}); layers.current = { pending, modal, walk, view, srcStage };
 
   // keep selections valid as the draft and source list move underneath us
   useEffect(() => { if (panel === view) setPanel(defaultPanelFor(view)); }, [view]); // eslint-disable-line
+  // A span staged while reading a source is offsets into THAT source's text, so it
+  // can't follow you to another view — drop it on the way out of Sources.
+  useEffect(() => { if (view !== "sources" && srcStage) { setSrcStage(null); setClaimQuery(""); } }, [view]); // eslint-disable-line
 
   // Read a stored text file's words onto the record so the reader can show + cite
   // them — without this an uploaded .txt opens to a "paste the text" box even
@@ -310,7 +315,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     const onKey = (e) => {
       if (e.key !== "Escape") return;
       const L = layers.current;
-      if (L.pending && L.pending.spans && L.pending.spans.length) setPending(null);
+      if (L.srcStage && L.srcStage.spans && L.srcStage.spans.length) { setSrcStage(null); setClaimQuery(""); }
+      else if (L.pending && L.pending.spans && L.pending.spans.length) setPending(null);
       else if (L.modal) closeCite();
       else if (L.walk) setWalk(null);
     };
@@ -406,6 +412,30 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     hits.sort((a, b) => a.loc.start - b.loc.start);
     return hits;
   })();
+  // Score EVERY source against the armed claim — not just to auto-pick a default.
+  // The picker then leads with the documents most likely to back this claim
+  // (strongest word-overlap first) and badges how many likely passages each
+  // holds, so you choose the right SOURCE first instead of scanning a flat,
+  // order-of-appearance wall and then hunting for the words. Mechanical overlap
+  // (CiteyAssist, no model); memoised on the claim + each source's text length
+  // so seeding a source's text (or editing the claim) refreshes the ranking.
+  const srcSig = srcList.map(s => s.key + ":" + srcText(s.key).length).join("|");
+  const rankedSrc = useMemo(() => {
+    const list = srcList.map(({ key }) => {
+      const t = srcText(key);
+      let score = 0, nHits = 0;
+      if (t.trim() && window.CiteyAssist && armedRow) {
+        try {
+          const h = window.CiteyAssist.rankSpans(armedRow.text, t) || [];
+          nHits = h.filter(x => x.hit >= 2 || x.score >= 0.3).length;
+          score = h.length ? h[0].score : 0;
+        } catch (e) {}
+      }
+      return { key, score, nHits, hasText: !!t.trim() };
+    });
+    list.sort((a, b) => b.score - a.score);
+    return list;
+  }, [armedRow && armedRow.text, srcSig]); // eslint-disable-line
   const scrollReaderTo = (attr, j) => {
     setTimeout(() => {
       [srcRefMain, srcRefPanel, srcRefModal].forEach(ref => {
@@ -441,7 +471,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     clearTimeout(timers.current.query);
     timers.current.query = setTimeout(() => scrollReaderTo("data-find", 0), 250);
   };
-  const pickSource = (key) => { setSelSrc(key); setArmIdx(0); setPending(null); setSrcQuery(""); setSrcFindIdx(0); };
+  const pickSource = (key) => { setSelSrc(key); setArmIdx(0); setPending(null); setSrcStage(null); setClaimQuery(""); setSrcQuery(""); setSrcFindIdx(0); };
 
   // ---- source library housekeeping: rename + delete ----
   // Renaming a source also opens it in the reader below — you can SEE the document
@@ -488,56 +518,76 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
   // past any trimmed leading space so loc slices back to exactly the quote (the
   // cited-mark render and conflict checks rely on that).
   const readerRefs = [srcRefModal, srcRefPanel, srcRefMain];
-  const stageSelection = () => {
-    if (!layers.current.modal) return;
+  // Merge a freshly grabbed span into a staged set, skipping a duplicate / an
+  // overlap of one already grabbed; keeps the set in document order. Shared by the
+  // claim-first (modal → pending) and source-first (reader → srcStage) flows.
+  const addSpanTo = (prev, span) => {
+    const spans = (prev && prev.spans) ? prev.spans.slice() : [];
+    const dup = spans.some(x => (x.loc && span.loc) ? (x.loc.start < span.loc.end && span.loc.start < x.loc.end) : (x.quote === span.quote));
+    if (!dup) spans.push(span);
+    spans.sort((a, b) => (a.loc ? a.loc.start : 0) - (b.loc ? b.loc.start : 0));
+    return { spans };
+  };
+  // The live selection → a staged span (quote + char offsets into the source
+  // text), if it lands in a reader's citable body ([data-doctext]); a click, or a
+  // selection elsewhere, is a no-op. Offsets come off the untrimmed range, then
+  // step past any trimmed leading space so loc slices back to exactly the quote
+  // (the cited-mark render and conflict checks rely on that). Returns the matched
+  // reader ref so the caller can route it (modal vs the Sources stage).
+  const grabSelection = () => {
     const sel = window.getSelection();
-    if (!sel || !sel.rangeCount || sel.isCollapsed) return;
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
     const r = sel.getRangeAt(0);
-    let cont = null;
+    let cont = null, hitRef = null;
     for (const ref of readerRefs) {
       const outer = ref.current; if (!outer) continue;
       const dt = outer.querySelector("[data-doctext]") || outer;
-      if (dt.contains(r.commonAncestorContainer)) { cont = dt; break; }
+      if (dt.contains(r.commonAncestorContainer)) { cont = dt; hitRef = ref; break; }
     }
-    if (!cont) return;
+    if (!cont) return null;
     const raw = r.toString();
     const quote = raw.trim();
-    if (quote.length < 3) return;
+    if (quote.length < 3) return null;
     const lead = raw.length - raw.replace(/^\s+/, "").length;
     const pre = document.createRange();
     pre.setStart(cont, 0); pre.setEnd(r.startContainer, r.startOffset);
     const start = pre.toString().length + lead;
     sel.removeAllRanges();
-    setPending(p => {
-      const spans = (p && p.spans) ? p.spans.slice() : [];
-      const span = { quote, loc: { start, end: start + quote.length } };
-      if (!spans.some(x => x.loc.start < span.loc.end && span.loc.start < x.loc.end)) spans.push(span);
-      spans.sort((a, b) => a.loc.start - b.loc.start);
-      return { spans };
-    });
+    return { span: { quote, loc: { start, end: start + quote.length } }, ref: hitRef };
+  };
+  // Route a grabbed span: the cite modal stages it onto its armed claim (pending);
+  // otherwise, reading a source in the Sources view stages it for a claim picked
+  // afterwards (srcStage — the source-first inverse). Restricted to the main
+  // Sources reader so a stray selection in the side panel stays a no-op.
+  const stageSelection = () => {
+    const L = layers.current;
+    const g = grabSelection();
+    if (!g) return;
+    if (L.modal) setPending(p => addSpanTo(p, g.span));
+    else if (L.view === "sources" && g.ref === srcRefMain) setSrcStage(s => addSpanTo(s, g.span));
   };
   // Grabbing works wherever the drag ends: listen at the document so releasing
   // outside the small reader box still stages (a short snapshot's box is only a
   // few lines tall, so the drag overshoots it constantly). The handler no-ops
-  // unless the cite modal is armed and the selection lands in a reader, so it's
-  // safe to keep mounted for the whole workspace.
+  // unless a reader is in a grab mode and the selection lands in it, so it's safe
+  // to keep mounted for the whole workspace.
   useEffect(() => {
     const onUp = () => stageSelection();
     document.addEventListener("mouseup", onUp);
     return () => document.removeEventListener("mouseup", onUp);
   }, []); // eslint-disable-line
-  // PDF selection → a staged span. PDFs carry no flat-text offsets, so the span
-  // is quote-only (loc null); the verbatim words are what get cited.
+  // PDF / image selection → a staged span. These carry no flat-text offsets, so
+  // the span is quote-only (loc null); the verbatim words are what get cited.
   const stagePdfQuote = (quote) => {
     if (!modal) return;
     const q = String(quote || "").replace(/\s+/g, " ").trim();
     if (q.length < 3) return;
-    setPending(p => {
-      const spans = (p && p.spans) ? p.spans.slice() : [];
-      if (spans.some(s => s.quote === q)) return { spans };
-      spans.push({ quote: q, loc: null });
-      return { spans };
-    });
+    setPending(p => addSpanTo(p, { quote: q, loc: null }));
+  };
+  const stageSrcPdfQuote = (quote) => {
+    const q = String(quote || "").replace(/\s+/g, " ").trim();
+    if (q.length < 3) return;
+    setSrcStage(s => addSpanTo(s, { quote: q, loc: null }));
   };
   const confirmPin = () => {
     const p = pending, m = modal;
@@ -549,9 +599,24 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     setModal(null); setPending(null); setSelSid(m.sid);
     afterResolve(m.sid); bump();
   };
+  // The source-first commit: a span grabbed while reading a source, bound to the
+  // claim chosen afterwards. Same mint as confirmPin (one record, the same DOM +
+  // autosave), just with the order inverted — source first, claim second.
+  const confirmSrcPin = (claimRow) => {
+    const s = layers.current.srcStage;
+    if (!s || !s.spans || !s.spans.length || !claimRow) return;
+    const fresh = (api.segment() || []).find(r => r.sid === claimRow.sid) || claimRow;
+    if (!fresh) return;
+    const quote = s.spans.map(x => x.quote).join(" … ");
+    if (!api.groundRow(fresh, selSrc, quote, s.spans[0].loc, s.spans)) return;
+    setSrcStage(null); setClaimQuery(""); setSelSid(fresh.sid);
+    say("⊤ Grounded “" + clip(fresh.text, 46) + "” in this source.");
+    afterResolve(fresh.sid); bump();
+  };
 
   // ---- shared bits ----
   const pendSpans = (pending && pending.spans) || [];
+  const srcStageSpans = (srcStage && srcStage.spans) || [];
   const eyebrow = { fontFamily: "var(--mono)", fontSize: 9.5, letterSpacing: ".08em", textTransform: "uppercase", color: NR.muted, fontWeight: 600 };
   const chipBtn = (extra) => Object.assign({ border: "1px solid " + NR.line, background: "transparent", color: NR.text, cursor: "pointer", fontFamily: "var(--cond)", fontSize: 12.5, padding: "3px 9px" }, extra || {});
   const Pill = ({ st }) => {
@@ -725,10 +790,17 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
 
   // ---- the source reader: the document carries its own identity ----
   // Pending spans (staged) > search finds > scent hits / citation marks.
-  const readerBody = (refObj, compact) => {
+  const readerBody = (refObj, compact, srcGrab) => {
     const rec = srcRec(selSrc);
     const t = srcText(selSrc);
     const armed = !!modal;
+    // The reader is "grabbing" when the modal arms a claim (claim-first) OR when
+    // the Sources view invites a source-first grab. Either way selecting words
+    // stages a span; the modal stages onto its claim, the Sources view stages for
+    // a claim picked after. stageSpans is whichever set is being built.
+    const grabbing = armed || srcGrab;
+    const stageSpans = armed ? pendSpans : (srcGrab ? srcStageSpans : []);
+    const onGrabFile = armed ? stagePdfQuote : srcGrab ? stageSrcPdfQuote : null;
     // Where this source actually lives — so a web page is reachable from the reader
     // (open it / its snapshot in a new tab) instead of being a dead title.
     const liveUrl = rec.original_url && /^https?:/i.test(rec.original_url) ? rec.original_url : "";
@@ -763,7 +835,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       <div style={{ padding: compact ? "9px 11px 1px" : "11px 14px 2px", background: "#f6f1e4" }}>
         {/* zoomable + grabbable: drag a box on the scan (Area mode) to OCR the
             exact words and stage them — the recognized text below is the fallback */}
-        <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 260 : 440} frameless hideOcr onSelectText={armed ? stagePdfQuote : null} />
+        <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 260 : 440} frameless hideOcr onSelectText={onGrabFile} />
       </div>
     ) : null;
     // A PDF is shown as the REAL document — rendered pages with a selectable text
@@ -774,7 +846,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         <div ref={refObj} className="np-scroll" style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, maxHeight: compact ? 380 : 580, overflowY: "auto" }}>
           {letterhead}
           <div style={{ padding: "8px 8px 10px" }}>
-            <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 320 : 500} onSelectText={armed ? stagePdfQuote : null} />
+            <window.SourceViewer srcKey={selSrc} rec={rec} height={compact ? 320 : 500} onSelectText={onGrabFile} />
           </div>
         </div>
       );
@@ -808,10 +880,11 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     }
     let items = [];
     if (armed) {
-      const hits = armHits.filter(h => !pendSpans.some(p => h.loc.start < p.loc.end && p.loc.start < h.loc.end));
+      // claim-first: scent the armed claim's likely passages (the staged spans win over them)
+      const hits = armHits.filter(h => !stageSpans.some(p => p.loc && h.loc.start < p.loc.end && p.loc.start < h.loc.end));
       items = hits.map(h => ({ start: h.loc.start, end: h.loc.end, type: "hit", j: armHits.indexOf(h) }));
-      pendSpans.forEach((p, pi) => items.push({ start: p.loc.start, end: p.loc.end, type: "pending", pi }));
     } else {
+      // reading (or source-first grabbing): show what's already pinned from this source
       allC.filter(c => c.srcKey === selSrc).forEach(c => {
         // pinned offsets when they still slice clean (source text is append-only),
         // else find the words; a quote the text doesn't carry simply isn't marked
@@ -821,6 +894,10 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         sp.forEach((s, si) => items.push({ start: s.loc.start, end: s.loc.end, type: "cite", id: c.id, si, nParts: sp.length }));
       });
     }
+    // the staged spans (claim-first pending OR source-first srcStage) always win
+    // their glyph over the scent / citation shading beneath them
+    stageSpans.forEach((p, pi) => { if (p.loc) items.push({ start: p.loc.start, end: p.loc.end, type: "pending", pi }); });
+    items = items.filter(it => it.type === "pending" || !stageSpans.some(p => p.loc && p.loc.start < it.end && it.start < p.loc.end));
     // search finds win over scent/citation shading, but never over a staged span
     const finds = findHits
       .map((l, fi) => ({ start: l.start, end: l.end, type: "find", fi }))
@@ -835,7 +912,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         kids.push(
           <mark key={"pend" + it.pi} style={{ background: "var(--yellow)", color: "#16140d", padding: "0 1px", outline: "1.5px solid #16140d" }}>
             {t.slice(it.start, it.end)}
-            {pendSpans.length > 1 && <sup style={{ fontFamily: "var(--mono)", fontSize: 8, fontWeight: 700, marginLeft: 1 }}>{"P" + (it.pi + 1)}</sup>}
+            {stageSpans.length > 1 && <sup style={{ fontFamily: "var(--mono)", fontSize: 8, fontWeight: 700, marginLeft: 1 }}>{"P" + (it.pi + 1)}</sup>}
           </mark>);
       } else if (it.type === "hit") {
         const active = it.j === armIdx;
@@ -865,7 +942,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     kids.push(t.slice(pos));
     return (
       <div ref={refObj} className="np-scroll"
-        style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, fontFamily: "var(--serif)", fontSize: compact ? 13 : 14.5, lineHeight: 1.62, userSelect: "text", cursor: modal ? "text" : "default", maxHeight: compact ? 300 : 440, overflowY: "auto", boxShadow: modal ? "inset 0 0 0 2px var(--yellow)" : "none" }}>
+        style={{ background: "#f6f1e4", color: "#16140d", border: "1px solid " + NR.line, fontFamily: "var(--serif)", fontSize: compact ? 13 : 14.5, lineHeight: 1.62, userSelect: "text", cursor: grabbing ? "text" : "default", maxHeight: compact ? 300 : 440, overflowY: "auto", boxShadow: grabbing ? "inset 0 0 0 2px var(--yellow)" : "none" }}>
         {letterhead}
         {imageBanner}
         <div data-doctext="1" style={{ whiteSpace: "pre-wrap", padding: compact ? "10px 12px 12px" : "12px 16px 16px" }}>{kids}</div>
@@ -961,6 +1038,52 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       )}
     </div>
   );
+
+  // The cite modal's source picker, ranked. Same chips as srcTabs, but ordered by
+  // how strongly each source backs the ARMED claim and badged with the count of
+  // likely passages — pick the right document first, then grab the words. Sources
+  // with no obvious match sink below a divider (still one click away); sources with
+  // no text yet are dimmed. Falls back to plain draft order when nothing scores.
+  const srcPalette = (() => {
+    const ranked = rankedSrc;
+    const likely = ranked.filter(s => s.nHits > 0);
+    const rest = ranked.filter(s => s.nHits === 0);
+    const srcChip = ({ key, nHits, hasText }) => {
+      const on = selSrc === key, hot = nHits > 0;
+      return (
+        <button key={key} onClick={() => pickSource(key)}
+          title={hot ? nHits + " likely passage" + (nHits === 1 ? "" : "s") + " for this claim — open it and grab the words"
+            : hasText ? "No obvious match — open it to read and check" : "No text loaded yet — open it to pull the text"}
+          style={chipBtn({ background: on ? "var(--yellow)" : "transparent", color: on ? "var(--ink)" : (hasText ? NR.text : NR.muted), borderColor: on ? "var(--yellow)" : (hot ? "rgba(31,138,85,.55)" : NR.line), fontWeight: (on || hot) ? 700 : 500, display: "inline-flex", alignItems: "center", gap: 5, opacity: hasText ? 1 : 0.7 })}>
+          {hot && !on && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1f8a55", flexShrink: 0 }} />}
+          {clip(srcShort(key), 26)}
+          {hot && <sup className="np-mono" style={{ fontSize: 8.5, fontWeight: 700, color: on ? "var(--ink)" : "#1f8a55", marginLeft: 1 }}>{nHits}</sup>}
+        </button>
+      );
+    };
+    return (
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <span className="np-mono" style={{ fontSize: 9, letterSpacing: ".06em", textTransform: "uppercase", color: NR.muted, fontWeight: 600 }}>
+            {srcList.length + " source" + (srcList.length === 1 ? "" : "s")}
+          </span>
+          {likely.length > 0 && <span className="np-mono" style={{ fontSize: 9, color: "#1f8a55", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ width: 6, height: 6, borderRadius: "50%", background: "#1f8a55" }} /> sorted by likely support — strongest first</span>}
+          <span style={{ flex: 1 }} />
+          {canIngest && (
+            <button onClick={() => setAddSrcOpen(o => !o)} title="Add a new source — a URL or a file — without leaving this claim"
+              style={chipBtn({ border: "1px dashed " + (addSrcOpen ? NR.text : NR.line), color: addSrcOpen ? NR.text : NR.soft, background: addSrcOpen ? NR.field : "transparent", fontWeight: 700 })}>
+              {addSrcOpen ? "× Close" : "+ Add source"}
+            </button>
+          )}
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+          {likely.map(srcChip)}
+          {likely.length > 0 && rest.length > 0 && <span style={{ width: 1, alignSelf: "stretch", background: NR.line, margin: "0 3px" }} />}
+          {rest.map(srcChip)}
+        </div>
+      </div>
+    );
+  })();
 
   const hitNav = armHits.length > 0 && (
     <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 7 }}>
@@ -1286,8 +1409,14 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
         </div>
         {srcList.length > 0 && selSrc && (
           <div>
+            <div className="np-mono" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5, color: srcStageSpans.length ? "#1f8a55" : NR.soft, lineHeight: 1.5, marginBottom: 7 }}>
+              <span style={{ fontFamily: "var(--mono)", fontSize: 12 }}>✦</span>
+              {srcStageSpans.length
+                ? "Span grabbed — pick the claim it backs below, or select more words to add a part."
+                : "Source-first: select the exact words that back a claim, then choose which claim they ground."}
+            </div>
             {searchRow()}
-            {readerBody(srcRefMain, false)}
+            {readerBody(srcRefMain, false, true)}
             {(() => {
               const r = api.sourceRec(selSrc), SVa = window.NpjSourceView;
               return (SVa && SVa.hasFile && SVa.hasFile(r) && window.SourceAdapter)
@@ -1594,8 +1723,8 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
                 {addSourceForm}
               </React.Fragment>)
             : (<React.Fragment>
-                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Open the source and <strong style={{ color: NR.text }}>select the exact words</strong> that support the claim — that becomes the citation. Support in two places? Grab them one after another.</div>
-                {srcTabs}
+                <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, lineHeight: 1.5, marginBottom: 8 }}>Pick the source that backs this — <strong style={{ color: NR.text }}>likely matches lead</strong> — then <strong style={{ color: NR.text }}>select the exact words</strong> in it. That selection becomes the citation. Support in two places? Grab them one after another.</div>
+                {srcPalette}
                 {addSrcOpen && addSourceForm}
                 {searchRow("Search this source for the supporting words…")}
                 {readerBody(srcRefModal, false)}
@@ -1690,6 +1819,73 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
     </div>
   );
 
+  // ============ source-first claim picker (the inverse of the cite modal) ============
+  // A span grabbed while reading a source floats this non-blocking bar: it lists
+  // the claims the span could ground — the ones still needing a source first,
+  // ranked by mechanical overlap with the grabbed words — and one click mints the
+  // citation onto the chosen claim. Searching reaches every claim. You keep
+  // selecting in the reader behind it (grab more parts), so the source stays the
+  // place you work; the claim is just the destination you pick at the end.
+  const sourceGrabBar = (view === "sources" && srcStageSpans.length > 0) ? (() => {
+    const stagedQuote = srcStageSpans.map(s => s.quote).join(" ");
+    const q = claimQuery.trim().toLowerCase();
+    const base = q
+      ? enriched.filter(e => e.row.text.toLowerCase().indexOf(q) >= 0)
+      : enriched.filter(e => e.st.key === "needs" || e.st.key === "conflict");
+    const matches = base
+      .map(e => ({ e, score: matchScore(e.row.text, stagedQuote) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 10);
+    return (
+      <div className="fade-in" style={{ position: "fixed", left: 0, right: 0, bottom: 0, zIndex: 5700, background: NR.panel, borderTop: "2px solid var(--yellow)", boxShadow: "0 -10px 30px rgba(0,0,0,.4)" }}>
+        <div className="np-scroll" style={{ maxWidth: 940, margin: "0 auto", padding: "11px 16px 14px", maxHeight: "48vh", overflowY: "auto" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+            <span style={Object.assign({}, eyebrow, { color: "#1f8a55" })}>⊕ Grabbed from {clip(srcShort(selSrc), 32)}</span>
+            <span style={{ flex: 1 }} />
+            <button onClick={() => { setSrcStage(null); setClaimQuery(""); }} style={chipBtn()}>Clear · Esc</button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 11 }}>
+            {srcStageSpans.map((p, i) => (
+              <span key={"s" + i} className="np-mono" style={{ fontSize: 10.5, color: NR.text, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {(srcStageSpans.length > 1 ? "Part " + (i + 1) + " · " : "") + "“" + clip(p.quote, 92) + "”"}
+                </span>
+                <button onClick={() => setSrcStage(x => { const sp = ((x && x.spans) || []).filter((_, j) => j !== i); return sp.length ? { spans: sp } : null; })}
+                  title="Remove this part" style={{ border: 0, background: "none", color: NR.muted, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 0 }}>×</button>
+              </span>
+            ))}
+            <span className="np-mono" style={{ fontSize: 9, color: NR.muted }}>Support in two places? Select another span in the source to add it as a part.</span>
+          </div>
+          <div style={Object.assign({}, eyebrow, { marginBottom: 6 })}>Ground which claim?</div>
+          <input value={claimQuery} onChange={e => setClaimQuery(e.target.value)}
+            placeholder={"Search all " + enriched.length + " claims" + (blockers ? " — defaults to the " + blockers + " that need grounding" : "") + "…"} className="np-mono"
+            style={{ width: "100%", boxSizing: "border-box", border: "1px solid " + NR.line, background: NR.field, color: NR.text, fontSize: 11.5, padding: "6px 8px", outline: "none", marginBottom: 8 }} />
+          {matches.length === 0
+            ? <div className="np-mono" style={{ fontSize: 10, color: NR.muted, lineHeight: 1.5 }}>{q ? "No claim matches that search." : "Every claim is grounded or owned — search above to attach this to one anyway."}</div>
+            : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {matches.map(({ e, score }) => {
+                  const strong = score >= 0.3;
+                  return (
+                    <button key={e.row.sid} onClick={() => confirmSrcPin(e.row)} title="Mint the grabbed span as this claim's citation"
+                      style={{ textAlign: "left", border: "1px solid " + (strong ? "rgba(31,138,85,.5)" : NR.line), background: NR.field, color: NR.text, borderRadius: 7, padding: "7px 9px", cursor: "pointer", display: "flex", gap: 8, alignItems: "center" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: DOT[e.st.key] || NR.line, flexShrink: 0 }} />
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span className="np-mono" style={{ display: "block", fontSize: 8.5, color: strong ? "#1f8a55" : NR.muted, marginBottom: 1, letterSpacing: ".04em" }}>
+                          {"⊕ GROUND · " + pillFor(e.st).label.toUpperCase() + (strong ? " · STRONG MATCH" : "")}
+                        </span>
+                        <span style={{ fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.4 }}>{clip(e.row.text, 120)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+        </div>
+      </div>
+    );
+  })() : null;
+
   // ============ shell ============
   const panelEl = panel === "prose" ? prosePanel : panel === "grounding" ? groundingPanel : panel === "citations" ? citationsPanel : sourcesPanel;
   return (
@@ -1718,6 +1914,7 @@ function GroundingWorkspace({ api, NR, view, setView, isMobile }) {
       </div>
       {walkBar}
       {walkStage}
+      {sourceGrabBar}
       {citeModal}
       {exporting && window.FactCheckExport && (
         <window.FactCheckExport payload={buildPayload()} onClose={() => setExporting(false)} />
