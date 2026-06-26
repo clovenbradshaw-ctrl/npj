@@ -386,9 +386,44 @@ function App() {
     const A = window.NPJ.ARTICLE; if (!A) return;
     window.NpjFeedback.reply({ slug: A.slug, ref: id, text, author: me, token: fbToken() }).then(reloadFeedback);
   };
+  // a contribution waiting on an account: stashed when a signed-out reader submits,
+  // released once they finish the ContributeOnboard flow (or post locally).
+  const [pendingContribution, setPendingContribution] = useState(null);
+  const submitContribution = (draft, author, token) => {
+    const A = window.NPJ.ARTICLE; if (!A) return Promise.resolve();
+    const owners = [].concat(A.authors || [], A.assignees || []).filter(Boolean);
+    const shareUrl = location.origin + location.pathname + "#article;read=" + A.slug;
+    return window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed,
+      rationale: draft.rationale, visibility: draft.visibility, forkBody: draft.forkBody, author, base_sha: A.base_sha, token,
+      authors: owners, shareUrl }).then(reloadFeedback);
+  };
   const onAddSuggestion = (draft) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: me, base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
+    // Signing the record requires a real, verified identity. Lead a signed-out
+    // reader through a fast account set-up first; their draft rides along and is
+    // submitted the moment they're in — they never leave the article.
+    if (!session) { setPendingContribution(draft); return; }
+    submitContribution(draft, me, fbToken());
+  };
+  // adopt a session WITHOUT navigating away (unlike signIn, which lands on Docs) —
+  // the reader stays on the article and watches their contribution appear.
+  const adoptSessionForContribution = (sess) => {
+    if (!sess || !sess.user_id) return;
+    setSession(sess);
+    if (!window.NPJ.PEOPLE[sess.user_id]) {
+      const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(sess.user_id) : "#b23a26";
+      window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: sess.admin ? "Admin" : "Contributor", trust: "editor", color: col };
+    }
+    const draft = pendingContribution;
+    setPendingContribution(null);
+    setShowSugg(true);
+    if (draft) submitContribution(draft, sess.user_id, (window.MatrixAuth.token && window.MatrixAuth.token()) || null);
+  };
+  // "post without an account": keep the draft as a local-only proposal (off the
+  // public record), the same best-effort path a signed-out propose has always had.
+  const postContributionLocally = () => {
+    const draft = pendingContribution; setPendingContribution(null);
+    if (draft) { setShowSugg(true); submitContribution(draft, me, null); }
   };
   // Merge a suggestion: apply its words to the body + commit a REC, then fold the
   // updated article in place (same path as the Edit overlay). Returns the merge
@@ -551,7 +586,7 @@ function App() {
           filter={filter} setFilter={setFilter}
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
-          me={me} onHome={goHome} onNewsroom={goNewsroom}
+          me={me} signedIn={!!session} onHome={goHome} onNewsroom={goNewsroom}
           onEdited={(a) => {
             window.NPJ.ARTICLE = a; setArticleRev(r => r + 1);
             // reflect the edit (incl. an unpublish/republish) on the front page
@@ -595,6 +630,14 @@ function App() {
       </TweaksPanel>
 
       <AdminEditor />
+
+      {pendingContribution && window.ContributeOnboard && (
+        <window.ContributeOnboard
+          draft={pendingContribution}
+          onAuthed={adoptSessionForContribution}
+          onSkip={postContributionLocally}
+          onClose={() => setPendingContribution(null)} />
+      )}
     </window.LayoutCtx.Provider>
   );
 }

@@ -172,6 +172,13 @@
         if (!t) return;
         if (o.act === "vote") t.votes += (o.dir || 1);
         else if (o.act === "reply") t.replies.push({ author: ev.actor || o.author || "@anon", text: o.text || "", ts: String(ev.ts || o.ts || "").slice(0, 10) });
+        else if (o.act === "branch") {
+          // the async follow-up that attaches the merge-request room + the
+          // archive.org snapshot once they're confirmed (see attachBranch)
+          if (o.roomId) t.roomId = o.roomId;
+          if (o.archiveUrl) t.archiveUrl = o.archiveUrl;
+          if (o.visibility) t.visibility = o.visibility;
+        }
         else if (o.act === "resolve") {
           t.status = (o.outcome === "accepted" || o.outcome === "merged") ? "accepted" : (o.outcome === "review" ? "review" : "rejected");
           t.resolution = o.note || "";
@@ -186,12 +193,28 @@
       by[o.id] = {
         id: o.id,
         kind: o.kind,
+        // "span" (pinned to selected words) or "article" (a contribution on the
+        // whole piece — read like a PR description, resolved by an editor, never
+        // auto-merged since it isn't bound to a quote)
+        scope: (o.anchor && o.anchor.scope) || "span",
         claimId: (o.anchor && o.anchor.claimId) || null,
         anchor: o.anchor || null,
         proposed: o.proposed || "",
         rationale: o.rationale || "",
         author: ev.actor || o.author || "@anon",
         trust: o.trust || "open",
+        // a contribution is a BRANCH: a fork of these words. visibility gates who
+        // may see/toggle it ("public" → everyone; "private" → the contributor +
+        // the article's authors only). roomId is its merge-request discussion;
+        // archiveUrl is its best-effort archive.org snapshot. The last two are
+        // filled in by the async "branch" follow-up after the proposal lands.
+        visibility: o.visibility === "private" ? "private" : "public",
+        roomId: o.roomId || null,
+        archiveUrl: o.archiveUrl || null,
+        // a whole-article FORK carries its edited copy of the body (text-level
+        // edits to existing blocks) — what the reader paints when the fork is
+        // toggled on, and what a merge commits as the new body
+        forkBody: Array.isArray(o.forkBody) ? o.forkBody : null,
         base_sha: o.base_sha || "",
         ts: String(ev.ts || o.ts || "").slice(0, 10),
         status: "proposed",
@@ -237,15 +260,81 @@
       .catch(function () { return { committed: false }; });
   }
 
-  // Propose a span change (kind:"suggestion") or leave a span comment ("comment").
+  // Propose a span change (kind:"suggestion") or leave a span comment ("comment")
+  // — i.e. open a BRANCH. visibility ("public"|"private") is the submitter's
+  // choice and rides the proposal itself (it gates who can see the branch).
+  // After it lands we asynchronously open the merge-request room and snapshot
+  // the branch to archive.org, attaching both via a "branch" follow-up event.
   function propose(p) {
     var id = newId("fb");
     var operand = {
       id: id, kind: p.kind || "suggestion", anchor: p.anchor || null,
       proposed: p.kind === "comment" ? "" : (p.proposed || ""), rationale: p.rationale || "",
-      base_sha: p.base_sha || "", author: p.author || null, trust: p.trust || "open"
+      base_sha: p.base_sha || "", author: p.author || null, trust: p.trust || "open",
+      visibility: p.visibility === "private" ? "private" : "public"
     };
-    return commitEva(p.slug, operand, p.author, p.token, "feedback: " + p.slug).then(function (r) { return { ok: true, id: id, committed: r.committed }; });
+    if (Array.isArray(p.forkBody) && p.forkBody.length) operand.forkBody = p.forkBody;
+    return commitEva(p.slug, operand, p.author, p.token, "feedback: " + p.slug).then(function (r) {
+      // best-effort, never blocks the proposal: open the MR room + archive the branch
+      try { attachBranch({ slug: p.slug, id: id, operand: operand, author: p.author, token: p.token, authors: p.authors || [], shareUrl: p.shareUrl || null }); } catch (e) {}
+      return { ok: true, id: id, committed: r.committed };
+    });
+  }
+
+  /* ---------------- a branch's merge-request room + archive.org snapshot ----------------
+     Both are enhancements layered on top of the durable EVA record (which already
+     holds the branch's words), so neither blocks proposing and a failure of either
+     just leaves that field null. The contributor's own account opens the room and
+     invites the article's authors; the snapshot rides anonymous Save Page Now. The
+     results are written back as a "branch" follow-up EVA so they're on the record
+     and every reader folds them in. */
+  function attachBranch(p) {
+    var token = p.token;
+    var jobs = [];
+    // 1) the merge-request discussion room (needs a verified session + invitees)
+    if (token && root.MatrixAuth && root.MatrixAuth.createMergeRequestRoom) {
+      var label = (p.operand && p.operand.scope === "article") ? "whole article" : "a span";
+      jobs.push(
+        root.MatrixAuth.createMergeRequestRoom({
+          slug: p.slug, title: "Merge request · " + label + " · " + p.slug,
+          invite: p.authors || [], visibility: p.operand && p.operand.visibility
+        }).then(function (r) { return { roomId: r && r.roomId }; }).catch(function () { return {}; })
+      );
+    } else { jobs.push(Promise.resolve({})); }
+    // 2) the archive.org snapshot of the piece this branch forks from (best-effort;
+    //    the branch's own words are already on the permanent EO record)
+    if (p.shareUrl && root.NpjArchiveCDN && root.NpjArchiveCDN.ensureSnapshot) {
+      jobs.push(root.NpjArchiveCDN.ensureSnapshot(p.shareUrl).then(function (u) { return { archiveUrl: u || null }; }).catch(function () { return {}; }));
+    } else { jobs.push(Promise.resolve({})); }
+
+    return Promise.all(jobs).then(function (res) {
+      var roomId = res[0] && res[0].roomId, archiveUrl = res[1] && res[1].archiveUrl;
+      if (!roomId && !archiveUrl) return;
+      return commitEva(p.slug, { id: newId("fbb"), ref: p.id, act: "branch", roomId: roomId || null, archiveUrl: archiveUrl || null, author: p.author || null }, p.author, token, "branch: " + p.slug);
+    }).catch(function () {});
+  }
+
+  /* ---------------- branch visibility + preview ----------------
+     canSee: a public branch is visible to everyone; a private one only to its
+     author and the article's authors/assignees. previewBranch returns the body
+     with the branch's words applied (the fork rendered) — what the reader paints
+     when a branch is toggled ON before any merge. Null when it can't apply
+     cleanly (a comment, a whole-article proposal, or a moved base). */
+  function isOwnerView(viewer, owners) {
+    if (!viewer) return false;
+    return (owners || []).some(function (o) { return o && viewer && String(o).toLowerCase() === String(viewer).toLowerCase(); });
+  }
+  function canSee(s, viewer, owners) {
+    if (!s) return false;
+    if (s.visibility !== "private") return true;
+    if (viewer && s.author && String(viewer).toLowerCase() === String(s.author).toLowerCase()) return true;
+    return isOwnerView(viewer, owners);
+  }
+  function previewBranch(body, s) {
+    if (!s) return null;
+    if (s.scope === "article") return (s.forkBody && s.forkBody.length) ? s.forkBody : null; // the fork's edited copy
+    if (s.kind === "comment") return null;
+    return applyToBody(body, s); // null on conflict — never a wrong paint
   }
   // Toggle this browser's 👍 on a proposal; returns the new on/off state.
   function vote(p) {
@@ -302,7 +391,11 @@
   function merge(p) {
     var s = p.suggestion, A = p.article;
     if (s.kind === "comment") return Promise.resolve({ ok: false, comment: true });
-    var body = applyToBody(A.body, s);
+    // a whole-article fork commits its edited copy wholesale; a span branch
+    // applies its words to the live body (a conflict if the base has moved)
+    var body = (s.scope === "article")
+      ? ((s.forkBody && s.forkBody.length) ? JSON.parse(JSON.stringify(s.forkBody)) : null)
+      : applyToBody(A.body, s);
     if (!body) return Promise.resolve({ ok: false, conflict: true });
     var note = "Merged a reader suggestion" + (s.author ? " from " + s.author : "") + (s.rationale ? " — " + s.rationale : "");
     return root.NpjArticles.appendEdit({ slug: p.slug, operand: { body: body }, actor: p.actor, note: note, token: p.token })
@@ -319,6 +412,7 @@
     makeAnchor: makeAnchor, anchorFromClaim: anchorFromClaim, locate: locate,
     paintAnchors: paintAnchors, clearAnchors: clearAnchors, flash: flash, supportsHighlight: supportsHL,
     load: load, propose: propose, vote: vote, reply: reply, resolve: resolve,
-    applyToBody: applyToBody, merge: merge
+    applyToBody: applyToBody, merge: merge,
+    canSee: canSee, previewBranch: previewBranch
   };
 })(typeof window !== "undefined" ? window : this);
