@@ -116,13 +116,20 @@ a { color: inherit; }
   box-sizing: border-box;
   width: 1.2em;
   height: 1.2em;
-  margin: 0.03em 0.22em 0.03em 0;
+  margin: 0.03em 0.24em 0.03em 0;
   font-family: var(--serif);
   font-weight: 600;
   font-size: 3.7em;
   line-height: 1;
   background: var(--yellow);
   color: var(--ink);
+}
+/* A single capital centers high in its line box — the empty descender space
+   rides below the baseline — so nudge the glyph down to sit optically centered
+   (em-relative, so it holds at any size). */
+.np-dropcap-box > span {
+  display: block;
+  transform: translateY(0.08em);
 }
 @media (max-width: 560px) {
   /* a touch smaller so the block never dominates a narrow measure */

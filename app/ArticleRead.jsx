@@ -1124,7 +1124,7 @@ function ArticleRead(props) {
           const [cap, rest] = splitLede(b.tokens);
           if (cap) return (
             <p key={i} style={{ fontSize: 18.5, lineHeight: 1.62, margin: "0 0 18px", textWrap: "pretty" }}>
-              <span className="np-dropcap-box">{cap}</span>{renderTokens(rest)}
+              <span className="np-dropcap-box"><span>{cap}</span></span>{renderTokens(rest)}
             </p>
           );
         }
