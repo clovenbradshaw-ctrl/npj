@@ -761,15 +761,22 @@ a { color: inherit; }
 /* a sentence that is grounded another way but also carries context links
    (prior coverage) — a faint trailing ⊪ marks "set in context, too" */
 .md-preview .claim-src[data-context]:not([data-stance]):not(.needs-quote)::after { content: "⊪"; font-size: 9px; color: #2e8b86; vertical-align: super; margin-left: 1px; opacity: .8; }
+/* Inline citation number chips are NEVER shown in the editor — a cited claim is
+   marked by its highlight alone, not a superscript number. (Footnote markers,
+   .md-cite[data-fn], are a separate apparatus and stay.) The span itself remains
+   clickable to open/pin its source; only the number is suppressed. */
+.md-preview .md-cite:not([data-fn]) { display: none !important; }
 /* clean-read toggle (the toolbar's Citations eye): strip every citation overlay
    so the draft reads like a finished page — the claim tints/underlines, the
-   stance + context glyphs, the inline citation AND footnote marker chips, and
-   the whole Footnotes apparatus at the foot of the page. Nothing is deleted:
-   every span, source, marker and note stays in the DOM and is still renumbered
-   in the background — clean-read only suppresses the rendering, so toggling it
-   back shows everything again, untouched. */
-.md-preview.nr-no-cites .claim-src { background: transparent; border-bottom-color: transparent; cursor: text; }
-.md-preview.nr-no-cites .claim-src::after { display: none; }
+   stance + context glyphs, the footnote marker chips, and the whole Footnotes
+   apparatus at the foot of the page. Nothing is deleted: every span, source,
+   marker and note stays in the DOM and is still renumbered in the background —
+   clean-read only suppresses the rendering, so toggling it back shows everything
+   again, untouched. !important is needed because the light-mode (.nr-light) and
+   stance/context highlight rules out-specify this one — without it, turning
+   Citations off would clear the numbers but leave the highlights on paper. */
+.md-preview.nr-no-cites .claim-src { background: transparent !important; border-bottom-color: transparent !important; cursor: text; }
+.md-preview.nr-no-cites .claim-src::after { display: none !important; }
 .md-preview.nr-no-cites .md-cite { display: none; }
 .md-preview.nr-no-cites ol.nr-fnotes { display: none; }
 /* "armed" — a source is picked and waiting for you to select the words it
