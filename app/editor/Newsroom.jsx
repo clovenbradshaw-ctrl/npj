@@ -3585,11 +3585,17 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // archived" counts exactly the sources that actually ship.
     const usedSources = (sources || []).filter(s => usedKeys.indexOf(s.key) >= 0);
     const archived = usedSources.filter(s => s.archived || ((window.NPJ.SOURCES[s.key] || {}).archive_url)).length;
-    // images still on the media store get moved onto archive.org at publish
-    const onStore = Array.from(root.querySelectorAll("figure image-slot")).filter(slot => {
-      const s = slot.getAttribute("src");
-      return s && window.NpjMedia && window.NpjMedia.isStoreUrl(s);
-    }).length;
+    // images still on the media store get moved onto archive.org at publish — but
+    // ONLY the ones that still owe an upload. A slot the author already pre-archived
+    // carries its durable archive.org copy in data-alt; at publish htmlToBlocks
+    // promotes that to the canonical src and freezeArticleMedia skips it, so it is
+    // never re-uploaded. Count with the SAME predicate (slotNeedsArchive) the freeze
+    // uses, so the gate never warns "moving N images" for photos already archived.
+    const onStore = Array.from(root.querySelectorAll("figure image-slot")).filter(slot =>
+      window.NpjMedia && window.NpjMedia.slotNeedsArchive
+        ? window.NpjMedia.slotNeedsArchive(slot)
+        : (slot.getAttribute("src") && window.NpjMedia && window.NpjMedia.isStoreUrl(slot.getAttribute("src")))
+    ).length;
     return { content: c, dek, words, spans: cites.length, missing, unpinned, usedKeys, srcTotal: usedSources.length, archived, mediaToFreeze: onStore };
   }, []);
 
