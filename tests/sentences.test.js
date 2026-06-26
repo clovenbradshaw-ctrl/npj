@@ -98,3 +98,47 @@ test("markerRanges finds a sup.md-cite at its textContent offset (recursing thro
 test("markerRanges returns nothing for a block with no markers", () => {
   assert.deepEqual(S.markerRanges(block([txt("Just plain prose. Two sentences.")])), []);
 });
+
+// ---- direct-text windows: a mixed container must not drop its own prose ----
+// segment() used to skip ANY div/blockquote that wrapped a nested block, silently
+// dropping the container's lead-in/trailing sentences. nestedBlockRanges +
+// directRuns isolate a block's OWN text so it's captured while nested blocks are
+// segmented on their own pass. Tiny faithful element stub (firstChild/nextSibling/
+// nodeType/nodeValue/tagName/textContent) — same no-jsdom ethos as above.
+const T = (s) => ({ nodeType: 3, nodeValue: s, textContent: s, nextSibling: null });
+function E(tag, kids) {
+  kids = (kids || []).map((k) => (typeof k === "string" ? T(k) : k));
+  for (let i = 0; i < kids.length; i++) kids[i].nextSibling = kids[i + 1] || null;
+  return { nodeType: 1, tagName: tag.toUpperCase(), firstChild: kids[0] || null, textContent: kids.map((k) => k.textContent).join("") };
+}
+
+test("a leaf block has no nested-block ranges and one full-width run (old behaviour, unchanged)", () => {
+  const p = E("p", ["First sentence. Second sentence."]);
+  assert.deepEqual(S.nestedBlockRanges(p), []);
+  assert.deepEqual(S.directRuns(p, p.textContent.length), [{ start: 0, end: p.textContent.length }]);
+});
+
+test("a mixed container keeps its lead-in prose as a direct-text run", () => {
+  // "Intro. " then a <ul><li>x</li></ul> — the list text belongs to the <li> row,
+  // the "Intro. " is the container's own prose the old code dropped
+  const div = E("div", ["Intro. ", E("ul", [E("li", ["x"])])]);
+  assert.deepEqual(S.nestedBlockRanges(div), [[7, 8]]);
+  assert.deepEqual(S.directRuns(div, div.textContent.length), [{ start: 0, end: 7 }]);
+});
+
+test("a pure wrapper (only nested blocks) yields no direct-text runs", () => {
+  const div = E("div", [E("p", ["a"]), E("p", ["b"])]);
+  assert.deepEqual(S.nestedBlockRanges(div), [[0, 1], [1, 2]]);
+  assert.deepEqual(S.directRuns(div, div.textContent.length), []);
+});
+
+test("a container keeps trailing prose after a nested block", () => {
+  const div = E("div", [E("ul", [E("li", ["x"])]), "after"]);
+  assert.deepEqual(S.directRuns(div, div.textContent.length), [{ start: 1, end: 6 }]);
+});
+
+test("hasBareText: bare text or an inline element counts; only-block children do not", () => {
+  assert.equal(S.hasBareText(E("div", ["loose ", E("p", ["block"])])), true);
+  assert.equal(S.hasBareText(E("div", [E("span", ["inline"])])), true);
+  assert.equal(S.hasBareText(E("div", [E("p", ["only a block child"])])), false);
+});

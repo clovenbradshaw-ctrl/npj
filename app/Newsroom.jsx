@@ -316,6 +316,25 @@ function NrSourceThumb({ srcKey, rec, onOpen }) {
   return null;
 }
 
+// Where a selection-toolbar dropdown should open so it never spills past a screen
+// edge. The toolbar is fixed ABOVE the selection (its bottom sits at selY-8), and a
+// menu drops from there. With a hardcoded height a menu opened low in the viewport
+// runs its footer (the "New source" / Add row) off the bottom, out of reach. Given
+// the selection's viewport-Y this returns the side to open toward (down when it's
+// roomier, else up) and a maxHeight clamped to that gutter, so the menu's own
+// scrollbar — not the window — carries any overflow and the footer stays reachable.
+function tbMenuBox(selY, desiredMax) {
+  var vh = (typeof window !== "undefined" && window.innerHeight) || 800;
+  var barH = 44, gap = 6, margin = 14;
+  var below = vh - selY - margin;          // gutter from the selection top to the foot
+  var above = selY - barH - gap - margin;  // gutter above the toolbar
+  var down = below >= above;
+  var room = Math.max(160, down ? below : above);
+  var box = { maxHeight: Math.min(desiredMax, room), overflowY: "auto" };
+  if (down) box.top = "calc(100% + " + gap + "px)"; else box.bottom = "calc(100% + " + gap + "px)";
+  return box;
+}
+
 function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished }) {
   const { layout, me, isAdmin } = React.useContext(window.LayoutCtx);
   const columns = (layout.sections || []).map(s => s.name);
@@ -3053,7 +3072,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <FB hot={menu === "void"} onClick={() => setMenu(menu === "void" ? null : "void")} title="Cite a void — ground this in a documented absence (no record exists)"><span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>∅</span> Void</FB>
 
           {menu === "link" && (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9 }}>
+            <div className="np-scroll" style={{ position: "absolute", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9, ...tbMenuBox(sel.y, 360) }}>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Link to a URL</div>
               <div style={{ display: "flex", gap: 6 }}>
                 <input autoFocus value={linkUrl} onChange={e => setLinkUrl(e.target.value)} onMouseDown={e => e.stopPropagation()} onKeyDown={e => e.key === "Enter" && applyLink()} placeholder="https://…" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
@@ -3066,7 +3085,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             </div>
           )}
           {menu === "src" && (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 332, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8, maxHeight: 440, overflowY: "auto" }} className="np-scroll">
+            <div style={{ position: "absolute", right: 0, width: 332, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 8, ...tbMenuBox(sel.y, 440) }} className="np-scroll">
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 5 }}><I.source style={{ fontSize: 13 }} /> Bind this span to a source</div>
               <div style={{ display: "flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "0 8px", marginBottom: 8 }}>
                 <I.search style={{ fontSize: 14, color: "var(--ink-soft)" }} />
@@ -3136,7 +3155,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             const k = VK.norm(voidKind); const def = k ? VK.get(k) : null;
             const ready = !!voidSearch.trim() || k === "ambient";
             return (
-            <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 322, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10, maxHeight: 392, overflowY: "auto" }} className="np-scroll">
+            <div style={{ position: "absolute", right: 0, width: 322, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 10, ...tbMenuBox(sel.y, 392) }} className="np-scroll">
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 4, display: "flex", alignItems: "center", gap: 5 }}><span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>∅</span> Cite a void — which kind?</div>
               <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", lineHeight: 1.5, marginBottom: 8 }}>The claim rests on something that <b style={{ color: "var(--ink)" }}>isn’t there</b>. Pick how hard the absence is to stand behind — the reader sees which.</div>
               {VK.GROUPS.map(g => (
