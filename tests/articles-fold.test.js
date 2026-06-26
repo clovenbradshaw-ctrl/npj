@@ -112,6 +112,34 @@ test("an unsourced claim-src wrapper stays transparent (folds to plain prose)", 
   assert.deepEqual(toks, ["Just some wrapped words."]);
 });
 
+test("a citation marker NESTED inside a sourced claim-src never leaks its number into the prose", () => {
+  // the cite-broken shape from the editor: the <sup>23</sup> ends up INSIDE the
+  // claim span (not after it), so its digits would ride along in textContent and
+  // print as "publication.23" in the published read. The claim text must be clean.
+  const inner = enode("span", { class: "claim-src cite-broken", "data-src": "doc-x", "data-cid": "ci" },
+    [tnode("A website tallies 53 deaths as of publication.")]);
+  const innerSup = cite({ "data-cite": "doc-x", "data-cid": "ci" }, "23");
+  const outer = enode("span", { class: "claim-src", "data-src": "web-y", "data-cid": "co", "data-quote": "53 Deaths" },
+    [inner, innerSup]);
+  const outerSup = cite({ "data-cite": "web-y", "data-cid": "co", "data-quote": "53 Deaths" }, "22");
+  const toks = foldParagraph([outer, outerSup]);
+  const claims = toks.filter((t) => t && typeof t === "object" && t.c != null);
+  assert.equal(claims.length, 1);
+  assert.equal(claims[0].c, "A website tallies 53 deaths as of publication.", "no '23' baked into the claim text");
+  assert.ok(!toks.some((t) => typeof t === "object" && t.c != null && /23\b/.test(t.c)), "no stray citation number in any claim");
+});
+
+test("a citation marker nested inside an OWNED (stance) claim drops its number too", () => {
+  const innerSrc = enode("span", { class: "claim-src cite-broken", "data-src": "web-z" }, [tnode("astroturf")]);
+  const innerSup = cite({ "data-cite": "web-z" }, "27");
+  const outer = enode("span", { class: "claim-src", "data-stance": "analysis" },
+    [tnode('attempt to "'), innerSrc, innerSup, tnode('" governance.')]);
+  const toks = foldParagraph([outer]);
+  const owned = toks.filter((t) => t && typeof t === "object" && t.stance);
+  assert.equal(owned.length, 1);
+  assert.equal(owned[0].c, 'attempt to "astroturf" governance.', "the nested marker '27' is stripped from owned prose");
+});
+
 // fold a whole tree of top-level nodes (not just one paragraph) → the blocks
 function foldBlocks(nodes) {
   const root = { childNodes: nodes, set innerHTML(_) {} };
