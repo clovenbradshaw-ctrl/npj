@@ -123,18 +123,19 @@ function CitedSpanList({ claims, onJump, currentId }) {
 // so it holds its place on screen instead of riding up and down with each marker.
 const DOCK_TOP = 84;
 
-// ---- slide-aside layout for the docked panels ----
-// On a wide window, rather than tucking the citation/note/grounding card into
-// whatever margin happens to be free (where it rides over wide figures and sits
-// a hair off the prose), the reading column slides over to CEDE a fixed gutter
-// and the panel pins to that gutter at the viewport's edge. Prose and panel then
-// sit centered side by side — neither overlaps the other, and the panel stays
-// put as the column glides into place. The reader/preview content reserves the
-// same RESERVE_GUTTER on its right so the two halves line up.
-const PANEL_W = 404;                       // a docked margin panel at full width
-const RESERVE_GUTTER = PANEL_W + 16 * 2;   // the gutter the reading column gives up for it
-// only engage the slide once the window is wide enough that the column keeps a
-// comfortable measure after ceding the gutter (≈ COL 700 + gutter + breathing room)
+// ---- slide-aside layout: the docked panel becomes a side drawer ----
+// On a wide window the citation/note/grounding card stops being a floating margin
+// card (which rode over wide figures, or floated with a lot of dead space around
+// it) and becomes a persistent SIDE DRAWER flush to the right edge — full height,
+// border on the left, sliding in from the side. The reading column reflows left
+// by ceding exactly the drawer's width (RESERVE_GUTTER), so nothing is covered and
+// the two sit side by side. Mirrors the SuggestionRail drawer and the side-panel
+// design mock. On a phone the panels stay bottom sheets, so it never engages.
+const PANEL_W = 380;                  // the side drawer's width
+const RESERVE_GUTTER = PANEL_W;       // the gutter the reading column cedes for it
+const DRAWER_TOP = 54;                // drawer sits just below the sticky top bar
+// only engage the drawer once the window is wide enough that the column keeps a
+// comfortable measure after ceding the gutter (≈ COL 700 + drawer + breathing room)
 const RESERVE_MIN_VW = 1180;
 
 /* Dock a preview panel BESIDE the reading column — out in the margin, never over
@@ -148,15 +149,14 @@ const RESERVE_MIN_VW = 1180;
    anchoring under the marker. */
 function besideColumn(mk, col, opts) {
   if (!mk || !col) return null;
-  const { vw, vh, gap = 16, blockL, blockR } = opts;
-  // Slide-aside: on a wide window with no rail already holding a margin, the
-  // reading column cedes RESERVE_GUTTER on its right (see the content padding in
-  // the reader/preview), so the panel pins to that gutter at the viewport edge —
-  // a steady column that never rides over the prose or its figures, and holds
-  // its place while the column glides over. Matches the parent's reserveAside.
+  const { vw, vh, gap = 16, blockL, blockR, dockTop = DOCK_TOP } = opts;
+  // Side drawer: on a wide window with no rail already holding a margin, the panel
+  // docks as a full-height drawer flush to the right edge (the reading column has
+  // reflowed left to cede the room — see the content padding in the reader/preview).
+  // The caller renders this as a sliding drawer; the geometry just says "right edge,
+  // top to bottom". Matches the parent's reserveAside.
   if (vw >= RESERVE_MIN_VW && !blockL && !blockR) {
-    const top = Math.min(DOCK_TOP, vh - 220);
-    return { left: vw - gap - PANEL_W, top, width: PANEL_W, maxHeight: vh - top - 16, docked: true };
+    return { drawer: true, top: dockTop, width: PANEL_W, docked: true };
   }
   const leftRoom = col.left;          // clear margin to the left of the prose
   const rightRoom = vw - col.right;   // …and to the right
@@ -185,7 +185,7 @@ function besideColumn(mk, col, opts) {
 // phone there's no hover and no room to pin a card to a tapped word, so it opens
 // instead as a dismissible bottom sheet (tap the backdrop or ✕ to close) —
 // thumb-reachable and full-width, which is how a touch reader opens the receipts.
-function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand }) {
+function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand, dockTop }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
@@ -200,11 +200,14 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
   const sheet = isPhone;
   // On a desktop the card lives in the margin beside the column (besideColumn);
   // only when the window's too narrow for a gutter does it anchor under the marker.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR, dockTop });
+  const drawer = !!(beside && beside.drawer);
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "72vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (drawer) {
+    cardStyle = { left: "auto", right: 0, top: beside.top, bottom: 0, width: beside.width, maxHeight: "none", overflowY: "auto" };
   } else if (beside) {
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
@@ -217,7 +220,7 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
   }
 
   const inner = (
-    <div className="srccard np-scroll" role="dialog" aria-label="Citation for this claim"
+    <div className={"srccard np-scroll" + (drawer ? " npj-dock-drawer" : "")} role="dialog" aria-label="Citation for this claim"
       style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onEnter} onBlur={onLeave}>
       {sheet && (
@@ -280,19 +283,22 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
 // losing your place. The note text still has its permanent home in the "Notes"
 // endnotes — this card is the inline preview, with a link down to it. Mirrors
 // HoverCard's positioning (margin card on a desktop; a bottom sheet on a phone).
-function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand }) {
+function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand, dockTop }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
   const { num, text, x, y, mk, col, blockL, blockR } = data;
   const vw = window.innerWidth, vh = window.innerHeight;
   const sheet = isPhone;
-  // Mirrors HoverCard: float in the margin beside the marker, anchoring under it
-  // only when there's no gutter to spare.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  // Mirrors HoverCard: a side drawer on a wide window, else a margin card beside
+  // the marker, anchoring under it only when there's no gutter to spare.
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR, dockTop });
+  const drawer = !!(beside && beside.drawer);
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "60vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (drawer) {
+    cardStyle = { left: "auto", right: 0, top: beside.top, bottom: 0, width: beside.width, maxHeight: "none", overflowY: "auto" };
   } else if (beside) {
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
@@ -303,7 +309,7 @@ function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand }) {
     cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
   }
   const inner = (
-    <div className="fnpop np-scroll" role="dialog" aria-label={"Footnote " + num} style={cardStyle}
+    <div className={"fnpop np-scroll" + (drawer ? " npj-dock-drawer" : "")} role="dialog" aria-label={"Footnote " + num} style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <div className="fnpop-h">
         <span className="np-mono fnpop-n">{num}</span>
@@ -376,20 +382,23 @@ function groundingDetail(tok) {
 // declaration, or by a documented absence of a given kind, and whether that absence
 // is shown, located or only inferred (void-kinds.js). Mirrors FootnotePop's
 // positioning: a margin card on a desktop, a dismissible bottom sheet on a phone.
-function GroundingPop({ data, onEnter, onLeave, onClose, onExpand }) {
+function GroundingPop({ data, onEnter, onLeave, onClose, onExpand, dockTop }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
   const { tok, x, y, mk, col, blockL, blockR } = data;
   const { isAbsence, glyph, accent, kicker, headline, ariaLabel, blurb, standLine, noteLabel } = groundingDetail(tok);
   const vw = window.innerWidth, vh = window.innerHeight;
   const sheet = isPhone;
-  // Mirrors FootnotePop: float in the margin beside the marker, anchoring under it
-  // only when there's no gutter to spare.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
+  // Mirrors FootnotePop: a side drawer on a wide window, else a margin card beside
+  // the marker, anchoring under it only when there's no gutter to spare.
+  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR, dockTop });
+  const drawer = !!(beside && beside.drawer);
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "62vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
+  } else if (drawer) {
+    cardStyle = { left: "auto", right: 0, top: beside.top, bottom: 0, width: beside.width, maxHeight: "none", overflowY: "auto" };
   } else if (beside) {
     cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
@@ -400,7 +409,7 @@ function GroundingPop({ data, onEnter, onLeave, onClose, onExpand }) {
     cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
   }
   const inner = (
-    <div className="gpop np-scroll" role="dialog" aria-label={ariaLabel} style={cardStyle}
+    <div className={"gpop np-scroll" + (drawer ? " npj-dock-drawer" : "")} role="dialog" aria-label={ariaLabel} style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <div className="gpop-h" style={{ borderLeft: "3px solid " + accent }}>
         <span className="gpop-g np-mono" style={{ color: accent }}>{glyph}</span>
@@ -1353,12 +1362,12 @@ function ArticleRead(props) {
            it. The body already wires enterClaim on each .claim span; the reader
            branch just renders this card off the same hover state. */}
         <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
-          onClose={() => { setHover(null); setActiveSrc(null); }}
+          onClose={() => { setHover(null); setActiveSrc(null); }} dockTop={DRAWER_TOP}
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
-        <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
+        <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave} dockTop={DRAWER_TOP}
           onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
           onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
-        <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
+        <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave} dockTop={DRAWER_TOP}
           onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
         <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
         {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
@@ -1402,14 +1411,14 @@ function ArticleRead(props) {
       </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
-        onClose={() => { setHover(null); setActiveSrc(null); }}
+        onClose={() => { setHover(null); setActiveSrc(null); }} dockTop={DRAWER_TOP}
         suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} />
 
-      <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
+      <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave} dockTop={DRAWER_TOP}
         onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
         onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
 
-      <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
+      <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave} dockTop={DRAWER_TOP}
         onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
 
       <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />

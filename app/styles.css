@@ -256,6 +256,19 @@ a { color: inherit; }
 }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ---- docked side drawer ---- */
+/* On a wide window the citation/note/grounding card docks as a persistent side
+   panel flush to the right edge — full height, border only on the left, sliding
+   in from the side (the reading column has reflowed left to make room). Overrides
+   the floating card's all-around border, box-shadow and pop animation. Shared by
+   .srccard / .fnpop / .gpop via the npj-dock-drawer modifier. */
+.npj-dock-drawer {
+  border-width: 0 0 0 1.5px;
+  box-shadow: -18px 0 44px rgba(22,20,13,.13);
+  animation: npj-drawer-in .32s cubic-bezier(.22,.61,.36,1);
+}
+@keyframes npj-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+
 /* ---- footnote inline preview (FootnotePop) — the Substack hover/tap card ----
    The note floats up next to its marker so the reader never loses their place;
    it's the same paper card as a citation, just lighter. */
