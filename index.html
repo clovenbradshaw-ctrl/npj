@@ -12,7 +12,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Spline+Sans+Mono:wght@400;500;600&family=Oswald:wght@500;700&family=Lora:ital,wght@0,400;0,500;1,400&family=Spectral:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap" rel="stylesheet" />
-<!-- Phosphor icons (webfont): the whole UI's icon set. window.I in app/shared.jsx
+<!-- Phosphor icons (webfont): the whole UI's icon set. window.I in app/ui/shared.jsx
      renders <i class="ph ph-NAME">, sized by font-size, colored by currentColor. -->
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/regular/style.css" />
 <link rel="stylesheet" href="https://unpkg.com/@phosphor-icons/web@2.1.1/src/bold/style.css" />
@@ -22,7 +22,7 @@
      zoomable photo viewer — how a wide image is read at full size). Vendored
      under vendor/ like eoreader4 (offline-friendly, no third-party CDN at
      runtime) and DEFERRED, since only the post-paint reader uses them. They
-     publish window.Splide / window.GLightbox, which app/shared.jsx guards on. -->
+     publish window.Splide / window.GLightbox, which app/ui/shared.jsx guards on. -->
 <link rel="stylesheet" href="vendor/splide/splide.min.css" />
 <link rel="stylesheet" href="vendor/glightbox/glightbox.min.css" />
 <script defer src="vendor/splide/splide.min.js"></script>
@@ -72,15 +72,15 @@
 <script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
 
-<script src="app/data.js"></script>
+<script src="app/core/data.js"></script>
 <!-- live sources: pulls archive.org items tagged "npj-source" into DATASETS/SOURCES -->
-<script src="app/archive-sources.js"></script>
+<script src="app/sources/archive-sources.js"></script>
 <!-- best-effort source identity: guess a web source's title + outlet from its URL
      slug/host, and read the real ones off the page's own <title>/og: tags. No model. -->
-<script src="app/source-title.js"></script>
+<script src="app/sources/source-title.js"></script>
 <!-- media CDN: resolves archive.org links to direct image URLs for <image-slot>,
      and (pageMeta) reads a source's identity off the CORS-open archived HTML -->
-<script src="app/archive-cdn.js"></script>
+<script src="app/sources/archive-cdn.js"></script>
 <!-- expose hooks globally so every babel file uses them bare without colliding -->
 <script>
   window.useState = React.useState;
@@ -91,83 +91,83 @@
 </script>
 
 <!-- plain scripts: matrix auth, durable drafts -->
-<script src="app/matrix-auth.js"></script>
+<script src="app/identity/matrix-auth.js"></script>
 <!-- e2ee: Web Crypto group-session encryption for the per-article collaboration layer -->
-<script src="app/e2ee.js"></script>
+<script src="app/identity/e2ee.js"></script>
 <!-- collab: end-to-end-encrypted comments + chat carried over the project's Matrix room -->
-<script src="app/collab.js"></script>
+<script src="app/feedback/collab.js"></script>
 <!-- passkey vault: lock your sign-in behind Face ID / a fingerprint (WebAuthn PRF) -->
-<script src="app/passkey-vault.js"></script>
+<script src="app/identity/passkey-vault.js"></script>
 <!-- contributor profiles (the byline): name + About me, local + Matrix account, pulled from account info -->
-<script src="app/profiles.js"></script>
+<script src="app/identity/profiles.js"></script>
 <!-- media store: uploads image-slot drops to the Matrix homeserver while drafting, frozen to archive.org at publish -->
-<script src="app/media-store.js"></script>
+<script src="app/media/media-store.js"></script>
 <!-- source view: makes an uploaded source viewable + citable (kind detection,
      durable display URLs via the media store, lazy pdf.js text extraction) -->
-<script src="app/source-view.js"></script>
-<script src="app/drafts.js"></script>
+<script src="app/sources/source-view.js"></script>
+<script src="app/identity/drafts.js"></script>
 <!-- editing-only post structure: the append-only log + fold + flatten + built-in
      post types (window.NpjStructure). Never published — stripped at build (I1). -->
-<script src="app/structure.js"></script>
-<script src="app/image-slot.js"></script>
+<script src="app/record/structure.js"></script>
+<script src="app/media/image-slot.js"></script>
 <!-- photo editor: crop + HARD redaction baked into the pixels before the image is
      re-uploaded, so only the redacted copy can ever reach archive.org (window.NpjPhotoEditor) -->
-<script src="app/photo-editor.js"></script>
+<script src="app/media/photo-editor.js"></script>
 <!-- the six kinds of void (asserted absence), one taxonomy shared by the editor,
      the publish fold and the reader's lens (window.NpjVoidKinds) -->
-<script src="app/void-kinds.js"></script>
+<script src="app/core/void-kinds.js"></script>
 <!-- url → embeddable player (YouTube/Vimeo/Google Drive/Docs/archive.org/media);
      shared by the composer, the edit surface and the reader. Load before
      articles.js, whose blocksToHtml rebuilds embeds through it. -->
-<script src="app/embed.js"></script>
+<script src="app/media/embed.js"></script>
 <!-- the published record: per-document folders of timestamped version files
      (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
-<script src="app/articles.js"></script>
+<script src="app/record/articles.js"></script>
 <!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
      the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
-<script src="app/feedback.js"></script>
+<script src="app/feedback/feedback.js"></script>
 <!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
      (paste into Substack keeps headings, images, links & the sourcing). -->
-<script src="app/substack-export.js"></script>
+<script src="app/export/substack-export.js"></script>
 <!-- Outstanding fact checks: each ungrounded claim (⊥ needs source, ¬ conflict)
      paired with the TYPE of evidence that would ground it — the negative space.
      evidence-needs.js reads it mechanically (optionally sharpened by a local
      LLM); fact-check-export.js shapes the plain, paste-anywhere list. -->
-<script src="app/evidence-needs.js"></script>
-<script src="app/fact-check-export.js"></script>
+<script src="app/grounding/evidence-needs.js"></script>
+<script src="app/export/fact-check-export.js"></script>
 <!-- grounding model: reusable citation records (spans of a source) + sentence
      segmentation for the table view. Plain scripts; require window.NPJ. -->
-<script src="app/citations.js"></script>
-<script src="app/sentences.js"></script>
+<script src="app/sources/citations.js"></script>
+<script src="app/record/sentences.js"></script>
 <!-- composition provenance: how a draft was assembled (typed vs. pasted, paste
      sizes, revision, timeline). Counts + timestamps only — never the words. -->
-<script src="app/composition.js"></script>
+<script src="app/record/composition.js"></script>
 <!-- source provenance: synthetic dedup (one signature per content, linked across
      projects) + backtracking (source → every article that cites it). No model. -->
-<script src="app/sources.js"></script>
+<script src="app/sources/sources.js"></script>
 <!-- definitions: the per-article glossary + the COLLECTIVE published-definition
      index across the record (window.NpjDefinitions). Terms are extracted by
      eoreader4 (the bridge below) and counted relative to the article's length;
      a term may carry conflicting definitions drawn from past articles. -->
-<script src="app/definitions.js"></script>
+<script src="app/grounding/definitions.js"></script>
 <!-- pii-v2 pack: mechanical recognizers (regex + checksum + context) for
      data-shaped PII — phones, SSNs, cards, addresses, emails (no name-guessing) —
      that surface candidate spans + hard-redact them before a source hits
      archive.org. No model — each finding carries a `basis`. -->
-<script src="app/pii.js"></script>
+<script src="app/redaction/pii.js"></script>
 <!-- Citey — the grounding assistant. State is mechanical (reads the editor's own
      grounding); voice is leashed (templated, no model). Plain scripts, order matters. -->
-<script src="app/citey-assist.js"></script>
-<script src="app/citey-states.js"></script>
-<script src="app/CiteyBrain.js"></script>
-<script src="app/CiteyVoice.js"></script>
+<script src="app/grounding/citey-assist.js"></script>
+<script src="app/grounding/citey-states.js"></script>
+<script src="app/grounding/CiteyBrain.js"></script>
+<script src="app/grounding/CiteyVoice.js"></script>
 <!-- proposition graph: eoreader4's model-free reading core, vendored + bridged
      (window.EOReader4), the prose→doc adapter (window.NpjPropGraph) and the SVG
      node-link renderer (window.NpjGraphRender). The bridge is an ES module that
      publishes window.EOReader4 after load — consumers guard on its presence. -->
-<script src="app/prop-graph.js"></script>
-<script src="app/graph-render.js"></script>
-<script type="module" src="app/eoreader4-bridge.js"></script>
+<script src="app/graph/prop-graph.js"></script>
+<script src="app/graph/graph-render.js"></script>
+<script type="module" src="app/graph/eoreader4-bridge.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>
 

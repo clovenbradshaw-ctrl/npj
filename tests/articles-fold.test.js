@@ -1,4 +1,4 @@
-/* articles-fold.test.js — the composer-HTML → body-token fold (app/articles.js
+/* articles-fold.test.js — the composer-HTML → body-token fold (app/record/articles.js
  * htmlToBlocks).
  *
  * Focus: a SOURCED claim span is an explicit boundary. When the author selects
@@ -17,7 +17,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 
 // ---- minimal faithful DOM: just what htmlToBlocks' walk reads ----
 const tnode = (s) => ({ nodeType: 3, nodeValue: s, textContent: s });

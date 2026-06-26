@@ -1,10 +1,10 @@
-/* source-title.test.js — best-effort source naming (app/source-title.js).
+/* source-title.test.js — best-effort source naming (app/sources/source-title.js).
  * Pure, mechanical, no model and no network: a title + outlet guessed from a
  * URL, and read off a page's own <title>/og: tags. `node --test`.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const T = require("../app/source-title.js");
+const T = require("../app/sources/source-title.js");
 
 test("titleFromUrl reads a headline out of the path slug", () => {
   assert.equal(

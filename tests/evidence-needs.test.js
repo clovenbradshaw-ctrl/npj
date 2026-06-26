@@ -1,11 +1,11 @@
-/* evidence-needs.test.js — the negative-space classifier (app/evidence-needs.js).
+/* evidence-needs.test.js — the negative-space classifier (app/grounding/evidence-needs.js).
  * The mechanical read (cues → an evidence type) is pure and tested here; the
  * optional local-LLM rung is exercised through a stub so no model or network is
  * touched. `node --test`.
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const EV = require("../app/evidence-needs.js");
+const EV = require("../app/grounding/evidence-needs.js");
 
 test("a verbatim quotation asks for the source of the quoted words", () => {
   assert.equal(EV.classify('It said: "Please Don\'t Blow Up Our Library Again."').type, "quote");

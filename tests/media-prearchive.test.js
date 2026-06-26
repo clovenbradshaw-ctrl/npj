@@ -1,5 +1,5 @@
 /* media-prearchive.test.js — the proactive pre-archive census + slot test in
- * app/media-store.js (prearchiveCensus / slotNeedsArchive).
+ * app/media/media-store.js (prearchiveCensus / slotNeedsArchive).
  *
  * Pre-archiving moves a draft's media-store images onto archive.org BEFORE the
  * publish boundary, recording the durable URL in each <image-slot>'s data-alt.
@@ -15,7 +15,7 @@ const assert = require("node:assert/strict");
 
 // the helpers read root.NpjArchiveCDN.isMediaUrl (an archive.org / wayback URL)
 globalThis.NpjArchiveCDN = { isMediaUrl: (u) => /(?:^|\/\/)(?:[^/]*\.)?archive\.org\//.test(String(u || "")) || /web\.archive\.org\//.test(String(u || "")) };
-const M = require("../app/media-store.js");
+const M = require("../app/media/media-store.js");
 
 // ---- minimal DOM: image-slot elements with attributes ----
 class Slot {

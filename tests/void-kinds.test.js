@@ -1,4 +1,4 @@
-/* void-kinds.test.js — the six-kind void taxonomy (app/void-kinds.js).
+/* void-kinds.test.js — the six-kind void taxonomy (app/core/void-kinds.js).
  * A void is an asserted absence; the six kinds rank how hard the absence is to
  * stand behind, and split into three groups by what the author can offer a
  * reader: SHOW it, LOCATE it, or only ASSERT it. These guard the shape and the
@@ -6,7 +6,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const VK = require("../app/void-kinds.js");
+const VK = require("../app/core/void-kinds.js");
 
 test("there are exactly six kinds, ordered strongest → weakest", () => {
   assert.deepEqual(VK.ORDER, ["removed", "withheld", "silent", "inaccessible", "unrecorded", "ambient"]);

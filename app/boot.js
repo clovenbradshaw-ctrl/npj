@@ -42,25 +42,25 @@
   // front page (and the app shell that mounts it). Everything the front page
   // touches lives here: the layout context, the shared UI kit (incl. MediaImg
   // for cover photos), and FrontPage itself.
-  var EAGER = ["tweaks-panel.jsx", "app/layout.jsx", "app/shared.jsx", "app/FrontPage.jsx"];
+  var EAGER = ["tweaks-panel.jsx", "app/admin/layout.jsx", "app/ui/shared.jsx", "app/reader/FrontPage.jsx"];
 
   // READ: the article reader + every non-editor page. Compiled right after the
   // front page paints. Gated behind window.__npjReady.read.
   var READ = [
-    "app/PdfView.jsx", "app/PdfRedactView.jsx", "app/SourceViewer.jsx", "app/SourceAdapter.jsx", "app/SourceExplorer.jsx",
-    "app/versions.jsx", "app/Entities.jsx", "app/SuggestionRail.jsx",
-    "app/SubstackExport.jsx", "app/FactCheckExport.jsx", "app/ArticleRead.jsx",
-    "app/ArticleEdit.jsx", "app/SourcePicker.jsx", "app/InterviewSource.jsx",
-    "app/Standards.jsx", "app/Contributors.jsx", "app/Submit.jsx",
-    "app/Data.jsx", "app/Documents.jsx", "app/Invite.jsx", "app/AdminEditor.jsx",
-    "app/CollabRail.jsx"
+    "app/media/PdfView.jsx", "app/redaction/PdfRedactView.jsx", "app/editor/SourceViewer.jsx", "app/editor/SourceAdapter.jsx", "app/editor/SourceExplorer.jsx",
+    "app/record/versions.jsx", "app/admin/Entities.jsx", "app/reader/SuggestionRail.jsx",
+    "app/export/SubstackExport.jsx", "app/export/FactCheckExport.jsx", "app/reader/ArticleRead.jsx",
+    "app/reader/ArticleEdit.jsx", "app/editor/SourcePicker.jsx", "app/editor/InterviewSource.jsx",
+    "app/reader/Standards.jsx", "app/reader/Contributors.jsx", "app/admin/Submit.jsx",
+    "app/admin/Data.jsx", "app/admin/Documents.jsx", "app/admin/Invite.jsx", "app/admin/AdminEditor.jsx",
+    "app/reader/CollabRail.jsx"
   ];
 
   // EDITOR: the newsroom + its heavy companions. Compiled last (after READ).
   // Gated behind window.__npjReady.all.
   var EDITOR = [
-    "app/GroundingWorkspace.jsx", "app/PostStructure.jsx", "app/GraphView.jsx",
-    "app/DefinitionsRail.jsx", "app/Newsroom.jsx", "app/Citey.jsx", "app/CiteyRedact.jsx"
+    "app/editor/GroundingWorkspace.jsx", "app/editor/PostStructure.jsx", "app/graph/GraphView.jsx",
+    "app/editor/DefinitionsRail.jsx", "app/editor/Newsroom.jsx", "app/grounding/Citey.jsx", "app/redaction/CiteyRedact.jsx"
   ];
 
   // The app shell (the <App/> component + the React mount) lives in an inline

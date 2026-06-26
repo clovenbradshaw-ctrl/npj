@@ -1,5 +1,5 @@
 /* merge-split-words.test.js — the fold/read-model repair that stitches a word
- * cut across a paragraph break (app/articles.js mergeSplitWords).
+ * cut across a paragraph break (app/record/articles.js mergeSplitWords).
  *
  * An accidental block split inside the contentEditable (a stray Enter/paste) or
  * an older record saved that way can cut a paragraph mid-WORD: "…public bench.
@@ -11,7 +11,7 @@
  */
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const A = require("../app/articles.js");
+const A = require("../app/record/articles.js");
 const merge = A.mergeSplitWords;
 
 const txt = (b) => (b.tokens || []).map((t) => (typeof t === "string" ? t : (t.c != null ? t.c : (t.text || "")))).join("");
