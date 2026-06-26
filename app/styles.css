@@ -104,6 +104,16 @@ a { color: inherit; }
 }
 .read-clean .claim-marker { background: transparent; border-color: var(--rule); color: var(--ink-soft); }
 
+/* plain prose: a truly naked read — every citation/claim affordance stripped so
+   the words read (and write) as pure prose. Strips the dotted underline, the
+   numbered markers, the footnote superscripts and the open-suggestion flag. */
+.read-naked .claim { background: none !important; border-bottom: none !important; padding-bottom: 0 !important; cursor: text; }
+.read-naked .claim:hover { background: none !important; }
+.read-naked .claim-marker,
+.read-naked .fnmark,
+.read-naked sup.fnmark { display: none !important; }
+.read-naked .claim[data-sugg]::after { display: none !important; }
+
 /* the grounded glyph (⊥) — a claim standing on its source: a stem planted on
    solid ground. Used in legends (e.g. the front-page manifesto strip) to mean
    "this mark means the text above it is grounded in an archived source". */

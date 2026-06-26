@@ -418,6 +418,32 @@
     return { roomId: out.room_id, alias: out.room_alias || null };
   }
 
+  /* ---- a merge-request discussion room ----
+     A reader's contribution is a branch proposed against a published piece; this
+     opens a small private room for it so the contributor and the article's
+     authors can discuss the merge — the conversation half of a pull request. The
+     contributor's own account creates it (they're signed in by the time a
+     contribution lands) and invites the authors. Tagged press.npj.room kind:"mr"
+     so it's recognisably ours and never dragged into the draft workspace. All
+     best-effort: a failure just leaves the branch without a room. */
+  async function createMergeRequestRoom({ slug, title, invite: invitees, visibility } = {}) {
+    if (!session) { const e = new Error("Sign in first"); e.code = "noauth"; throw e; }
+    const topic = "People's Journalism merge request — a proposed branch on " + (slug || "an article") + (visibility === "private" ? " (private)" : "");
+    const out = await api(session.base_url, "/_matrix/client/v3/createRoom", {
+      method: "POST", token: session.access_token,
+      body: { name: (title || "Merge request").slice(0, 120), topic, visibility: "private", preset: "private_chat", initial_state: [appRoomState("mr")] }
+    });
+    // invite the article's authors (skip self + anything that isn't a real mxid)
+    const seen = {};
+    for (const who of (invitees || [])) {
+      const id = parseMxid(who);
+      if (!id || id.mxid === session.user_id || seen[id.mxid]) continue;
+      seen[id.mxid] = 1;
+      try { await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(out.room_id) + "/invite", { method: "POST", token: session.access_token, body: { user_id: id.mxid } }); } catch (e) { /* best-effort */ }
+    }
+    return { roomId: out.room_id };
+  }
+
   /* ---- invite someone who has NO Matrix account yet ----
      The inviter (signed in) mints a brand-new account on the homeserver, then
      hands the newcomer a single link that logs them in, lets them pick a display
@@ -685,7 +711,7 @@
     register, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
-    joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange,
+    joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, createMergeRequestRoom, getAccountData, setAccountData, onChange,
     // shared project documents (the draft lives in the room, not just the account)
     putRoomDoc, deleteRoomDoc, getRoomDocs, getRoomDocContent, ensureDocPower
   };

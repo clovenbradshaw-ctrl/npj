@@ -386,7 +386,11 @@ function App() {
   const [pendingContribution, setPendingContribution] = useState(null);
   const submitContribution = (draft, author, token) => {
     const A = window.NPJ.ARTICLE; if (!A) return Promise.resolve();
-    return window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author, base_sha: A.base_sha, token }).then(reloadFeedback);
+    const owners = [].concat(A.authors || [], A.assignees || []).filter(Boolean);
+    const shareUrl = location.origin + location.pathname + "#article;read=" + A.slug;
+    return window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed,
+      rationale: draft.rationale, visibility: draft.visibility, forkBody: draft.forkBody, author, base_sha: A.base_sha, token,
+      authors: owners, shareUrl }).then(reloadFeedback);
   };
   const onAddSuggestion = (draft) => {
     const A = window.NPJ.ARTICLE; if (!A) return;

@@ -96,17 +96,21 @@ function Replies({ s, me, onReply }) {
   );
 }
 
-function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMerge, onShow, me }) {
+function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMerge, onShow, onPreviewBranch, canPreview, me }) {
   const [busy, setBusy] = useState(false);
   const [mergeErr, setMergeErr] = useState(null);
   const before = (claim && claim.text) || (s.anchor && s.anchor.quote) || "";
   const open = s.status === "proposed" || s.status === "review";
+  // a mergeable BRANCH: a span suggestion (proposed words) or a whole-article fork
+  // (an edited copy). Comments and note-only article contributions aren't branches.
+  const isFork = s.scope === "article" && s.forkBody && s.forkBody.length;
+  const isBranch = (s.scope !== "article" && s.kind === "suggestion") || isFork;
   const doMerge = async () => {
     setBusy(true); setMergeErr(null);
     const r = (await onMerge(s)) || {};
     setBusy(false);
     if (r.ok) return;
-    if (r.conflict) setMergeErr("Can't merge cleanly — these exact words aren't in the current version anymore (the base moved). Open Edit and apply it by hand, or decline.");
+    if (r.conflict) setMergeErr("Can't merge cleanly — these exact words aren't in the current version anymore (the base moved). Open Edit and apply it by hand, or ignore.");
     else if (r.status === 401 || r.status === 403) setMergeErr("Rejected (" + r.status + ") — your Matrix account can't commit edits to this article.");
     else setMergeErr("Couldn't commit the merge: " + (r.error || ("HTTP " + (r.status || "?"))) + ". Nothing changed.");
   };
@@ -114,10 +118,14 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 12,
       opacity: s.stale && open ? .94 : 1 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: "1px solid var(--rule)", flexWrap: "wrap" }}>
-        <span className="chip" style={{ background: s.scope === "article" ? "var(--data)" : s.kind === "comment" ? "var(--paper-2)" : "var(--yellow)", color: s.scope === "article" ? "#fff" : undefined, borderColor: "var(--ink)" }}>
-          {s.scope === "article" ? "📄 Contribution" : s.kind === "comment" ? "💬 Comment" : "✎ Suggestion"}
+        <span className="chip" style={{ background: isFork ? "var(--data)" : s.scope === "article" ? "var(--paper-2)" : s.kind === "comment" ? "var(--paper-2)" : "var(--yellow)", color: isFork ? "#fff" : undefined, borderColor: "var(--ink)" }}>
+          {isFork ? "⑂ Fork" : s.scope === "article" ? "📄 On the article" : s.kind === "comment" ? "💬 Comment" : "✎ Branch"}
         </span>
         <StatusChip status={s.status} merged={s.merged} />
+        <span className="chip" title={s.visibility === "private" ? "Private — only the article's authors can see this branch" : "Public — anyone can preview this branch"}
+          style={{ background: "transparent", borderColor: "var(--rule-strong)", color: "var(--ink-soft)" }}>
+          {s.visibility === "private" ? "🔒 Private" : "🌐 Public"}
+        </span>
         {s.stale && <span className="chip chip-stale" title={"Proposed against v." + s.base_sha + " — the article has since advanced"}>⚠ Stale</span>}
         <span style={{ flex: 1 }} />
         <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{shortDate(s.ts)}</span>
@@ -126,7 +134,8 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
       <div style={{ padding: "10px 11px" }}>
         <AnchorLine s={s} claim={claim} onShow={onShow} />
 
-        {s.kind === "suggestion" && <DiffText before={before} after={s.proposed} />}
+        {s.kind === "suggestion" && s.scope !== "article" && <DiffText before={before} after={s.proposed} />}
+        {isFork && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.4 }}>An edited copy of the whole article — toggle it on to read the fork before it's merged.</div>}
 
         {s.rationale && (
           <div style={{ marginTop: 10, paddingLeft: 9, borderLeft: "2px solid var(--rule)", fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.4 }}>
@@ -149,6 +158,23 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
           </button>
         </div>
 
+        {(isBranch && canPreview && open) || s.roomId ? (
+          <div style={{ display: "flex", gap: 7, marginTop: 9, flexWrap: "wrap" }}>
+            {isBranch && canPreview && open && (
+              <button className="btn btn-sm" onClick={() => onPreviewBranch && onPreviewBranch(s)} title="Read the article with this branch applied — before any merge"
+                style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "var(--data)", color: "#fff", borderColor: "var(--ink)" }}>
+                <I.eye style={{ fontSize: 12 }} /> Toggle branch on
+              </button>
+            )}
+            {s.roomId && (
+              <a href={"https://matrix.to/#/" + s.roomId} target="_blank" rel="noopener" className="btn btn-sm"
+                title="Open the merge-request discussion room" style={{ display: "inline-flex", alignItems: "center", gap: 5, textDecoration: "none" }}>
+                <I.chat style={{ fontSize: 12 }} /> Discussion
+              </a>
+            )}
+          </div>
+        ) : null}
+
         <Replies s={s} me={me} onReply={onReply} />
 
         {mergeErr && (
@@ -159,15 +185,15 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
 
         {canReview && open && (
           <div style={{ display: "flex", gap: 7, marginTop: 11, borderTop: "1px solid var(--rule)", paddingTop: 10, flexWrap: "wrap" }}>
-            {s.kind === "suggestion"
+            {isBranch
               ? <button className="btn btn-sm" disabled={busy} style={{ flex: 1, minWidth: 130, background: "var(--verified)", color: "#fff", borderColor: "var(--verified)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: busy ? .7 : 1 }} onClick={doMerge}>
                   {busy ? <span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>⊛</span>}
-                  {busy ? "Merging…" : "Merge → commit"}
+                  {busy ? "Merging…" : "Merge branch"}
                 </button>
               : <button className="btn btn-sm" style={{ flex: 1, minWidth: 110, borderColor: "var(--verified)", color: "var(--verified)" }} onClick={() => onResolve(s.id, "accepted")}><I.check style={{ fontSize: 13 }} /> Mark resolved</button>}
-            {s.status === "proposed" && s.kind === "suggestion" &&
+            {s.status === "proposed" && isBranch &&
               <button className="btn btn-sm" style={{ borderColor: "var(--review)", color: "var(--review)" }} onClick={() => onResolve(s.id, "review")}>Review</button>}
-            <button className="btn btn-sm" style={{ borderColor: "var(--reject)", color: "var(--reject)", display: "inline-flex", alignItems: "center", gap: 5 }} onClick={() => onResolve(s.id, "rejected")} title="Decline"><I.x style={{ fontSize: 13 }} /> Decline</button>
+            <button className="btn btn-sm" style={{ borderColor: "var(--reject)", color: "var(--reject)", display: "inline-flex", alignItems: "center", gap: 5 }} onClick={() => onResolve(s.id, "rejected")} title="Ignore this branch — it stays on the record, just declined"><I.x style={{ fontSize: 13 }} /> Ignore</button>
           </div>
         )}
       </div>
@@ -186,11 +212,12 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn }) {
   const [kind, setKind] = useState(article ? "comment" : (draft.kind || "suggestion"));
   const [proposed, setProposed] = useState(quote);
   const [rationale, setRationale] = useState("");
+  const [visibility, setVisibility] = useState("public"); // public = anyone can see/toggle the branch; private = only the article's authors
   const isSugg = !article && kind === "suggestion";
   const valid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
     : rationale.trim().length >= (article ? 8 : 2);
-  const submit = () => onSubmit({ kind, scope: article ? "article" : "span", anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  const submit = () => onSubmit({ kind, scope: article ? "article" : "span", anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim(), visibility });
   const submitLabel = article ? "Submit contribution" : isSugg ? "Propose edit" : "Post comment";
   return (
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 14, boxShadow: "5px 5px 0 rgba(22,20,13,.14)" }}>
@@ -236,6 +263,21 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn }) {
             {isSugg && proposed.trim() === quote.trim() ? "Edit the proposed text so it differs from the original." : "Add a short reason to deposit."}
           </div>
         )}
+
+        {/* visibility: a public branch anyone can see and toggle on; a private one
+            only the article's authors (and you) can see */}
+        <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "12px 0 5px" }}>Who can see this branch</div>
+        <div style={{ display: "flex", gap: 0, border: "1.5px solid var(--ink)" }}>
+          {[["public", "🌐 Public", "anyone can see & toggle it on"], ["private", "🔒 Private", "only the article's authors"]].map(([v, l, d]) => (
+            <button key={v} onClick={() => setVisibility(v)} title={d} className="np-cond" style={{ flex: 1, padding: "6px 4px", border: 0, cursor: "pointer",
+              borderRight: v === "public" ? "1.5px solid var(--ink)" : 0, fontWeight: 700, fontSize: 12.5,
+              background: visibility === v ? "var(--ink)" : "transparent", color: visibility === v ? "var(--yellow)" : "var(--ink)" }}>{l}</button>
+          ))}
+        </div>
+        <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 5, lineHeight: 1.4 }}>
+          {visibility === "public" ? "Public — everyone reading can preview this branch before it's merged." : "Private — kept between you and the article's authors until they decide."}
+        </div>
+
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{signedIn ? "as " + me : "you'll sign in next"}</span>
           <div style={{ display: "flex", gap: 7 }}>
@@ -252,11 +294,58 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn }) {
   );
 }
 
+/* a compact MERGE-REQUEST TABLE — the same branches as the cards, one row each.
+   "Another view of merge requests": span/kind, who, visibility, status, votes,
+   and the same merge/preview actions an editor has on the card. */
+function MergeRequestTable({ rows, claimOf, canReview, onMerge, onResolve, onPreviewBranch, canSee }) {
+  if (!rows.length) return <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)", fontSize: 14, padding: "8px 0 18px" }}>No merge requests in this view.</div>;
+  const kindOf = (s) => (s.scope === "article" && s.forkBody && s.forkBody.length) ? "Fork" : s.scope === "article" ? "Note" : s.kind === "comment" ? "Comment" : "Branch";
+  const spanOf = (s) => { const c = claimOf(s); const q = (c && c.text) || (s.anchor && s.anchor.quote) || (s.scope === "article" ? "whole article" : ""); return q.length > 38 ? q.slice(0, 38) + "…" : q; };
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", overflowX: "auto" }}>
+      <table className="np-mr-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5 }}>
+        <thead>
+          <tr style={{ background: "var(--ink)", color: "var(--paper)", textAlign: "left" }}>
+            {["", "Span", "From", "See", "Status", "▲", ""].map((h, i) => (
+              <th key={i} className="np-mono" style={{ padding: "6px 8px", fontWeight: 600, fontSize: 9.5, textTransform: "uppercase", letterSpacing: ".04em", whiteSpace: "nowrap" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(s => {
+            const open = s.status === "proposed" || s.status === "review";
+            const isBranch = (s.scope !== "article" && s.kind === "suggestion") || (s.scope === "article" && s.forkBody && s.forkBody.length);
+            return (
+              <tr key={s.id} style={{ borderBottom: "1px solid var(--rule)" }}>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}><span className="np-mono" style={{ fontSize: 10 }}>{kindOf(s)}</span></td>
+                <td style={{ padding: "6px 8px", fontFamily: "var(--serif)", color: "var(--ink)", maxWidth: 150 }}>{spanOf(s)}</td>
+                <td style={{ padding: "6px 8px" }}><Handle mxid={s.author} size={14} /></td>
+                <td style={{ padding: "6px 8px" }} title={s.visibility === "private" ? "Private" : "Public"}>{s.visibility === "private" ? "🔒" : "🌐"}</td>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}><StatusChip status={s.status} merged={s.merged} /></td>
+                <td style={{ padding: "6px 8px", textAlign: "right" }} className="np-mono">{s.votes}</td>
+                <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "right" }}>
+                  {isBranch && open && canSee(s) && <button className="btn btn-sm btn-ghost" title="Toggle branch on" onClick={() => onPreviewBranch && onPreviewBranch(s)} style={{ padding: "2px 6px" }}><I.eye style={{ fontSize: 12 }} /></button>}
+                  {canReview && open && isBranch && <button className="btn btn-sm" title="Merge branch" onClick={() => onMerge(s)} style={{ padding: "2px 6px", marginLeft: 4, color: "var(--verified)", borderColor: "var(--verified)" }}>⊛</button>}
+                  {canReview && open && <button className="btn btn-sm" title="Ignore" onClick={() => onResolve(s.id, "rejected")} style={{ padding: "2px 6px", marginLeft: 4, color: "var(--reject)", borderColor: "var(--reject)" }}><I.x style={{ fontSize: 11 }} /></button>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, canReview,
-                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me,
+                         onVote, onReply, onResolve, onMerge, onShow, onPreviewBranch, owners, composeDraft, onSubmit, onCancelCompose, me,
                          signedIn, onContributeArticle }) {
   const TRUST_RANK = { editor: 3, preferred: 2, open: 1 };
+  const [viewMode, setViewMode] = useState("cards"); // cards | table
+  // a private branch is hidden from anyone who isn't its author or an article author
+  const canSee = (s) => !window.NpjFeedback || !window.NpjFeedback.canSee || window.NpjFeedback.canSee(s, me, owners || []);
   const filtered = list.filter(s => {
+    if (!canSee(s)) return false;
     if (filter === "editor") return s.trust === "editor";
     if (filter === "preferred") return TRUST_RANK[s.trust] >= 2;
     return true;
@@ -314,29 +403,44 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 10px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", margin: "4px 0 10px", gap: 8 }}>
           <span className="np-eyebrow">Open · {active.length}</span>
-          {canReview
-            ? <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)", display: "inline-flex", alignItems: "center", gap: 5 }}><I.shield style={{ fontSize: 12 }} /> you can merge</span>
-            : <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>editors merge</span>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ display: "inline-flex", border: "1px solid var(--rule-strong)" }}>
+              {[["cards", I.chat, "Cards"], ["table", I.data, "Table"]].map(([m, Ic, lbl]) => (
+                <button key={m} onClick={() => setViewMode(m)} title={lbl + " view"} className="np-mono" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, padding: "3px 7px", border: 0, cursor: "pointer",
+                  background: viewMode === m ? "var(--ink)" : "transparent", color: viewMode === m ? "var(--yellow)" : "var(--ink-soft)" }}><Ic style={{ fontSize: 12 }} /> {lbl}</button>
+              ))}
+            </div>
+            {canReview
+              ? <span className="np-mono" style={{ fontSize: 10.5, color: "var(--verified)", display: "inline-flex", alignItems: "center", gap: 5 }}><I.shield style={{ fontSize: 12 }} /> you can merge</span>
+              : <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>editors merge</span>}
+          </div>
         </div>
 
-        {active.map(s => (
-          <SuggestionCard key={s.id} s={s} claim={claimOf(s)} canReview={canReview}
-            onVote={onVote} onReply={onReply} onResolve={onResolve} onMerge={onMerge} onShow={onShow} me={me} />
-        ))}
-        {active.length === 0 && <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)", fontSize: 14, padding: "8px 0 18px" }}>No open suggestions in this view.</div>}
+        {viewMode === "table" ? (
+          <MergeRequestTable rows={active.concat(resolved)} claimOf={claimOf} canReview={canReview}
+            onMerge={onMerge} onResolve={onResolve} onPreviewBranch={onPreviewBranch} canSee={canSee} />
+        ) : (<>
+          {active.map(s => (
+            <SuggestionCard key={s.id} s={s} claim={claimOf(s)} canReview={canReview}
+              onVote={onVote} onReply={onReply} onResolve={onResolve} onMerge={onMerge} onShow={onShow}
+              onPreviewBranch={onPreviewBranch} canPreview={canSee(s)} me={me} />
+          ))}
+          {active.length === 0 && <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", color: "var(--ink-soft)", fontSize: 14, padding: "8px 0 18px" }}>No open suggestions in this view.</div>}
 
-        {resolved.length > 0 && <>
-          <div className="np-rule-thin" style={{ margin: "18px 0 12px" }} />
-          <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Resolved · {resolved.length}</span>
-          <div style={{ marginTop: 10 }}>
-            {resolved.map(s => (
-              <SuggestionCard key={s.id} s={s} claim={claimOf(s)} canReview={canReview}
-                onVote={onVote} onReply={onReply} onResolve={onResolve} onMerge={onMerge} onShow={onShow} me={me} />
-            ))}
-          </div>
-        </>}
+          {resolved.length > 0 && <>
+            <div className="np-rule-thin" style={{ margin: "18px 0 12px" }} />
+            <span className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Resolved · {resolved.length}</span>
+            <div style={{ marginTop: 10 }}>
+              {resolved.map(s => (
+                <SuggestionCard key={s.id} s={s} claim={claimOf(s)} canReview={canReview}
+                  onVote={onVote} onReply={onReply} onResolve={onResolve} onMerge={onMerge} onShow={onShow}
+                  onPreviewBranch={onPreviewBranch} canPreview={canSee(s)} me={me} />
+              ))}
+            </div>
+          </>}
+        </>)}
       </div>
     </aside>
   );

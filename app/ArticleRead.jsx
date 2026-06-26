@@ -341,7 +341,7 @@ function ArticleRead(props) {
           // very same publish pipeline). Same Header + Body the reader uses, just
           // dropped on the paper page with a Close affordance — no masthead,
           // control bar, evidence rails or modals.
-          preview, previewArticle, onClose, onRefresh } = props;
+          preview, previewArticle, branchInfo, onClose, onRefresh } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
   const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
@@ -350,6 +350,9 @@ function ArticleRead(props) {
   // reader instance, so the live page and the editor's Preview each carry their
   // own. Off by default: a clean read.
   const [transparency, setTransparency] = useState(false);
+  // plain prose: strip every citation/claim affordance for a pure read (and a
+  // clean surface to write a contribution against). Forces the clean read.
+  const [naked, setNaked] = useState(false);
   // Preview's "Refresh" bumps this. It re-keys every embed (forcing a brand-new
   // iframe element) and rides along as a throwaway cache-buster on the frame src,
   // so an embed that failed or got cached on its first load is fetched fresh —
@@ -540,6 +543,18 @@ function ArticleRead(props) {
     setCompose({ quote: "", scope: "article", anchor: { scope: "article", quote: "" }, kind: "comment" });
     setShowSugg(true); setHover(null); setBubble(null);
   };
+
+  // Toggle a BRANCH on before merge: render the article with this branch applied
+  // (the fork), read-only, so anyone allowed to see it can read the proposed
+  // version in context. Reuses the very same reader pipeline via preview mode.
+  const [branchPreview, setBranchPreview] = useState(null); // { s, article }
+  const openBranchPreview = (s) => {
+    if (!window.NpjFeedback || !window.NpjFeedback.previewBranch) return;
+    const body = window.NpjFeedback.previewBranch(A.body, s);
+    if (!body) { setBranchErr(s.id); setTimeout(() => setBranchErr(null), 4000); return; }
+    setBranchPreview({ s, article: { ...A, body } });
+  };
+  const [branchErr, setBranchErr] = useState(null);
 
   // ---- select-to-suggest: pick any words in the story → a floating bubble ----
   const closestClaimId = (node) => {
@@ -960,9 +975,16 @@ function ArticleRead(props) {
     return (
       <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
-          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
-          </span>
+          {branchInfo ? (
+            <span className="np-eyebrow" style={{ color: "var(--data)", display: "inline-flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: "var(--mono)" }}>⑂</span> {branchInfo.visibility === "private" ? "Private branch" : "Branch"} — not merged
+              <Handle mxid={branchInfo.author} size={15} showName />
+            </span>
+          ) : (
+            <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
+            </span>
+          )}
           <span style={{ flex: 1 }} />
           <button className="btn btn-sm" onClick={() => setPreviews(v => !v)} aria-pressed={previews}
             title="Previews — hover a claim or footnote and its citation/note floats up in the margin. On by default; turn off for a clean read."
@@ -977,12 +999,14 @@ function ArticleRead(props) {
           {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
              with a fresh cache-buster (reloadTick) — so an embed that's in the draft
              but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
-          <button className="btn btn-sm" onClick={() => { setReloadTick(t => t + 1); if (onRefresh) onRefresh(); }}
-            title="Refresh — rebuild this preview from the editor and reload every embed, bypassing any cached frame"
-            style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <I.redo style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Refresh</span>
-          </button>
-          <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
+          {!branchInfo && (
+            <button className="btn btn-sm" onClick={() => { setReloadTick(t => t + 1); if (onRefresh) onRefresh(); }}
+              title="Refresh — rebuild this preview from the editor and reload every embed, bypassing any cached frame"
+              style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+              <I.redo style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Refresh</span>
+            </button>
+          )}
+          <button className="btn btn-sm" onClick={onClose} title={branchInfo ? "Exit the branch preview (Esc)" : "Back to the editor (Esc)"}>✕ {branchInfo ? "Exit branch" : "Close"}</button>
         </div>
         <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
           {Main}
@@ -1007,7 +1031,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg,
+      <ControlBar {...{ audit, setAudit, naked, setNaked, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg,
         suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
         entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
@@ -1016,7 +1040,7 @@ function ArticleRead(props) {
 
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
         marginLeft: (!isPhone && entityOpen) ? 372 : "auto", marginRight: (!isPhone && showSugg) ? 408 : "auto", transition: "margin .28s" }}
-        className={audit ? "read-audit" : "read-clean"}>
+        className={naked ? "read-clean read-naked" : (audit ? "read-audit" : "read-clean")}>
 
         {hasRail ? (
           <div style={{ display: "grid",
@@ -1059,7 +1083,20 @@ function ArticleRead(props) {
         composeDraft={compose}
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
         onCancelCompose={() => setCompose(null)} me={me} signedIn={signedIn}
-        onContributeArticle={startArticleContribution} />
+        onContributeArticle={startArticleContribution}
+        onPreviewBranch={openBranchPreview} owners={[].concat(A.authors || [], A.assignees || [])} />
+
+      {branchErr && (
+        <div className="np-mono fade-in" style={{ position: "fixed", bottom: 18, left: "50%", transform: "translateX(-50%)", zIndex: 9999,
+          background: "var(--ink)", color: "var(--paper)", padding: "9px 14px", fontSize: 12, lineHeight: 1.4, maxWidth: "90vw", boxShadow: "3px 3px 0 rgba(22,20,13,.3)" }}>
+          Can't preview this one — a comment or a branch whose base has moved. Open it in the rail.
+        </div>
+      )}
+
+      {branchPreview && window.ArticleRead && (
+        <window.ArticleRead preview previewArticle={branchPreview.article} branchInfo={branchPreview.s}
+          onClose={() => setBranchPreview(null)} me={me} />
+      )}
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
         onRevert={revertTo} canRevert={canEditArticle} reverting={reverting} revertErr={revertErr} />}
       {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
@@ -1128,7 +1165,7 @@ function GroundingLegend({ tally, onClose }) {
 }
 
 /* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, onContribute, isAdmin, status, statusBusy, onSetStatus }) {
+function ControlBar({ audit, setAudit, naked, setNaked, transparency, setTransparency, previews, setPreviews, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, onContribute, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
@@ -1163,6 +1200,13 @@ function ControlBar({ audit, setAudit, transparency, setTransparency, previews, 
           style={{ display: "inline-flex", alignItems: "center", gap: 7,
             background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
           <I.shield style={{ fontSize: 14 }} /> Auditability
+        </button>
+
+        <button className="btn btn-sm" onClick={() => setNaked(!naked)} aria-pressed={naked}
+          title="Plain prose — strip every citation marker and claim underline for a pure read (and a clean surface to write a contribution against). Off: the grounded read."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7,
+            background: naked ? "var(--ink)" : "var(--card)", color: naked ? "var(--yellow)" : "var(--ink)" }}>
+          <I.penNib style={{ fontSize: 14 }} /> Plain prose
         </button>
 
         <button className="btn btn-sm" onClick={() => setTransparency(!transparency)} aria-pressed={transparency}
