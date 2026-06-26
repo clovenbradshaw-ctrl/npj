@@ -119,82 +119,72 @@ function CitedSpanList({ claims, onJump, currentId }) {
   );
 }
 
-// The docked preview panel sits at a fixed band below the sticky control bar,
-// so it holds its place on screen instead of riding up and down with each marker.
-const DOCK_TOP = 84;
+/* The docked assertion panel. On a desktop the citation / grounding / note panel
+   slides in from the right as a full-height surface that PUSHES the reading
+   column left (it's never over the prose), holding its place while you read and
+   swapping contents as you move between markers. An "Open" affordance widens it
+   for deeper reading; ✕ or Escape close it. On a phone there's no room for that,
+   so it opens as a bottom sheet instead (handled per panel). These widths are
+   what the reading column reflows by (see ArticleRead). */
+const PANEL_W = 384, PANEL_W_WIDE = 600;
+function panelWidth(expanded, vw) {
+  return Math.min(expanded ? PANEL_W_WIDE : PANEL_W, Math.max(300, (vw || 1200) - 8));
+}
+// Right-edge dock, full height under the sticky control bar (dockTop). The card
+// itself is position:fixed (see .srccard/.fnpop/.gpop); this just places + sizes
+// it and lets its own body scroll.
+function dockedStyle(dockTop, expanded, vw) {
+  return { left: "auto", right: 0, top: dockTop, bottom: "auto",
+    height: "calc(100vh - " + dockTop + "px)", width: panelWidth(expanded, vw),
+    maxHeight: "none", overflowY: "auto" };
+}
 
-/* Dock a preview panel BESIDE the reading column — out in the margin, never over
-   the prose — so it never covers what you're reading yet stays a short hop away.
-   It's a side panel that STAYS PUT: given the article column's rect it picks one
-   stable gutter (the roomier free margin, skipping a gutter an open rail has
-   already claimed — the ledger, the suggestions or figures rail) and pins itself
-   to a fixed band near the top, rather than hopping side to side and up and down
-   with the marker. Shrinks to fit and clamps to the viewport. Returns null when
-   neither margin has room (a narrow window) — the caller then drops back to
-   anchoring under the marker. */
-function besideColumn(mk, col, opts) {
-  if (!mk || !col) return null;
-  const { vw, vh, gap = 16, blockL, blockR } = opts;
-  const leftRoom = col.left;          // clear margin to the left of the prose
-  const rightRoom = vw - col.right;   // …and to the right
-  // as wide as a full card, shrunk to the roomier gutter, never below a readable
-  // measure (a card narrower than this isn't worth pulling out to the side)
-  const best = Math.max(blockL ? 0 : leftRoom, blockR ? 0 : rightRoom);
-  // a roomier card than a tooltip — wide enough to read a passage and click into
-  // without it feeling cramped, still capped so it stays a margin note, not a panel
-  const w = Math.min(404, Math.max(300, best - gap - 12));
-  const canL = !blockL && leftRoom >= w + gap + 12;
-  const canR = !blockR && rightRoom >= w + gap + 12;
-  if (!canL && !canR) return null;
-  // dock to ONE stable gutter — the roomier of the two free margins, NOT the one
-  // nearest the marker — so the panel keeps its place instead of jumping sides as
-  // you move between markers (a side an open rail claimed is already ruled out)
-  const side = canR && (!canL || rightRoom >= leftRoom) ? "right" : "left";
-  const left = side === "right" ? col.right + gap : col.left - gap - w;
-  // pin the panel to a fixed band rather than the marker's line, so it stays in
-  // place on screen as you scroll and read (it scrolls within maxHeight if long)
-  const top = Math.min(DOCK_TOP, vh - 220);
-  return { left, top, width: w, maxHeight: vh - top - 16, docked: true };
+/* The Open / Collapse affordance — widens the docked panel and back. Desktop
+   only (a phone sheet is already full-width). Mirrors the design mockup's OPEN. */
+function PanelExpandBtn({ expanded, onToggle }) {
+  if (!onToggle) return null;
+  return (
+    <button onMouseDown={e => e.preventDefault()} onClick={onToggle}
+      aria-label={expanded ? "Collapse the panel" : "Open the panel wider"}
+      title={expanded ? "Collapse — narrow the panel" : "Open — widen the panel for deeper reading"}
+      className="np-mono gpop-open" style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11,
+        lineHeight: 1.4, cursor: "pointer", padding: "3px 8px", border: "1px solid var(--rule)", borderRadius: 4,
+        background: "none", color: "var(--ink-soft)" }}>
+      <I.expand style={{ fontSize: 13 }} /> {expanded ? "Collapse" : "Open"}
+    </button>
+  );
 }
 
 /* ---- source citation card ---- */
-// On a pointer device this floats in the margin beside the hovered claim. On a
-// phone there's no hover and no room to pin a card to a tapped word, so it opens
-// instead as a dismissible bottom sheet (tap the backdrop or ✕ to close) —
-// thumb-reachable and full-width, which is how a touch reader opens the receipts.
-function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand }) {
+// On a desktop this docks as a full-height side panel on the right that pushes
+// the reading column over (never over the prose). On a phone there's no room for
+// that, so it opens as a dismissible bottom sheet (tap the backdrop or ✕ to
+// close) — thumb-reachable and full-width, which is how a touch reader opens the
+// receipts.
+function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, spansForSource, onJump, preview, onExpand, expanded, onToggleExpand, dockTop = 56 }) {
   // Hooks first, before any early return, so the hook order is stable whether
   // or not a claim is being hovered (data toggles null↔set on hover).
   const [tab, setTab] = useState(0);
   const isPhone = window.useIsMobile(760);
   React.useEffect(() => setTab(0), [data && data.claim && data.claim.id]);
   if (!data) return null;
-  const { claim, x, y, srcKeys, mk, col, blockL, blockR } = data;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const { claim, srcKeys } = data;
+  const vw = window.innerWidth;
   // the other passages this same source backs — so you can hop between them
   const spans = spansForSource ? spansForSource(srcKeys[tab]) : [];
 
   const sheet = isPhone;
-  // On a desktop the card lives in the margin beside the column (besideColumn);
-  // only when the window's too narrow for a gutter does it anchor under the marker.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "72vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
-  } else if (beside) {
-    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
-    // no room either side — anchor under the marker (flip up near the foot)
-    const w = Math.min(404, vw - 24);
-    const left = Math.min(Math.max(12, x), vw - w - 12);
-    const top = y + 8;
-    const flip = top > vh - 260;
-    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+    // a docked right-hand side panel, full height under the control bar
+    cardStyle = dockedStyle(dockTop, expanded, vw);
   }
 
   const inner = (
-    <div className="srccard np-scroll" role="dialog" aria-label="Citation for this claim"
+    <div className={"srccard np-scroll" + (sheet ? "" : " np-dockpanel")} role="dialog" aria-label="Citation for this claim"
       style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onEnter} onBlur={onLeave}>
       {sheet && (
@@ -204,11 +194,13 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
           <button onClick={onClose} aria-label="Close citation" style={{ background: "none", border: 0, fontSize: 22, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "2px 6px" }}><I.x /></button>
         </div>
       )}
-      {/* the panel stays put on a desktop too, so it carries a header with its own
-         dismiss (✕ or Esc) instead of fading when the pointer leaves */}
+      {/* the docked panel carries a header pinned to the top with its Open / ✕
+         affordances (Esc closes too); it stays put instead of fading on leave */}
       {!sheet && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1.5px solid var(--ink)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1.5px solid var(--ink)",
+          position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}><I.source style={{ fontSize: 14 }} /> Citation</span>
+          <PanelExpandBtn expanded={expanded} onToggle={onToggleExpand} />
           <button onClick={onClose} aria-label="Close citation" style={{ background: "none", border: 0, fontSize: 20, lineHeight: 1, cursor: "pointer", color: "var(--ink)", padding: "0 4px" }}><I.x /></button>
         </div>
       )}
@@ -257,38 +249,30 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
 // losing your place. The note text still has its permanent home in the "Notes"
 // endnotes — this card is the inline preview, with a link down to it. Mirrors
 // HoverCard's positioning (margin card on a desktop; a bottom sheet on a phone).
-function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand }) {
+function FootnotePop({ data, onEnter, onLeave, onClose, onJump, onExpand, expanded, onToggleExpand, dockTop = 56 }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
-  const { num, text, x, y, mk, col, blockL, blockR } = data;
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const { num, text } = data;
+  const vw = window.innerWidth;
   const sheet = isPhone;
-  // Mirrors HoverCard: float in the margin beside the marker, anchoring under it
-  // only when there's no gutter to spare.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "60vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
-  } else if (beside) {
-    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
-    const w = Math.min(404, vw - 24);
-    const left = Math.min(Math.max(12, x - 16), vw - w - 12);
-    const top = y + 8;
-    const flip = top > vh - 220;
-    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+    cardStyle = dockedStyle(dockTop, expanded, vw);
   }
   const inner = (
-    <div className="fnpop np-scroll" role="dialog" aria-label={"Footnote " + num} style={cardStyle}
+    <div className={"fnpop np-scroll" + (sheet ? "" : " np-dockpanel")} role="dialog" aria-label={"Footnote " + num} style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <div className="fnpop-h">
+      <div className="fnpop-h" style={sheet ? undefined : { position: "sticky", top: 0, background: "var(--card)", zIndex: 1, paddingBottom: 9, borderBottom: "1.5px solid var(--ink)" }}>
         <span className="np-mono fnpop-n">{num}</span>
         <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>Note</span>
+        {!sheet && <PanelExpandBtn expanded={expanded} onToggle={onToggleExpand} />}
         {onExpand && (
           <button onMouseDown={e => e.preventDefault()} onClick={() => onExpand(data)} aria-label="Open in full" title="Open in full — take the main stage"
             className="np-mono gpop-open" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, lineHeight: 1.4, cursor: "pointer", padding: "2px 7px", border: "1px solid var(--rule)", borderRadius: 4, background: "none", color: "var(--ink-soft)" }}>
-            <I.expand style={{ fontSize: 13 }} /> Open
+            <I.expand style={{ fontSize: 13 }} /> Full
           </button>
         )}
         {/* the panel stays put, so it always carries its own dismiss — ✕ (or Esc) */}
@@ -353,39 +337,31 @@ function groundingDetail(tok) {
 // declaration, or by a documented absence of a given kind, and whether that absence
 // is shown, located or only inferred (void-kinds.js). Mirrors FootnotePop's
 // positioning: a margin card on a desktop, a dismissible bottom sheet on a phone.
-function GroundingPop({ data, onEnter, onLeave, onClose, onExpand }) {
+function GroundingPop({ data, onEnter, onLeave, onClose, onExpand, expanded, onToggleExpand, dockTop = 56 }) {
   const isPhone = window.useIsMobile(760);
   if (!data) return null;
-  const { tok, x, y, mk, col, blockL, blockR } = data;
+  const { tok } = data;
   const { isAbsence, glyph, accent, kicker, headline, ariaLabel, blurb, standLine, noteLabel } = groundingDetail(tok);
-  const vw = window.innerWidth, vh = window.innerHeight;
+  const vw = window.innerWidth;
   const sheet = isPhone;
-  // Mirrors FootnotePop: float in the margin beside the marker, anchoring under it
-  // only when there's no gutter to spare.
-  const beside = sheet ? null : besideColumn(mk, col, { vw, vh, blockL, blockR });
   let cardStyle;
   if (sheet) {
     cardStyle = { left: 0, right: 0, bottom: 0, top: "auto", width: "100%", maxHeight: "62vh", overflowY: "auto",
       borderWidth: "1.5px 0 0", boxShadow: "0 -10px 30px rgba(8,7,5,.4)" };
-  } else if (beside) {
-    cardStyle = { left: beside.left, top: beside.top, width: beside.width, maxHeight: beside.maxHeight, overflowY: "auto" };
   } else {
-    const w = Math.min(404, vw - 24);
-    const left = Math.min(Math.max(12, x - 16), vw - w - 12);
-    const top = y + 8;
-    const flip = top > vh - 220;
-    cardStyle = { left, top: flip ? "auto" : top, bottom: flip ? vh - y + 14 : "auto", width: w };
+    cardStyle = dockedStyle(dockTop, expanded, vw);
   }
   const inner = (
-    <div className="gpop np-scroll" role="dialog" aria-label={ariaLabel} style={cardStyle}
+    <div className={"gpop np-scroll" + (sheet ? "" : " np-dockpanel")} role="dialog" aria-label={ariaLabel} style={cardStyle}
       onMouseEnter={onEnter} onMouseLeave={onLeave}>
-      <div className="gpop-h" style={{ borderLeft: "3px solid " + accent }}>
+      <div className="gpop-h" style={sheet ? { borderLeft: "3px solid " + accent } : { borderLeft: "3px solid " + accent, position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
         <span className="gpop-g np-mono" style={{ color: accent }}>{glyph}</span>
         <span className="np-eyebrow" style={{ flex: 1, color: "var(--ink-soft)" }}>{kicker}</span>
+        {!sheet && <PanelExpandBtn expanded={expanded} onToggle={onToggleExpand} />}
         {onExpand && (
           <button onMouseDown={e => e.preventDefault()} onClick={() => onExpand(tok)} aria-label="Open in full" title="Open in full — take the main stage"
             className="np-mono gpop-open" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, lineHeight: 1.4, cursor: "pointer", padding: "2px 7px", border: "1px solid var(--rule)", borderRadius: 4, background: "none", color: "var(--ink-soft)" }}>
-            <I.expand style={{ fontSize: 13 }} /> Open
+            <I.expand style={{ fontSize: 13 }} /> Full
           </button>
         )}
         {/* the panel stays put, so it always carries its own dismiss — ✕ (or Esc) */}
@@ -632,6 +608,11 @@ function ArticleRead(props) {
   useEffect(() => {
     if (!previews) { setHover(null); setFnPop(null); setGroundPop(null); setActiveSrc(null); }
   }, [previews]);
+  // The docked side panel's "Open" affordance — widens it for deeper reading. One
+  // flag shared by all three panel kinds (citation / grounding / note) since only
+  // one is open at a time. Reset to collapsed once the panel fully closes.
+  const [panelExpanded, setPanelExpanded] = useState(false);
+  const toggleExpand = useCallback(() => setPanelExpanded(v => !v), []);
   const footnoteByKey = React.useMemo(() => {
     const m = {};
     (A.body || []).forEach(b => { if (b.type === "footnotes") (b.notes || []).forEach(n => { if (n && n.key) m[n.key] = n; }); });
@@ -658,6 +639,31 @@ function ArticleRead(props) {
   // reading column off-screen), and tapping a claim opens its citation as a
   // bottom sheet, since there's no hover on touch
   const isPhone = window.useIsMobile(760);
+  // where the docked panel's top edge sits — flush under the sticky control bar,
+  // tracking the bar's live bottom as the masthead scrolls away (then constant
+  // once the bar sticks). Desktop only; a phone gets a bottom sheet.
+  const [dockTop, setDockTop] = useState(56);
+  useEffect(() => {
+    if (isPhone) return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      const el = document.getElementById("npj-reader-bar");
+      const top = el ? Math.max(0, Math.round(el.getBoundingClientRect().bottom)) : 56;
+      setDockTop(prev => (prev === top ? prev : top));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(measure); };
+    measure();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => { window.removeEventListener("scroll", onScroll); window.removeEventListener("resize", onScroll); if (raf) cancelAnimationFrame(raf); };
+  }, [isPhone, preview]);
+  // the docked panel is open when any of the three kinds is showing; the reading
+  // column reflows left by its width (desktop only — a phone sheet overlays).
+  const panelOpen = !isPhone && !!(hover || fnPop || groundPop);
+  const panelReflow = panelOpen ? panelWidth(panelExpanded, typeof window !== "undefined" ? window.innerWidth : 1200) : 0;
+  // once the panel fully closes, collapse it back to its default width
+  useEffect(() => { if (!panelOpen) setPanelExpanded(false); }, [panelOpen]);
   // edit-after-publish: the admin always; otherwise only the article's
   // assignees (the publisher is one by default — see genesisFromContent)
   const canEditArticle = isAdmin || (Array.isArray(A.assignees) && A.assignees.includes(me));
@@ -1284,7 +1290,7 @@ function ArticleRead(props) {
   if (preview) {
     return (
       <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
+        <div id="npj-reader-bar" style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
             <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
@@ -1300,24 +1306,27 @@ function ArticleRead(props) {
           </button>
           <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
         </div>
-        <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
-          {Main}
+        <div style={{ paddingRight: panelReflow, transition: "padding-right .28s cubic-bezier(.22,.61,.36,1)" }}>
+          <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
+            {Main}
+          </div>
         </div>
         {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransLevel("standard")} />}
-        {/* Grounding receipts on hover — the SAME citation card the public reader
-           shows. Hover (or tap, on a phone) a claim and its source card floats
-           up, so the author can audit the grounding in the preview exactly as a
-           reader will. Lives INSIDE the fixed preview overlay so it stacks above
-           it. The body already wires enterClaim on each .claim span; the reader
-           branch just renders this card off the same hover state. */}
+        {/* Grounding receipts on hover — the SAME docked panel the public reader
+           shows. Hover (or tap, on a phone) a claim and its source panel slides in,
+           so the author can audit the grounding in the preview exactly as a reader
+           will. Lives INSIDE the fixed preview overlay so it stacks above it. The
+           body already wires enterClaim on each .claim span; the reader branch
+           just renders this panel off the same hover state. */}
         <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
-          onClose={() => { setHover(null); setActiveSrc(null); }}
+          onClose={() => { setHover(null); setActiveSrc(null); }} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
           spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
         <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
-          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
+          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
           onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
         <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
-          onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
+          onClose={() => setGroundPop(null)} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
+          onExpand={(tok) => openStage({ kind: "ground", tok })} />
         <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
         {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
       </div>
@@ -1333,6 +1342,9 @@ function ArticleRead(props) {
         canEdit: canEditArticle, onEdit: () => setEditing(true), onExport: () => setShowExport(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
+      {/* the docked side panel pushes the reading column over: a right gutter the
+         width of the panel, so the prose reflows left and nothing is covered */}
+      <div style={{ paddingRight: panelReflow, transition: "padding-right .28s cubic-bezier(.22,.61,.36,1)" }}>
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
         marginLeft: (!isPhone && entityOpen) ? 372 : "auto", marginRight: (!isPhone && showSugg) ? 408 : "auto", transition: "margin .28s" }}
         className={audit ? "read-audit" : "read-clean"}>
@@ -1352,17 +1364,19 @@ function ArticleRead(props) {
           <div style={{ maxWidth: COL, margin: "0 auto" }}>{Main}</div>
         )}
       </div>
+      </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
-        onClose={() => { setHover(null); setActiveSrc(null); }}
+        onClose={() => { setHover(null); setActiveSrc(null); }} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
         suggCount={hover ? openByClaim[hover.claim.id] : 0} spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} />
 
       <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave}
-        onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
+        onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
         onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
 
       <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave}
-        onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
+        onClose={() => setGroundPop(null)} expanded={panelExpanded} onToggleExpand={toggleExpand} dockTop={dockTop}
+        onExpand={(tok) => openStage({ kind: "ground", tok })} />
 
       <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
 
@@ -1524,7 +1538,7 @@ function TransparencyControl({ level, setLevel }) {
 function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, onExport, isAdmin, status, statusBusy, onSetStatus }) {
   const isPhone = window.useIsMobile(760);
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
+    <div id="npj-reader-bar" style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
         {!isPhone && <span style={{ flex: 1 }} />}
 

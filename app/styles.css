@@ -257,6 +257,20 @@ a { color: inherit; }
 }
 @keyframes pop { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 
+/* ---- the docked assertion panel (desktop) ----
+   The citation / grounding / note panel docks to the right edge as a full-height
+   surface that slides in and PUSHES the reading column over (the column reflows
+   in ArticleRead). A left-edge shadow instead of the floating card's corner one;
+   the width animates when the "Open" affordance widens it. */
+@keyframes panelin { from { transform: translateX(22px); opacity: .35; } to { transform: none; opacity: 1; } }
+.np-dockpanel {
+  animation: panelin .3s cubic-bezier(.22,.61,.36,1) !important;
+  box-shadow: -18px 0 44px rgba(8,7,5,.13) !important;
+  border-right: 0 !important;
+  transition: width .25s cubic-bezier(.22,.61,.36,1);
+}
+@media (prefers-reduced-motion: reduce) { .np-dockpanel { animation: none !important; } }
+
 /* ---- footnote inline preview (FootnotePop) — the Substack hover/tap card ----
    The note floats up next to its marker so the reader never loses their place;
    it's the same paper card as a citation, just lighter. */
