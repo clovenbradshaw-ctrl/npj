@@ -30,6 +30,7 @@ function AdminEditor() {
   const [newRole, setNewRole] = useState("editor");
   const [expandCol, setExpandCol] = useState(null);
   const [expandProfile, setExpandProfile] = useState(null); // mxid whose name/bio is open
+  const [hover, setHover] = useState(false); // launcher collapses to an icon until hovered/open
 
   // Every hook stays ABOVE this guard. isAdmin flips false→true the moment the
   // admin signs in, so an early return placed before some of the hooks changes
@@ -125,12 +126,16 @@ function AdminEditor() {
 
   return (
     <React.Fragment>
-      {/* launcher — bottom-left, distinct from Tweaks/Citey */}
+      {/* launcher — bottom-left, distinct from Tweaks/Citey. Collapsed to an icon
+          so it stays out of the way; expands to its label on hover or while open. */}
       <button onClick={() => setOpen(o => !o)} title="Admin: edit site layout"
-        style={{ position: "fixed", left: 18, bottom: 18, zIndex: 6000, display: "inline-flex", alignItems: "center", gap: 8,
+        onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+        onFocus={() => setHover(true)} onBlur={() => setHover(false)}
+        style={{ position: "fixed", left: 18, bottom: 18, zIndex: 6000, display: "inline-flex", alignItems: "center", gap: (open || hover) ? 8 : 0,
           background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)",
-          padding: "9px 14px", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>
-        <span style={{ fontFamily: "var(--mono)" }}>⊛</span> {open ? "Close" : "Edit layout"}
+          padding: (open || hover) ? "9px 14px" : "9px 11px", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer", transition: "gap .15s ease, padding .15s ease" }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 15, lineHeight: 1 }}>⊛</span>
+        <span style={{ maxWidth: (open || hover) ? 140 : 0, overflow: "hidden", whiteSpace: "nowrap", transition: "max-width .18s ease" }}>{open ? "Close" : "Edit layout"}</span>
       </button>
 
       {open && (
