@@ -16,12 +16,13 @@
  *      when the homeserver gates media behind auth — and PUTs them to archive.org
  *      as a real item via the S3-style API. Optional: that webhook may not be
  *      deployed, in which case this step is skipped.
- *   2. Download + reupload (site/media-npj): fetch the media-store bytes with the
- *      author's session (works on auth-gated homeservers) and POST them to the
- *      media endpoint, which PUTs to archive.org. This endpoint ships with
- *      publish, and works even when the AUTHOR's network can't reach archive.org
- *      (n8n does the PUT). The archive.org S3 keys live server-side, never in the
- *      browser.
+ *   2. Download + reupload (site/media-npj → site/media-archive-npj): fetch the
+ *      media-store bytes with the author's session (works on auth-gated
+ *      homeservers), POST them to media-npj — which stores them in the Matrix
+ *      media repo server-side and returns a fresh mxc — then migrate that mxc to
+ *      archive.org via media-archive-npj. Works even when the AUTHOR's network
+ *      can't reach archive.org (n8n does the PUT). The archive.org S3 keys live
+ *      server-side, never in the browser.
  *   3. Wayback freeze (fallback, no keys): Save Page Now on the media-store URL,
  *      the same path the app already uses to freeze sources. Only reaches the
  *      bytes if the homeserver serves media unauthenticated.
@@ -100,7 +101,14 @@
         headers: { "Authorization": "Bearer " + token, "Content-Type": (blob && blob.type) || "application/octet-stream" },
         body: blob
       });
-    } catch (e) { throw new Error("Couldn't reach the media store."); }
+    } catch (e) {
+      // The direct browser → media-repo POST couldn't even connect — almost
+      // always CORS (the homeserver's media endpoint isn't open to the app
+      // origin). Fall back to the server-side media-npj endpoint, which does
+      // the same Matrix upload from n8n (no browser CORS) and hands back the mxc.
+      try { return await uploadViaBackend(blob, name); }
+      catch (e2) { throw new Error((e2 && e2.message) || "Couldn't reach the media store."); }
+    }
     // Size rejections are tagged (err.tooLarge) so the caller can shrink-and-retry
     // a tall document instead of just surfacing a dead end. Both the standard 413
     // and a 200-shaped homeserver error with errcode M_TOO_LARGE are honoured.
@@ -114,6 +122,39 @@
     const mxc = j && j.content_uri;
     if (!mxc) throw new Error("The media store returned no URL.");
     return { url: mxcToHttp(mxc, base), mxc };
+  }
+
+  /* uploadViaBackend(blob, filename) → Promise<{url, mxc}>. The server-side draft
+     upload: POST the bytes (base64) + the author's Matrix token to the n8n
+     media-npj endpoint, which stores them in the homeserver's media repo and
+     answers { ok, mxc, filename }. Used when the browser can't PUT to the media
+     repo directly (CORS) — n8n does the upload, so the app never touches the
+     media API cross-origin. Returns the durable https URL + the mxc. */
+  async function uploadViaBackend(blob, filename) {
+    const m = MA();
+    const token = m && m.token && m.token();
+    if (!token) throw new Error("Sign in with Matrix to upload images.");
+    const name = filename || (blob && blob.name) || ("image-" + Date.now() + ".webp");
+    const b64 = await blobToBase64(blob);
+    let res;
+    try {
+      res = await fetchT(mediaEndpoint(), {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+        body: JSON.stringify({
+          filename: name, mimetype: (blob && blob.type) || "image/webp",
+          title: name, contentBase64: b64
+        })
+      }, 120000);
+    } catch (e) {
+      throw new Error(e && e.name === "AbortError"
+        ? "Media upload timed out — the media service took too long."
+        : "Couldn't reach the media store.");
+    }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!res.ok || !j || !j.ok || !j.mxc) throw new Error((j && j.error) || ("Media upload failed (HTTP " + res.status + ")."));
+    const base = (sess() && sess().base_url) || "";
+    return { url: mxcToHttp(j.mxc, base), mxc: j.mxc };
   }
 
   /* uploadLimit() → Promise<number|null>. The homeserver's max upload size in
@@ -249,36 +290,21 @@
   }
 
   /* uploadToArchive(blob, {identifier, filename, title}) → Promise<archive.org URL>.
-     POSTs the bytes (base64) + the author's Matrix token to the n8n media
-     endpoint; n8n PUTs to archive.org and answers { ok, url } (or { ok:false,
-     error }). Rejects loudly so the caller can fall back or warn. */
+     The bytes path to archive.org, in two server-side hops that match the
+     deployed n8n endpoints:
+       1. media-npj stores the bytes in the homeserver's media repo and returns
+          an mxc (it is a Matrix uploader, NOT an archive.org uploader).
+       2. media-archive-npj migrates that mxc onto archive.org and returns the
+          durable url.
+     Used when the caller has the bytes but no usable mxc to migrate directly
+     (e.g. the src wasn't a recognizable media-store URL). Rejects loudly so the
+     caller can fall back or warn. */
   async function uploadToArchive(blob, opts) {
-    const m = MA();
-    const token = m && m.token && m.token();
-    if (!token) throw new Error("Sign in to upload to archive.org.");
-    const b64 = await blobToBase64(blob);
-    let res;
-    try {
-      // n8n PUTs the bytes to archive.org within the request — that round-trip can
-      // take up to a minute, so give it the same generous bound migrateToArchive
-      // uses rather than letting a stalled PUT hang the publish forever.
-      res = await fetchT(mediaEndpoint(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({
-          identifier: opts.identifier, filename: opts.filename,
-          mimetype: (blob && blob.type) || "image/webp",
-          title: opts.title || "", contentBase64: b64
-        })
-      }, 120000);
-    } catch (e) {
-      throw new Error(e && e.name === "AbortError"
-        ? "archive.org upload timed out — the media upload service took too long."
-        : "Couldn't reach the media upload service.");
-    }
-    let j = null; try { j = await res.json(); } catch (e) {}
-    if (!res.ok || !j || !j.ok || !j.url) throw new Error((j && j.error) || ("archive.org upload failed (HTTP " + res.status + ")."));
-    return j.url;
+    const stored = await uploadViaBackend(blob, opts.filename);
+    return await migrateToArchive(stored.mxc, {
+      identifier: opts.identifier, filename: opts.filename,
+      mimetype: (blob && blob.type) || "image/webp", title: opts.title || ""
+    });
   }
 
   /* migrateToArchive(mxc, {identifier, filename, mimetype, title}) → Promise<archive.org URL>.
@@ -334,11 +360,11 @@
   //      the bytes from the homeserver and PUTs them to archive.org — no byte
   //      download in the browser. Best, but optional: that webhook may not be
   //      deployed.
-  //   2. download + reupload the bytes (site/media-npj): fetch the media-store
-  //      bytes with the author's session (works even on auth-gated homeservers)
-  //      and POST them to the media endpoint that PUTs to archive.org. This is
-  //      the endpoint that always ships with publish, and it works even when the
-  //      author's own network can't reach archive.org (n8n does the PUT).
+  //   2. download + reupload the bytes (site/media-npj → site/media-archive-npj):
+  //      fetch the media-store bytes with the author's session (works even on
+  //      auth-gated homeservers), POST them to media-npj to get a fresh mxc, then
+  //      migrate that mxc to archive.org. Works even when the author's own network
+  //      can't reach archive.org (n8n does the PUT).
   //   3. keyless Wayback snapshot of the media-store URL.
   async function toArchive(srcUrl, ctx) {
     const mxc = httpToMxc(srcUrl);
@@ -478,7 +504,7 @@
 
   root.NpjMedia = {
     canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint,
-    upload, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
+    upload, uploadViaBackend, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
     freeze, freezeArticleMedia, slotNeedsArchive, prearchiveCensus, prearchiveSlots
   };
 
