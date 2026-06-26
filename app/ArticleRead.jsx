@@ -123,6 +123,20 @@ function CitedSpanList({ claims, onJump, currentId }) {
 // so it holds its place on screen instead of riding up and down with each marker.
 const DOCK_TOP = 84;
 
+// ---- slide-aside layout for the docked panels ----
+// On a wide window, rather than tucking the citation/note/grounding card into
+// whatever margin happens to be free (where it rides over wide figures and sits
+// a hair off the prose), the reading column slides over to CEDE a fixed gutter
+// and the panel pins to that gutter at the viewport's edge. Prose and panel then
+// sit centered side by side — neither overlaps the other, and the panel stays
+// put as the column glides into place. The reader/preview content reserves the
+// same RESERVE_GUTTER on its right so the two halves line up.
+const PANEL_W = 404;                       // a docked margin panel at full width
+const RESERVE_GUTTER = PANEL_W + 16 * 2;   // the gutter the reading column gives up for it
+// only engage the slide once the window is wide enough that the column keeps a
+// comfortable measure after ceding the gutter (≈ COL 700 + gutter + breathing room)
+const RESERVE_MIN_VW = 1180;
+
 /* Dock a preview panel BESIDE the reading column — out in the margin, never over
    the prose — so it never covers what you're reading yet stays a short hop away.
    It's a side panel that STAYS PUT: given the article column's rect it picks one
@@ -135,6 +149,15 @@ const DOCK_TOP = 84;
 function besideColumn(mk, col, opts) {
   if (!mk || !col) return null;
   const { vw, vh, gap = 16, blockL, blockR } = opts;
+  // Slide-aside: on a wide window with no rail already holding a margin, the
+  // reading column cedes RESERVE_GUTTER on its right (see the content padding in
+  // the reader/preview), so the panel pins to that gutter at the viewport edge —
+  // a steady column that never rides over the prose or its figures, and holds
+  // its place while the column glides over. Matches the parent's reserveAside.
+  if (vw >= RESERVE_MIN_VW && !blockL && !blockR) {
+    const top = Math.min(DOCK_TOP, vh - 220);
+    return { left: vw - gap - PANEL_W, top, width: PANEL_W, maxHeight: vh - top - 16, docked: true };
+  }
   const leftRoom = col.left;          // clear margin to the left of the prose
   const rightRoom = vw - col.right;   // …and to the right
   // as wide as a full card, shrunk to the roomier gutter, never below a readable
@@ -666,6 +689,13 @@ function ArticleRead(props) {
   // side (in Preview there are no rails, so both margins are free)
   const railBlockR = !preview && (audit || showSugg);
   const railBlockL = !preview && entityOpen;
+  // Slide-aside: when a docked citation/note/grounding panel is up on a wide
+  // window — and no rail is already holding a margin — the reading column slides
+  // over to cede a gutter for it (besideColumn pins the panel to that gutter), so
+  // the prose and the panel sit centered side by side instead of the panel riding
+  // over the page. On a phone the panels are bottom sheets, so it never engages.
+  const reserveAside = previews && !isPhone && !railBlockL && !railBlockR &&
+    !!(hover || fnPop || groundPop) && window.innerWidth >= RESERVE_MIN_VW;
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
   // the glossary + Sources footer are sections too — list them at the foot of
@@ -1310,8 +1340,10 @@ function ArticleRead(props) {
           )}
           <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
         </div>
-        <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
-          {Main}
+        <div style={{ transition: "padding .28s", paddingRight: reserveAside ? RESERVE_GUTTER : 0 }}>
+          <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
+            {Main}
+          </div>
         </div>
         {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransLevel("standard")} />}
         {/* Grounding receipts on hover — the SAME citation card the public reader
@@ -1344,6 +1376,10 @@ function ArticleRead(props) {
         canEdit: canEditArticle, onEdit: () => setEditing(true),
         isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
 
+      {/* When a docked citation/note/grounding panel is up on a wide window, cede
+         a right gutter for it so the column slides left and the two sit centered
+         side by side (besideColumn pins the panel into this gutter). */}
+      <div style={{ transition: "padding .28s", paddingRight: reserveAside ? RESERVE_GUTTER : 0 }}>
       <div style={{ maxWidth: hasRail && !stackRail ? COL + 2 * (railW + railGap) : COL, padding: isPhone ? "18px 16px 64px" : "30px 22px 80px",
         marginLeft: (!isPhone && entityOpen) ? 372 : "auto", marginRight: (!isPhone && showSugg) ? 408 : "auto", transition: "margin .28s" }}
         className={audit ? "read-audit" : "read-clean"}>
@@ -1362,6 +1398,7 @@ function ArticleRead(props) {
         ) : (
           <div style={{ maxWidth: COL, margin: "0 auto" }}>{Main}</div>
         )}
+      </div>
       </div>
 
       <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave} onSuggest={startCompose}
