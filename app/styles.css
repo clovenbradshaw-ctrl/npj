@@ -106,27 +106,35 @@ a { color: inherit; }
 
 /* ---- the lede drop cap: a dark serif initial on a brand-yellow block ---- */
 /* The opening paragraph's first character is lifted into this floated box (see
-   ArticleRead) and the prose wraps to its right. The box is sized to stand
-   about three lines tall, the letter centered in the body serif. */
+   ArticleRead) and the prose wraps to its right. The box stands about two lines
+   tall — enough presence without overhanging a short lede — the letter centered
+   in the body serif. */
 .np-dropcap-box {
   float: left;
   display: flex;
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: 1.2em;
-  height: 1.2em;
-  margin: 0.03em 0.22em 0.03em 0;
+  width: 1.22em;
+  height: 1.22em;
+  margin: 0.04em 0.26em 0.04em 0;
   font-family: var(--serif);
   font-weight: 600;
-  font-size: 3.7em;
+  font-size: 2.7em;
   line-height: 1;
   background: var(--yellow);
   color: var(--ink);
 }
+/* A single capital centers high in its line box — the empty descender space
+   rides below the baseline — so nudge the glyph down to sit optically centered
+   (em-relative, so it holds at any size). */
+.np-dropcap-box > span {
+  display: block;
+  transform: translateY(0.08em);
+}
 @media (max-width: 560px) {
   /* a touch smaller so the block never dominates a narrow measure */
-  .np-dropcap-box { font-size: 3.2em; }
+  .np-dropcap-box { font-size: 2.4em; }
 }
 
 /* the grounded glyph (⊥) — a claim standing on its source: a stem planted on
