@@ -141,6 +141,11 @@
 <!-- source provenance: synthetic dedup (one signature per content, linked across
      projects) + backtracking (source → every article that cites it). No model. -->
 <script src="app/sources.js"></script>
+<!-- definitions: the per-article glossary + the COLLECTIVE published-definition
+     index across the record (window.NpjDefinitions). Terms are extracted by
+     eoreader4 (the bridge below) and counted relative to the article's length;
+     a term may carry conflicting definitions drawn from past articles. -->
+<script src="app/definitions.js"></script>
 <!-- pii-v2 pack: mechanical recognizers (regex + checksum + context) for
      data-shaped PII — phones, SSNs, cards, addresses, emails (no name-guessing) —
      that surface candidate spans + hard-redact them before a source hits

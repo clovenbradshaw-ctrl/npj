@@ -15,11 +15,20 @@
  */
 import { ingestText } from "../vendor/eoreader4/src/organs/in/text.js";
 import { projectGraph, DEFAULT_PROJECTION_RULES } from "../vendor/eoreader4/src/core/index.js";
+import { extractGlossary, glossarySurface, glossarySize } from "../vendor/eoreader4/src/perceiver/glossary.js";
 
 window.EOReader4 = {
   ingestText,                 // (textOrFile, opts?) -> Promise<doc>  (doc.projectGraph(frame), doc.sentences, doc.log, doc.mentions)
   projectGraph,               // (log, frame) -> { entities:Map, edges:[], propositions, voids }
   DEFAULT_PROJECTION_RULES,
+  // glossary: the terms a piece leans on that a reader might need defined —
+  // mechanical, sized to the document's length. extractGlossary(text) parses
+  // and reads; glossarySurface(doc) reads an already-parsed doc (the graph view
+  // already has one). -> { words, size, perTerm, terms:[{term,termKey,kind,
+  // count,mentions,acronym,expansion,contexts,score}], all }
+  extractGlossary,
+  glossarySurface,
+  glossarySize,               // (words, opts?) -> N candidates this length earns
   version: "eoreader4@779a6b7",
   ready: true
 };

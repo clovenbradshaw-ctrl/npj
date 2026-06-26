@@ -435,11 +435,15 @@ function ArticleRead(props) {
   const railBlockL = !preview && entityOpen;
   const artSlug = (s) => "h-" + String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
   const headings = (A.body || []).filter(b => b.type === "h2" || b.type === "h3").map(b => ({ id: artSlug(b.text), text: b.text, level: b.type === "h2" ? 2 : 3 }));
-  // the Sources footer is a section too — list it at the foot of Contents so a
-  // reader can jump straight to the receipts (#article-sources anchors the footer).
-  const tocItems = sourceList.length
-    ? [...headings, { id: "article-sources", text: "Sources", level: 2 }]
-    : headings;
+  // the glossary + Sources footer are sections too — list them at the foot of
+  // Contents so a reader can jump straight to the definitions / the receipts
+  // (#article-definitions, #article-sources anchor the footers).
+  const definedTerms = (A.definitions || []).filter(d => d && d.term && d.def);
+  const tocItems = [
+    ...headings,
+    ...(definedTerms.length ? [{ id: "article-definitions", text: "Definitions", level: 2 }] : []),
+    ...(sourceList.length ? [{ id: "article-sources", text: "Sources", level: 2 }] : [])
+  ];
   // scrollIntoView walks to the element's actual scroll container — the window
   // in the live read, but the fixed overlay in Preview — so it moves the page
   // the reader is looking at, not whatever's behind it. The headings carry
@@ -940,6 +944,7 @@ function ArticleRead(props) {
       )}
       {Header}
       {Body}
+      <DefinitionsSection definitions={A.definitions} slug={A.slug} isPhone={isPhone} />
       <SourcesExplorer sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />
     </div>
   );
@@ -1260,6 +1265,79 @@ function sourceCategory(s) {
   if (s.archive_url || s.original_url) return "web";
   if (SV && SV.hasFile && SV.hasFile(s)) return "document";
   return "other";
+}
+
+// The conflicting definitions OTHER published pieces carry for the same term —
+// collapsed by default, so a reader can see the record disagree with itself.
+function DefAlternates({ others }) {
+  const [open, setOpen] = useState(false);
+  if (!others.length) return null;
+  return (
+    <div style={{ marginTop: 5 }}>
+      <button onClick={() => setOpen(o => !o)} className="np-mono" style={{ border: 0, background: "none", color: "var(--ink-soft)", cursor: "pointer", fontSize: 10.5, padding: 0 }}>
+        {open ? "▾" : "▸"} {others.length} other definition{others.length > 1 ? "s" : ""} on the record
+      </button>
+      {open && others.map((a, i) => (
+        <div key={i} style={{ borderLeft: "2px solid var(--ink-soft)", padding: "3px 0 3px 10px", marginTop: 6 }}>
+          <div style={{ fontSize: 13.5, lineHeight: 1.45 }}>{a.def}</div>
+          <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>— {a.headline || a.slug}{a.ts ? " · " + a.ts : ""}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// The piece's glossary, published with the article (folded field `definitions`).
+// Each term shows this piece's definition; when the COLLECTIVE record defines the
+// same term differently elsewhere, that disagreement is flagged and openable.
+// Mirrors the SOURCES footer in shape so Contents jumps to it the same way.
+function DefinitionsSection({ definitions, slug, isPhone }) {
+  const D = window.NpjDefinitions;
+  const defs = (D ? D.normList(definitions) : (definitions || [])).filter(d => d && d.term && d.def);
+  const [index, setIndex] = useState(D ? D.publishedIndex() : null);
+  // best-effort: build the collective index once so we can flag terms the record
+  // defines differently elsewhere. Cached + deduped (sig); never blocks the read.
+  useEffect(() => {
+    if (!D || !defs.length) return;
+    let live = true;
+    const off = D.onChange(s => { if (live) setIndex(s.index); });
+    D.buildPublishedIndex();
+    return () => { live = false; if (off) off(); };
+  }, [defs.length]);
+  if (!defs.length) return null;
+  const resolved = (D && index) ? D.resolve(defs, index) : defs.map(d => ({ ...d, alternates: [] }));
+  const byId = {};
+  resolved.forEach(r => { byId[r.id] = r; });
+  const norm = (s) => (D ? D.normText(s) : String(s || "").toLowerCase().trim());
+  return (
+    <section id="article-definitions" style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18, scrollMarginTop: 90 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
+        <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>DEFINITIONS</h3>
+        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{defs.length} term{defs.length === 1 ? "" : "s"}</span>
+      </div>
+      <p className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", margin: "0 0 14px", lineHeight: 1.5 }}>
+        Terms this piece leans on. Where the record defines one differently elsewhere, the other readings are flagged.
+      </p>
+      <dl style={{ margin: 0 }}>
+        {defs.map(d => {
+          const r = byId[d.id] || {};
+          // alternates published by OTHER pieces, with a different definition than this one
+          const others = (r.alternates || []).filter(a => a.slug !== slug && norm(a.def) !== norm(d.def));
+          return (
+            <div key={d.id} style={{ marginBottom: 14 }}>
+              <dt style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                <span>{d.term}</span>
+                {d.acronym && <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>({d.acronym})</span>}
+                {others.length > 0 && <span className="np-mono" title="the published record defines this term differently elsewhere" style={{ fontSize: 10, color: "var(--review)", border: "1px solid var(--review)", padding: "0 5px" }}>⚖ contested</span>}
+              </dt>
+              <dd style={{ margin: "3px 0 0", fontSize: 15, lineHeight: 1.5, color: "var(--ink)" }}>{d.def}</dd>
+              <DefAlternates others={others} />
+            </div>
+          );
+        })}
+      </dl>
+    </section>
+  );
 }
 
 function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {

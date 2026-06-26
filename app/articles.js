@@ -220,7 +220,7 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status", "composition"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status", "composition", "definitions"];
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -287,6 +287,10 @@
       headline: state.headline,
       dek: state.dek || "",
       tags: Array.isArray(state.tags) ? state.tags : [],
+      // the piece's glossary — terms it leans on, each bound to a short
+      // definition (extracted by eoreader4 or written by hand). Drawn into the
+      // collective glossary across the published record (app/definitions.js).
+      definitions: Array.isArray(state.definitions) ? state.definitions : [],
       authors: Array.isArray(state.authors) ? state.authors : [],
       // editors credited in the byline (optional, separate from the authors line);
       // byline is an optional override string ("Unsigned" suppresses author names)
@@ -1210,6 +1214,11 @@
       dek: dek || o.dek || "",
       column: c.column || "",
       tags: Array.isArray(c.tags) ? c.tags : [],
+      // the piece's glossary entries (term → definition); normalized through the
+      // definitions helper when it's loaded, otherwise carried as-is
+      definitions: (typeof window !== "undefined" && window.NpjDefinitions && window.NpjDefinitions.normList)
+        ? window.NpjDefinitions.normList(c.definitions)
+        : (Array.isArray(c.definitions) ? c.definitions : []),
       authors: unsigned ? [] : authors,
       editors: mxids(o.editors),
       byline: unsigned ? "Unsigned" : (typeof o.byline === "string" ? o.byline : ""),

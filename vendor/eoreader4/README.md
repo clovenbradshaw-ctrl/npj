@@ -6,19 +6,27 @@ self-contained, **mechanical (no model / no network / no WASM)** slice needed to
 read prose into an Event-Order proposition graph.
 
 - **Upstream commit:** `779a6b77506be78f5d36b13d58a80c7227eb98bf` (branch `main`)
-- **Entry used by npj:** `src/organs/in/text.js` → `ingestText(textOrFile)` and
-  `src/core/index.js` → `projectGraph(log, frame)`.
+- **Entries used by npj:** `src/organs/in/text.js` → `ingestText(textOrFile)`,
+  `src/core/index.js` → `projectGraph(log, frame)`, and
+  `src/perceiver/glossary.js` → `extractGlossary(text)` / `glossarySurface(doc)`.
 - **What `ingestText` gives back:** a `doc` with `.sentences`, `.log`,
   `.mentions`, and `doc.projectGraph(frame)` → `{ entities: Map, edges: [], ... }`
   where edges carry `{ from, to, via, kind, weight, sentIdx }`.
+- **What `extractGlossary` gives back:** `{ words, size, perTerm, terms, all }`
+  where each term is `{ term, termKey, kind, count, mentions, acronym,
+  expansion, contexts, score }` — the figures/acronyms a piece leans on that a
+  reader might need defined, ranked and counted relative to the document's
+  length. Mechanical; no model. Consumed by the editor's Definitions section.
 
-## Scope of the vendor (53 files)
+## Scope of the vendor (54 files)
 
-Computed as the exact static-import closure of `src/organs/in/text.js`:
-`src/core/**`, `src/perceiver/**` (incl. `perceiver/parse/**`),
-`src/organs/in/text.js`, and `src/converse/**`. **Zero third-party imports**,
-no `src/model/`, no embedder, no WebGPU/WASM. The full upstream app (UI, model
-backends, retrieval, turn pipeline, etc.) is intentionally **not** vendored.
+The exact static-import closure of `src/organs/in/text.js` (`src/core/**`,
+`src/perceiver/**` incl. `perceiver/parse/**`, `src/organs/in/text.js`,
+`src/converse/**`), **plus** `src/perceiver/glossary.js` — a leaf perceiver
+surface the bridge imports directly (it reads the same parsed `doc`, so it pulls
+in nothing new). **Zero third-party imports**, no `src/model/`, no embedder, no
+WebGPU/WASM. The full upstream app (UI, model backends, retrieval, turn
+pipeline, etc.) is intentionally **not** vendored.
 
 ## How npj loads it
 
