@@ -158,7 +158,20 @@
   }
 
   // —— per-device address used as the keyshare state_key ————————————————————
-  function shareKey(user, device, keyId) { return user + "|" + device + "|" + keyId; }
+  // Matrix reserves state keys that begin with "@" to that very user: a member
+  // can only write @them-keyed state. A keyshare is written BY the keyholder FOR
+  // another member's device, so its state key must NOT start with the recipient's
+  // mxid — else the homeserver rejects it with "not allowed to set others state".
+  // We prefix it so it's a plain (non-@) key any member may write.
+  function shareKey(user, device, keyId) { return "share|" + user + "|" + device + "|" + keyId; }
+  // Pre-prefix keyshares (only ever written to a member's own device, so they
+  // landed) are still read so existing rooms keep their key after this change.
+  function legacyShareKey(user, device, keyId) { return user + "|" + device + "|" + keyId; }
+  function isShareFor(s, user, device) {
+    return s.state_key === shareKey(user, device, s.keyId) || s.state_key === legacyShareKey(user, device, s.keyId);
+  }
+  // The device key is only ever written by the device's own owner (@them === sender),
+  // so an "@"-prefixed key is allowed here.
   function deviceKey(user, device) { return user + "|" + device; }
 
   // —— room key cache (memory + IndexedDB) ——————————————————————————————————
@@ -241,7 +254,7 @@
     return ensureDevice().then(function (dev) {
       var me = myId();
       return listShares(roomId).then(function (shares) {
-        var mine = shares.filter(function (s) { return s.state_key === shareKey(me, dev.deviceId, s.keyId); });
+        var mine = shares.filter(function (s) { return isShareFor(s, me, dev.deviceId); });
         mine.sort(function (a, b) { return String(b.ts || "").localeCompare(String(a.ts || "")); });
         // try newest first; the first that unwraps wins and becomes current
         var i = 0;
@@ -293,8 +306,10 @@
       return subtle.exportKey("raw", key).then(function (raw) {
         return Promise.all([listDevices(roomId), listShares(roomId)]).then(function (r) {
           var devices = r[0], shares = r[1];
-          var have = {}; shares.forEach(function (s) { if (s.keyId === keyId) have[s.state_key] = 1; });
-          var missing = devices.filter(function (d) { return !have[shareKey(d.user_id, d.device_id, keyId)]; });
+          var mineForKey = shares.filter(function (s) { return s.keyId === keyId; });
+          var missing = devices.filter(function (d) {
+            return !mineForKey.some(function (s) { return isShareFor(s, d.user_id, d.device_id); });
+          });
           if (!missing.length) return 0;
           return distribute(roomId, keyId, raw, missing);
         });

@@ -60,6 +60,12 @@ function makeServer() {
     let m = url.match(/\/rooms\/([^/]+)\/state\/([^/]+)\/([^?]*)$/);
     if (m && init.method === "PUT") {
       const room = decodeURIComponent(m[1]), type = decodeURIComponent(m[2]), sk = decodeURIComponent(m[3] || "");
+      // Matrix: a state key beginning with "@" is reserved to that user — only
+      // they may write it. Synapse answers anyone else with M_FORBIDDEN. Enforce
+      // it here so a keyshare addressed by raw mxid can't silently "work" in tests.
+      if (sk.startsWith("@") && sk.split("|")[0] !== user) {
+        return resp({ errcode: "M_FORBIDDEN", error: "You are not allowed to set others state" }, false, 403);
+      }
       const content = JSON.parse(init.body);
       const existing = events.find(e => e.room === room && e.type === type && e.state_key === sk);
       if (existing) existing.content = content; else events.push({ room, type, state_key: sk, content, sender: user });
