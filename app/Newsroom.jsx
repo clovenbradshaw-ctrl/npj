@@ -16,8 +16,11 @@ const THEME_KEY = "npj_nr_theme";
 function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
 
 // clean-read preference (the toolbar's Citations eye). Default ON — highlights,
-// marker chips and footnotes are shown. "0" means the author chose a clean read
-// and it should survive reloads instead of snapping back on every refresh.
+// marker chips and footnotes are shown. "0" means the author chose a clean read:
+// not only is the citation chrome hidden, the citation INTERACTIONS step aside too
+// (no source-pin popover on click, no hover-to-remove ×, no Source/Void in the
+// selection toolbar) so the canvas behaves like a plain prose editor you can just
+// type into. Survives reloads instead of snapping back on every refresh.
 const CITEHL_KEY = "npj_nr_citehl";
 function nrCiteHl() { try { return localStorage.getItem(CITEHL_KEY) !== "0"; } catch (e) { return true; } }
 
@@ -931,6 +934,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const onBodyClick = (e) => {
     const a = e.target.closest && e.target.closest('a[href^="#"]');
     if (a) { e.preventDefault(); scrollToId(a.getAttribute("href").slice(1)); return; }
+    // clean read = a plain writing surface: a click just places the caret. Don't
+    // hijack it with the source-pin popover when the author has the citation layer
+    // turned off — that's the "I can't click into my own sentence" frustration.
+    if (!citeHl) return;
     // click a cited span (or its marker) to pin / re-pin the words in the source
     const cs = e.target.closest && e.target.closest(".claim-src, sup.md-cite[data-cid]");
     if (cs && cs.getAttribute("data-cid")) {
@@ -1857,6 +1864,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // by the little superscript), else the end of the span's last line.
   const onBodyOver = (e) => {
     if (!ed.current) return;
+    // clean read: no citation chrome means no floating remove-× either — moving the
+    // pointer over the prose shouldn't sprout a control to delete a binding you've
+    // deliberately hidden. Clear any × left over from before the toggle.
+    if (!citeHl) { if (citeHover) setCiteHover(null); return; }
     const cs = e.target.closest && e.target.closest(".claim-src, sup.md-cite[data-cid]");
     const cid = cs && cs.getAttribute("data-cid");
     const span = cid ? ed.current.querySelector('.claim-src[data-cid="' + cid + '"]') : null;
@@ -2754,11 +2765,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <Sep />
         {/* clean-read toggle: hide every citation overlay — the claim highlights
             (tints, underlines, stance glyphs), the inline citation + footnote
-            marker chips, and the Footnotes list — for a clean read, without
-            touching the words, their sources or the notes. Remembered across
-            reloads (localStorage, CITEHL_KEY). */}
-        <button onMouseDown={e => e.preventDefault()} onClick={() => setCiteHl(v => { const next = !v; try { localStorage.setItem(CITEHL_KEY, next ? "1" : "0"); } catch (e) {} return next; })} aria-pressed={!citeHl}
-          title={citeHl ? "Citations & footnotes shown — click for a clean read (hides the highlights, marker chips and footnotes)" : "Clean read — highlights, marker chips and footnotes hidden. Click to show them"}
+            marker chips, and the Footnotes list — AND step the citation interactions
+            aside (no pin popover on click, no hover ×, no Source/Void in the
+            selection toolbar) so the canvas is a plain prose editor. Doesn't touch
+            the words, their sources or the notes. Remembered across reloads
+            (localStorage, CITEHL_KEY). Going clean dismisses any open citation UI. */}
+        <button onMouseDown={e => e.preventDefault()} onClick={() => setCiteHl(v => { const next = !v; try { localStorage.setItem(CITEHL_KEY, next ? "1" : "0"); } catch (e) {} if (!next) { setMenu(null); setCiteHover(null); closePin(); } return next; })} aria-pressed={!citeHl}
+          title={citeHl ? "Citations & footnotes shown — click for a clean read (hides the highlights and marker chips, and turns off the citation popups so you can just type)" : "Clean read — citation layer and its popups hidden, so the canvas edits like plain prose. Click to bring citations back"}
           className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
           {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
         </button>
@@ -3052,7 +3065,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {/* the hover-to-remove × — floats by the cited span the pointer is over, so
           dropping a citation is one click in the prose (no popover). Rendered
           OUTSIDE the contenteditable, so it never lands in the saved/published HTML. */}
-      {citeHover && (() => {
+      {citeHl && citeHover && (() => {
         const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + citeHover.cid + '"]');
         if (!span || !spanIsCite(span)) return null;
         return (
@@ -3074,8 +3087,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <FB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote"><I.quote style={{ fontSize: 13 }} /></FB>
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
           <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.link style={{ fontSize: 13 }} /> Link</FB>
-          <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
-          <FB hot={menu === "void"} onClick={() => setMenu(menu === "void" ? null : "void")} title="Cite a void — ground this in a documented absence (no record exists)"><span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>∅</span> Void</FB>
+          {/* citation actions only when the citation layer is on — in a clean read the
+             toolbar stays a plain format bar (no Source/Void) to match the hidden layer */}
+          {citeHl && <React.Fragment>
+            <FB hot={menu === "src"} onClick={() => setMenu(menu === "src" ? null : "src")} title="Bind a source to this span — the claim stands on it"><I.source style={{ fontSize: 13 }} /> Source</FB>
+            <FB hot={menu === "void"} onClick={() => setMenu(menu === "void" ? null : "void")} title="Cite a void — ground this in a documented absence (no record exists)"><span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>∅</span> Void</FB>
+          </React.Fragment>}
 
           {menu === "link" && (
             <div className="np-scroll" style={{ position: "absolute", right: 0, width: 280, background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)", padding: 9, ...tbMenuBox(sel.y, 360) }}>
