@@ -624,7 +624,7 @@ function ArticleRead(props) {
   // the glossary + Sources footer are sections too — list them at the foot of
   // Contents so a reader can jump straight to the definitions / the receipts
   // (#article-definitions, #article-sources anchor the footers).
-  const definedTerms = (A.definitions || []).filter(d => d && d.term && d.def);
+  const definedTerms = (A.definitions || []).filter(d => d && d.term && (Array.isArray(d.defs) ? d.defs.some(x => x && x.text) : !!d.def));
   const tocItems = [
     ...headings,
     ...(definedTerms.length ? [{ id: "article-definitions", text: "Definitions", level: 2 }] : []),
@@ -1516,11 +1516,28 @@ function sourceCategory(s) {
 
 // The conflicting definitions OTHER published pieces carry for the same term —
 // collapsed by default, so a reader can see the record disagree with itself.
+// A definition's archived source — the link, the outlet, and the date the page
+// was preserved on archive.org. Mechanical provenance, shown right under the def.
+function DefSourceLine({ source }) {
+  if (!source || !(source.url || source.archive_url)) return null;
+  const link = source.archive_url || source.url;
+  return (
+    <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 3, display: "flex", gap: 6, alignItems: "baseline", flexWrap: "wrap" }}>
+      <span aria-hidden="true" title={source.archive_url ? "preserved on archive.org" : "source link"}>{source.archive_url ? "🔒" : "↗"}</span>
+      <a href={link} target="_blank" rel="noopener noreferrer" style={{ color: "var(--ink-soft)", textDecoration: "underline" }}>{source.title || source.outlet || source.url}</a>
+      {source.outlet && <span>· {source.outlet}</span>}
+      {source.preserved && <span>· preserved {source.preserved}</span>}
+    </div>
+  );
+}
+
+// The conflicting definitions OTHER published pieces carry for the same term —
+// collapsed by default, so a reader can see the record disagree with itself.
 function DefAlternates({ others }) {
   const [open, setOpen] = useState(false);
   if (!others.length) return null;
   return (
-    <div style={{ marginTop: 5 }}>
+    <div style={{ marginTop: 6 }}>
       <button onClick={() => setOpen(o => !o)} className="np-mono" style={{ border: 0, background: "none", color: "var(--ink-soft)", cursor: "pointer", fontSize: 10.5, padding: 0 }}>
         {open ? "▾" : "▸"} {others.length} other definition{others.length > 1 ? "s" : ""} on the record
       </button>
@@ -1528,6 +1545,7 @@ function DefAlternates({ others }) {
         <div key={i} style={{ borderLeft: "2px solid var(--ink-soft)", padding: "3px 0 3px 10px", marginTop: 6 }}>
           <div style={{ fontSize: 13.5, lineHeight: 1.45 }}>{a.def}</div>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 2 }}>— {a.headline || a.slug}{a.ts ? " · " + a.ts : ""}</div>
+          <DefSourceLine source={a.source} />
         </div>
       ))}
     </div>
@@ -1535,24 +1553,26 @@ function DefAlternates({ others }) {
 }
 
 // The piece's glossary, published with the article (folded field `definitions`).
-// Each term shows this piece's definition; when the COLLECTIVE record defines the
-// same term differently elsewhere, that disagreement is flagged and openable.
-// Mirrors the SOURCES footer in shape so Contents jumps to it the same way.
+// A term can carry MORE THAN ONE definition, each with its own archived source;
+// when the COLLECTIVE record defines a term differently elsewhere, that
+// disagreement is flagged and openable. Mirrors the SOURCES footer in shape.
 function DefinitionsSection({ definitions, slug, isPhone }) {
   const D = window.NpjDefinitions;
-  const defs = (D ? D.normList(definitions) : (definitions || [])).filter(d => d && d.term && d.def);
+  const entries = (D ? D.normList(definitions) : (definitions || []))
+    .map(e => Object.assign({}, e, { defs: (e && Array.isArray(e.defs) ? e.defs : []).filter(x => x && x.text) }))
+    .filter(e => e && e.term && e.defs.length);
   const [index, setIndex] = useState(D ? D.publishedIndex() : null);
   // best-effort: build the collective index once so we can flag terms the record
   // defines differently elsewhere. Cached + deduped (sig); never blocks the read.
   useEffect(() => {
-    if (!D || !defs.length) return;
+    if (!D || !entries.length) return;
     let live = true;
     const off = D.onChange(s => { if (live) setIndex(s.index); });
     D.buildPublishedIndex();
     return () => { live = false; if (off) off(); };
-  }, [defs.length]);
-  if (!defs.length) return null;
-  const resolved = (D && index) ? D.resolve(defs, index) : defs.map(d => ({ ...d, alternates: [] }));
+  }, [entries.length]);
+  if (!entries.length) return null;
+  const resolved = (D && index) ? D.resolve(entries, index) : entries.map(e => ({ ...e, alternates: [] }));
   const byId = {};
   resolved.forEach(r => { byId[r.id] = r; });
   const norm = (s) => (D ? D.normText(s) : String(s || "").toLowerCase().trim());
@@ -1560,24 +1580,32 @@ function DefinitionsSection({ definitions, slug, isPhone }) {
     <section id="article-definitions" style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18, scrollMarginTop: 90 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>DEFINITIONS</h3>
-        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{defs.length} term{defs.length === 1 ? "" : "s"}</span>
+        <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{entries.length} term{entries.length === 1 ? "" : "s"}</span>
       </div>
       <p className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", margin: "0 0 14px", lineHeight: 1.5 }}>
-        Terms this piece leans on. Where the record defines one differently elsewhere, the other readings are flagged.
+        Terms this piece leans on — some defined more than one way, each sourced. Where the record defines one differently elsewhere, the other readings are flagged.
       </p>
       <dl style={{ margin: 0 }}>
-        {defs.map(d => {
-          const r = byId[d.id] || {};
-          // alternates published by OTHER pieces, with a different definition than this one
-          const others = (r.alternates || []).filter(a => a.slug !== slug && norm(a.def) !== norm(d.def));
+        {entries.map(e => {
+          const r = byId[e.id] || {};
+          const mine = {}; e.defs.forEach(d => { mine[norm(d.text)] = 1; });
+          // alternates from OTHER pieces, with a definition this piece doesn't already carry
+          const others = (r.alternates || []).filter(a => a.slug !== slug && !mine[norm(a.def)]);
+          const multi = e.defs.length > 1;
           return (
-            <div key={d.id} style={{ marginBottom: 14 }}>
+            <div key={e.id} style={{ marginBottom: 16 }}>
               <dt style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                <span>{d.term}</span>
-                {d.acronym && <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>({d.acronym})</span>}
+                <span>{e.term}</span>
+                {e.acronym && <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>({e.acronym})</span>}
+                {multi && <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>{e.defs.length} definitions</span>}
                 {others.length > 0 && <span className="np-mono" title="the published record defines this term differently elsewhere" style={{ fontSize: 10, color: "var(--review)", border: "1px solid var(--review)", padding: "0 5px" }}>⚖ contested</span>}
               </dt>
-              <dd style={{ margin: "3px 0 0", fontSize: 15, lineHeight: 1.5, color: "var(--ink)" }}>{d.def}</dd>
+              {e.defs.map((d, i) => (
+                <dd key={d.id || i} style={{ margin: "4px 0 0", fontSize: 15, lineHeight: 1.5, color: "var(--ink)" }}>
+                  {multi && d.sense ? <b style={{ fontFamily: "var(--cond)" }}>{d.sense}: </b> : (multi ? <span className="np-mono" style={{ color: "var(--ink-soft)", fontSize: 12 }}>{i + 1}. </span> : null)}{d.text}
+                  <DefSourceLine source={d.source} />
+                </dd>
+              ))}
               <DefAlternates others={others} />
             </div>
           );

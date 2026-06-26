@@ -377,9 +377,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [toc, setToc] = useState([]);
   // the piece's glossary (term → definition); extracted by eoreader4, drawn from
   // the collective published record (app/definitions.js), published like tags.
-  const [definitions, setDefinitions] = useState([]);
-  const [defsOpen, setDefsOpen] = useState(false);   // the Definitions panel overlay
-  const [defsBody, setDefsBody] = useState("");      // editor plain text, snapshotted when the panel opens
+  const [definitions, setDefinitions] = useState([]);   // edited in the Definitions view (a top-bar tab)
   // ---- editing-only post structure (app/structure.js) ----
   // the append-only event log is the source of truth; `structure` is its fold.
   // Stamped onto headings as data-sec (stable identity across renames/reorders),
@@ -2580,6 +2578,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
             ["sources", "Sources", "Read the source documents and grab the words that back a claim"],
+            ["definitions", "Definitions", "The piece's glossary — terms a reader may need defined, suggested by eoreader4 and sourced"],
             ["graph", "Graph", "The document as a graph of its propositions — entities and the relations between them"]].map(([k, label, ti]) => (
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
@@ -2833,8 +2832,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 {definitions.slice(0, 8).map(d => <span key={d.id} title={d.def || "no definition yet"} className="np-mono" style={{ fontSize: 10.5, border: "1px solid " + NR.line, color: d.def ? NR.text : NR.muted, padding: "2px 6px" }}>{d.term}</span>)}
                 {definitions.length > 8 && <span className="np-mono" style={{ fontSize: 10.5, color: NR.muted }}>+{definitions.length - 8}</span>}
               </div>}
-            <button onClick={() => { setDefsBody(ed.current ? (ed.current.innerText || "") : ""); setDefsOpen(true); }}
-              className="np-cond" style={{ width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: NR.field, color: NR.text, cursor: "pointer", fontSize: 12, padding: "6px 8px" }}>
+            <button onClick={() => setView("definitions")}
+              className="np-cond" style={{ width: "100%", textAlign: "left", border: "1px solid " + NR.line, background: view === "definitions" ? "var(--yellow)" : NR.field, color: view === "definitions" ? "var(--ink)" : NR.text, cursor: "pointer", fontSize: 12, padding: "6px 8px" }}>
               {definitions.length ? "Edit definitions →" : "Define key terms →"}
             </button>
             {definitions.length === 0 &&
@@ -2926,6 +2925,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             {view === "graph"
               ? (window.GraphView
                   ? <window.GraphView text={graphText} onSelectSentence={jumpToProse} NR={NR} isMobile={isMobile} />
+                  : null)
+              : view === "definitions"
+              ? (window.DefinitionsView
+                  ? <window.DefinitionsView NR={NR} definitions={definitions} onChange={setDefinitions}
+                      getBodyText={() => ed.current ? (ed.current.innerText || "") : ""}
+                      slug={fileSlug || slugify(title)} isMobile={isMobile}
+                      actor={(window.MatrixAuth && window.MatrixAuth.current && window.MatrixAuth.current()) ? window.MatrixAuth.current().user_id : null} />
                   : null)
               : <window.GroundingWorkspace api={tableApi} NR={NR} view={view} setView={setView} isMobile={isMobile} />}
           </div>
@@ -3266,14 +3272,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
         </div>
       ); })()}
-
-      {/* the definitions panel — the piece's glossary, extracted by eoreader4 and
-          drawn from the collective published record (app/DefinitionsRail.jsx) */}
-      {defsOpen && window.DefinitionsPanel &&
-        <window.DefinitionsPanel NR={NR} definitions={definitions} onChange={setDefinitions}
-          bodyText={defsBody} slug={fileSlug || (window.NpjArticles ? slugify(title) : "")} isMobile={isMobile}
-          actor={(window.MatrixAuth && window.MatrixAuth.current && window.MatrixAuth.current()) ? window.MatrixAuth.current().user_id : null}
-          onClose={() => setDefsOpen(false)} />}
 
       {/* the media viewer — images full-size, with caption, count and jump-to-figure */}
       {viewer != null && mediaImages[viewer] && (
