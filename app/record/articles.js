@@ -638,6 +638,22 @@
       const toks = []; let buf = "";
       const flush = () => { if (buf) { toks.push(buf); buf = ""; } };
       const plain = (n) => String(n.textContent || "");
+      // The READING text of a claim/owned span, with any nested citation/footnote
+      // MARKER sups (<sup class="md-cite">) stripped. A marker prints only its
+      // number — it is never part of the words. Normally the marker sits AFTER the
+      // claim span (a sibling that folds via the md-cite branch below), but when the
+      // editor nests it INSIDE the span (a cite-broken artifact), the marker's digits
+      // ride along in textContent and surface as a stray "23" in the published prose —
+      // in both the preview and the live read, which share this fold. Recursive (not
+      // cloneNode/querySelector) so it works on the test shim's minimal node too.
+      const isCiteSup = (el) => el && el.nodeType === 1 && el.tagName &&
+        el.tagName.toLowerCase() === "sup" && el.classList && el.classList.contains("md-cite");
+      const claimText = (n) => {
+        if (!n) return "";
+        if (n.nodeType === 3) return String(n.nodeValue || "");
+        if (n.nodeType !== 1 || isCiteSup(n)) return "";
+        let s = ""; (n.childNodes || []).forEach(c => { s += claimText(c); }); return s;
+      };
       const walk = (n) => {
         n.childNodes.forEach(c => {
           if (c.nodeType === 3) { buf += c.nodeValue; return; }
@@ -654,7 +670,7 @@
             // transparency lens can show it's grounded by declaration, not a cite.
             if (stance && !src.length) {
               flush();
-              const owned = { c: plain(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
+              const owned = { c: claimText(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
               // an asserted absence carries the documented search it rests on (what
               // the author looked through, and found nothing) — that note IS its
               // grounding, so it rides the published token like a quote would.
@@ -692,8 +708,8 @@
                   q = {}; src.forEach(k => { const v = (src.length === 1 && inlineQ) ? inlineQ : quoteFromCiteIds(c, k); if (v) q[k] = v; });
                   if (!Object.keys(q).length) q = undefined;
                 }
-                toks.push({ c: plain(c), src, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId(), q });
-              } else buf += plain(c);
+                toks.push({ c: claimText(c), src, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId(), q });
+              } else buf += claimText(c);
               return;
             }
             // a .claim-src with no source of its own (a transient/owned-forming
