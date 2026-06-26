@@ -147,14 +147,56 @@
     return null;
   }
 
+  /* ---- display-blob cache ----
+     resolveDisplay gets called again and again for the SAME image — a list
+     re-renders, a lightbox opens, an <image-slot> remounts, the front page and
+     the reader both paint the cover. Each call used to re-download the FULL
+     authenticated bytes, so clicking to load an image felt slow every single
+     time and several components showing the same image each fired their own
+     download. Cache the fetched Blob by URL (Matrix media is content-addressed
+     and immutable, so a given store URL always yields the same bytes) and dedupe
+     concurrent fetches. Callers still mint — and revoke — their OWN object URL
+     from the shared blob, so the existing ownership contract is untouched;
+     minting a URL from an in-memory blob is instant. A modest byte-capped LRU
+     keeps memory bounded. */
+  const _blobCache = new Map();    // url -> Blob (insertion order = LRU)
+  const _blobInflight = new Map(); // url -> Promise<Blob|null>
+  let _blobCacheBytes = 0;
+  const BLOB_CACHE_MAX = 48 * 1024 * 1024; // ~48 MB of source bytes
+  function _cacheBlob(url, blob) {
+    if (!blob) return;
+    if (_blobCache.has(url)) { _blobCacheBytes -= (_blobCache.get(url).size || 0); _blobCache.delete(url); }
+    _blobCache.set(url, blob);
+    _blobCacheBytes += blob.size || 0;
+    while (_blobCacheBytes > BLOB_CACHE_MAX && _blobCache.size > 1) {
+      const oldest = _blobCache.keys().next().value;
+      const b = _blobCache.get(oldest);
+      _blobCache.delete(oldest);
+      _blobCacheBytes -= (b && b.size) || 0;
+    }
+  }
+  async function fetchBytesCached(url) {
+    if (_blobCache.has(url)) {
+      const b = _blobCache.get(url);
+      _blobCache.delete(url); _blobCache.set(url, b); // refresh LRU position
+      return b;
+    }
+    if (_blobInflight.has(url)) return _blobInflight.get(url);
+    const p = (async () => { const b = await fetchBytes(url); if (b) _cacheBlob(url, b); return b; })();
+    _blobInflight.set(url, p);
+    try { return await p; } finally { _blobInflight.delete(url); }
+  }
+
   /* resolveDisplay(url) → a URL the <img> can actually render.
      Homeservers running authenticated media (Matrix 1.11+) refuse an
      unauthenticated <img> GET, so when display is needed we fetch the bytes
      with the session token and hand back a blob: URL. Signed-out or non-store
-     URLs pass straight through. Best-effort — returns the original on failure. */
+     URLs pass straight through. Best-effort — returns the original on failure.
+     The bytes come from a per-URL cache (see above) so repeat displays of the
+     same image are instant; each caller still owns the object URL it mints. */
   async function resolveDisplay(url) {
     if (!isStoreUrl(url) || !canUpload()) return url;
-    const b = await fetchBytes(url);
+    const b = await fetchBytesCached(url);
     return b ? URL.createObjectURL(b) : url;
   }
 
