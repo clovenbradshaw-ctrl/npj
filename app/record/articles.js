@@ -1523,16 +1523,29 @@
     const m = String(publishEndpoint()).match(/^(https?:\/\/[^/]+\/webhook)\//i);
     return m ? m[1] + "/site/article-npj" : DEFAULT_ENDPOINT.replace(/\/[^/]*$/, "/article-npj");
   }
-  // POST one event line to the article webhook. The webhook appends it to
-  // npj-article-<slug>/<slug>.jsonl on archive.org. After a write we drop this
-  // slug's cached body so the next read refetches the freshly-appended log.
+  // POST one event line to the article webhook, which appends it to
+  // npj-article-<slug>/<slug>.jsonl on archive.org. If that endpoint isn't
+  // deployed yet (n8n answers 404 for an unregistered path, or it's
+  // unreachable), fall back to the existing /site/publish-npj webhook with its
+  // single-file append + mirror contract: it commits the log to GitHub AND
+  // mirrors the full log to the same archive.org item, so the reader (which only
+  // ever reads archive.org) still works. Deploying npj-article.n8n.json later
+  // makes this drop GitHub entirely — no client change needed. Either way, a
+  // successful write drops the slug's cached body so the next read is fresh.
   async function postArticle(bodyObj, token) {
-    const res = await fetch(articleEndpoint(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-      body: JSON.stringify(bodyObj)
-    });
-    if (res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
+    const auth = { "Content-Type": "application/json", "Authorization": "Bearer " + token };
+    let res = null;
+    try { res = await fetch(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }); }
+    catch (e) { res = null; }
+    if (!res || res.status === 404) {
+      // legacy fallback: the deployed publish webhook (mirror:true puts the full
+      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article)
+      res = await fetch(publishEndpoint(), {
+        method: "POST", headers: auth,
+        body: JSON.stringify({ filename: filenameFor(bodyObj.slug), mode: "append", contentRaw: bodyObj.line + "\n", message: bodyObj.message, mirror: true })
+      });
+    }
+    if (res && res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
     return res;
   }
   // forget a slug's cached body (after a write) so a reload pulls the new log
