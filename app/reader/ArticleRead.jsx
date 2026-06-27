@@ -586,6 +586,12 @@ function ArticleRead(props) {
           // control bar, evidence rails or modals.
           preview, previewArticle, onClose, onRefresh } = props;
   const { entityData, entityOpen, setEntityOpen, activeEntity, setActiveEntity } = props;
+  // Safety net: a citation/footnote/lightbox modal freezes body scroll while open
+  // and restores it on close. If one ever unmounts without its cleanup running
+  // (an interrupted close, a fast route change), the lock leaks and the whole
+  // reader can't scroll. Clearing it when the reader mounts can't strand a lock,
+  // since no modal is open yet at open time.
+  React.useEffect(() => { document.body.style.overflow = ""; }, []);
   const A = preview ? (previewArticle || { body: [] }) : window.NPJ.ARTICLE;
   const { isAdmin } = React.useContext(window.LayoutCtx);
   const { claimList, claimById, sourceNums, sourceList } = useClaimModel(A);

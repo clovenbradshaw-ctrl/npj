@@ -3800,7 +3800,8 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // re-POSTs the exact same line; the webhook appends it to articles/<slug>.jsonl
     // in GitHub (idempotent enough — a duplicate genesis just re-seeds the same
     // state on fold).
-    payloadRef.current = { slug, line, token, message: (isRepublish ? "republish: " : "publish: ") + slug };
+    // republish writes a NEW event file (a fresh INS), never re-edits the genesis
+    payloadRef.current = { slug, line, token, republish: isRepublish, message: (isRepublish ? "republish: " : "publish: ") + slug };
     upd(3, { detail: "→ articles/" + slug + ".jsonl" });
     await commit();
   };

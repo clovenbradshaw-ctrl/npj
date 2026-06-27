@@ -82,6 +82,21 @@
     return ("0000000" + h.toString(16)).slice(-7);
   }
 
+  /* ---------------- one event = one new file ----------------
+     The genesis (first publish) anchors a slug at articles/<slug>.jsonl. Every
+     LATER event — an edit, a status flip, a republish, a reader deposit — is
+     written as its OWN brand-new file under articles/<slug>/, never an append to
+     or overwrite of a prior file. So every write after the first is a fresh
+     create (the GitHub path that actually commits), and the append-only log is
+     reconstructed on read by folding the genesis + every event file in filename
+     order. The stamp is sortable and carries milliseconds, so two edits in the
+     same second still order deterministically and never collide on a path. */
+  const eventDir = (slug) => DIR + "/" + slug;
+  function eventPath(slug, op, line) {
+    const stamp = nowIso().replace(/[-:.]/g, "");           // 2026-06-27T16:05:03.104Z → 20260627T160503104Z
+    return eventDir(slug) + "/" + stamp + "-" + String(op || "rec").toLowerCase() + "-" + lineSha(line) + ".jsonl";
+  }
+
   /* ---------------- plain text of a body (versions, diffing, engines) ---------------- */
   // A footnote marker ({t:"sup"}) carries no reading text — it's a reference, so
   // it must not leak its "fn1"/number into plaintext, word counts or diffs.
@@ -438,18 +453,48 @@
   /* One git-tree call lists every document at once (articles/<slug>.jsonl), no
      matter how many there are — one API request, then each body is read (and
      folded) from the raw CDN only when its blob sha is new. */
+  // genesis anchor: articles/<slug>.jsonl ·  event file: articles/<slug>/<stamp>-<op>-<hash>.jsonl
   const DOC_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\.jsonl$/;
+  const EVT_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\/[^/]+\.jsonl$/;
+  /* ONE git-tree call lists every file at once; we group them by slug into the
+     genesis + its event files. Each document is its genesis anchor followed by
+     every event file in filename (timestamp) order — the exact order foldLog
+     must replay them in. `key` is the combined blob shas, so adding ANY new
+     event file changes the key and the slug refolds; an unchanged document is
+     served from cache. A slug with event files but no genesis anchor is skipped
+     (an orphan can't define a document). */
   async function listDocs() {
     const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" } });
     if (!res.ok) throw new Error("github " + res.status);
     const tree = ((await res.json()) || {}).tree || [];
-    const docs = [];
+    const bySlug = {};
     tree.forEach(e => {
       if (!e || e.type !== "blob") return;
-      const m = DOC_RE.exec(e.path);
-      if (m) docs.push({ slug: m[1], path: e.path, sha: e.sha });
+      let m = DOC_RE.exec(e.path);
+      if (m) { (bySlug[m[1]] = bySlug[m[1]] || { events: [] }).genesis = { path: e.path, sha: e.sha }; return; }
+      m = EVT_RE.exec(e.path);
+      if (m) (bySlug[m[1]] = bySlug[m[1]] || { events: [] }).events.push({ path: e.path, sha: e.sha });
     });
-    return docs;
+    return Object.keys(bySlug).map(slug => {
+      const g = bySlug[slug];
+      if (!g.genesis) return null;
+      const events = g.events.slice().sort((a, b) => String(a.path).localeCompare(String(b.path)));
+      const files = [g.genesis].concat(events);
+      return { slug, files, key: files.map(f => f.sha).join("·") };
+    }).filter(Boolean);
+  }
+
+  // Every file that makes up one document's log, genesis first then events in
+  // timestamp order — the read-side counterpart of the one-event-one-file write
+  // path. Falls back to the genesis alone if the tree can't be listed.
+  async function docPaths(slug) {
+    const s = slugify(slug) || slug;
+    try { const d = (await listDocs()).find(x => x.slug === s); if (d) return d.files.map(f => f.path); } catch (e) {}
+    return [filenameFor(s)];
+  }
+  async function gatherLog(slug) {
+    const texts = await Promise.all((await docPaths(slug)).map(p => fetchRaw(p)));
+    return texts.filter(t => t != null).join("\n");
   }
 
   function byNewest(a, b) {
@@ -471,12 +516,14 @@
     const cache = loadIdxCache();
     const live = {};
     const metas = await Promise.all(docs.map(async d => {
-      // the cache key is the blob sha — a new commit to the file changes its sha,
-      // so it misses the cache and refolds; an unchanged file is served instantly
+      // the cache key is the combined blob shas — a new genesis OR a new event
+      // file changes the key, so the slug misses the cache and refolds; an
+      // unchanged document is served instantly
       const hit = cache[d.slug];
-      if (hit && hit.key === d.sha && hit.meta) { live[d.slug] = hit; return hit.meta; }
-      const text = await fetchRaw(d.path);
-      if (text == null) return null;
+      if (hit && hit.key === d.key && hit.meta) { live[d.slug] = hit; return hit.meta; }
+      const texts = await Promise.all(d.files.map(f => fetchRaw(f.path)));
+      const text = texts.filter(t => t != null).join("\n");
+      if (!text) return null;
       const { article } = foldLog(text);
       if (!article) return null;
       const meta = {
@@ -486,7 +533,7 @@
         status: article.status, image: article.image,
         storage: "github", logPath: blobUrl(d.slug)
       };
-      live[d.slug] = { key: d.sha, meta };
+      live[d.slug] = { key: d.key, meta };
       return meta;
     }));
     saveIdxCache(live); // only live docs — a removed file drops out of the cache
@@ -551,8 +598,8 @@
   // methods footer all resolve.
   async function loadArticle(slug) {
     const s = slugify(slug) || slug;
-    const text = await fetchRaw(filenameFor(s));
-    if (text == null) return null;
+    const text = await gatherLog(s);
+    if (!text) return null;
     const { article, sources } = foldLog(text);
     if (article) {
       article.storage = "github";
@@ -1314,35 +1361,50 @@
       signal: ctrl.signal
     }).finally(() => clearTimeout(timer));
   }
-  // Append one EO line to the document's log. mirror:false keeps it on GitHub.
-  function commitLine({ slug, line, token, message }) {
+  // Write ONE file (mode:"overwrite"). Every NPJ write targets a path that does
+  // not yet exist — the genesis on first publish, a fresh per-event file after —
+  // so this is always a clean GitHub create: we NEVER read-modify-append an
+  // existing file. mirror:false keeps it on GitHub.
+  function commitFile({ filename, line, token, message }) {
     return postCommit({
-      filename: filenameFor(slug), mode: "append",
+      filename, mode: "overwrite",
       contentRaw: String(line).replace(/\n+$/, "") + "\n",
-      message: message || ("update: " + slug), mirror: false
+      message: message || ("update: " + filename), mirror: false
     }, token);
   }
-  // Publish the genesis (INS) — appended to the document's log (created on first write).
-  function publishGenesis({ slug, line, token, message }) {
-    return commitLine({ slug, line, token, message: message || ("publish: " + slug) });
+  // First publish writes the genesis anchor articles/<slug>.jsonl (a create). A
+  // REPUBLISH of an already-anchored slug is itself a NEW event file (a fresh INS
+  // that re-seeds state on fold) — so the genesis is written exactly once and
+  // never edited.
+  function publishGenesis({ slug, line, token, message, republish }) {
+    const filename = republish ? eventPath(slug, "ins", line) : filenameFor(slug);
+    return commitFile({ filename, line, token, message: message || ((republish ? "republish: " : "publish: ") + slug) });
   }
-  // One REC event appended to the document's log — the edit-after-publish path.
-  async function appendEdit({ slug, operand, actor, note, token, message }) {
-    const line = editLine(slug, operand, actor, note);
-    const res = await commitLine({ slug, line, token, message: message || ("edit: " + slug) });
-    return { res, line, sha: lineSha(line), filename: filenameFor(slug) };
+  // One REC event → its OWN new file. The current status (published/unpublished)
+  // is stamped into the event so each file self-records publication state, and a
+  // reader can resolve the live status from the newest file without folding the
+  // whole log. A status-flip already carries operand.status; for a content edit,
+  // pass `status` so the newest file still declares the piece's current state.
+  async function appendEdit({ slug, operand, actor, note, token, message, status }) {
+    const op = status ? Object.assign({}, operand, { status }) : (operand || {});
+    const line = editLine(slug, op, actor, note);
+    const filename = eventPath(slug, "rec", line);
+    const res = await commitFile({ filename, line, token, message: message || ("edit: " + slug) });
+    return { res, line, sha: lineSha(line), filename };
   }
-  /* A generic event writer — appends any EO op to the document's log. Used by
-     the feedback layer (app/feedback.js) to land reader EVA deposits in the same
-     append-only file as the article's own events. `schema` overrides the event's
-     `v` so feedback lines self-identify (npj/feedback-eo/1) while still folding
-     harmlessly through the article reader (EVA never touches state). */
-  async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema }) {
-    const head = { v: schema || SCHEMA, op, target: "article/" + slug, ts: nowIso(), actor: actor || null, operand: operand || {} };
+  /* A generic event writer — writes any EO op as its own new event file. Used by
+     the feedback layer (app/feedback.js) to land reader EVA deposits alongside
+     the article's own events. `schema` overrides the event's `v` so feedback
+     lines self-identify (npj/feedback-eo/1) while still folding harmlessly
+     through the article reader (EVA never touches state). */
+  async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema, status }) {
+    const opnd = status ? Object.assign({}, operand, { status }) : (operand || {});
+    const head = { v: schema || SCHEMA, op, target: "article/" + slug, ts: nowIso(), actor: actor || null, operand: opnd };
     if (note) head.note = note;
     const line = JSON.stringify(Object.assign(head, extra || {}));
-    const res = await commitLine({ slug, line, token, message: message || (String(op).toLowerCase() + ": " + slug) });
-    return { res, line, sha: lineSha(line), filename: filenameFor(slug) };
+    const filename = eventPath(slug, op, line);
+    const res = await commitFile({ filename, line, token, message: message || (String(op).toLowerCase() + ": " + slug) });
+    return { res, line, sha: lineSha(line), filename };
   }
 
   /* Every event in the document's log, folded once — the article reader keeps
@@ -1352,8 +1414,8 @@
      since-superseded draft as stale). */
   async function fetchEvents(slug) {
     const s = slugify(slug) || slug;
-    const text = await fetchRaw(filenameFor(s));
-    if (text == null) return { events: [], base_sha: null };
+    const text = await gatherLog(s);
+    if (!text) return { events: [], base_sha: null };
     const folded = foldLog(text);
     return { events: folded.events || [], base_sha: folded.article ? folded.article.base_sha : null };
   }
