@@ -1165,8 +1165,10 @@ function ArticleRead(props) {
   };
 
   const Body = (
-    <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}
-      onMouseUp={() => setTimeout(refreshBubble, 0)} onKeyUp={(e) => { if (e.shiftKey || e.key === "Shift") setTimeout(refreshBubble, 0); }}>
+    // Select-to-suggest is OFF on the external read view for now — no bubble on
+    // text selection. The feedback machinery (refreshBubble / compose / rail) is
+    // left intact so it can be switched back on by re-wiring these handlers.
+    <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}>
       {A.body.map((b, i) => {
         if (b.type === "h2" || b.type === "h3") {
           const Tag = b.type;
