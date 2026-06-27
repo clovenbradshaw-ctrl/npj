@@ -489,14 +489,25 @@
       await cache.put(bodyKey(slug), new Response(text, { headers: { "Content-Type": "application/x-ndjson", "X-Ver": ver || "" } }));
     } catch (e) {}
   }
-  async function fetchArchiveNet(slug, ver) {
-    try {
-      const res = await fetch(articleDownloadUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
-      if (!res.ok) return null;
-      const text = await res.text();
-      bodyCachePut(slug, text, ver);
-      return text;
-    } catch (e) { return null; }
+  // In-flight de-dupe: loadArticle, the front-page fold and the prefetch can all
+  // ask for the same slug at once — without this they fire 4-5 concurrent GETs
+  // for one file and archive.org answers 503 (rate-limited). One shared request
+  // per slug fixes that; later callers await the same promise.
+  const inflightBody = Object.create(null);
+  function fetchArchiveNet(slug, ver) {
+    if (inflightBody[slug]) return inflightBody[slug];
+    const p = (async () => {
+      try {
+        const res = await fetch(articleDownloadUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return null; // 404 = not published yet; 503 = archive busy — caller serves cache/empty, retries next pass
+        const text = await res.text();
+        bodyCachePut(slug, text, ver);
+        return text;
+      } catch (e) { return null; }
+    })();
+    inflightBody[slug] = p;
+    p.then(() => { delete inflightBody[slug]; }, () => { delete inflightBody[slug]; });
+    return p;
   }
   // The article's full event log, cache-first. `ver` (the manifest's per-slug
   // version) decides whether a cache hit is trusted as current.
@@ -1512,16 +1523,29 @@
     const m = String(publishEndpoint()).match(/^(https?:\/\/[^/]+\/webhook)\//i);
     return m ? m[1] + "/site/article-npj" : DEFAULT_ENDPOINT.replace(/\/[^/]*$/, "/article-npj");
   }
-  // POST one event line to the article webhook. The webhook appends it to
-  // npj-article-<slug>/<slug>.jsonl on archive.org. After a write we drop this
-  // slug's cached body so the next read refetches the freshly-appended log.
+  // POST one event line to the article webhook, which appends it to
+  // npj-article-<slug>/<slug>.jsonl on archive.org. If that endpoint isn't
+  // deployed yet (n8n answers 404 for an unregistered path, or it's
+  // unreachable), fall back to the existing /site/publish-npj webhook with its
+  // single-file append + mirror contract: it commits the log to GitHub AND
+  // mirrors the full log to the same archive.org item, so the reader (which only
+  // ever reads archive.org) still works. Deploying npj-article.n8n.json later
+  // makes this drop GitHub entirely — no client change needed. Either way, a
+  // successful write drops the slug's cached body so the next read is fresh.
   async function postArticle(bodyObj, token) {
-    const res = await fetch(articleEndpoint(), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-      body: JSON.stringify(bodyObj)
-    });
-    if (res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
+    const auth = { "Content-Type": "application/json", "Authorization": "Bearer " + token };
+    let res = null;
+    try { res = await fetch(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }); }
+    catch (e) { res = null; }
+    if (!res || res.status === 404) {
+      // legacy fallback: the deployed publish webhook (mirror:true puts the full
+      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article)
+      res = await fetch(publishEndpoint(), {
+        method: "POST", headers: auth,
+        body: JSON.stringify({ filename: filenameFor(bodyObj.slug), mode: "append", contentRaw: bodyObj.line + "\n", message: bodyObj.message, mirror: true })
+      });
+    }
+    if (res && res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
     return res;
   }
   // forget a slug's cached body (after a write) so a reload pulls the new log

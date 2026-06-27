@@ -3469,7 +3469,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
       {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
-      {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session}
+      {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, definitions, sources })} />}
       {previewDoc && window.ArticleRead && (
@@ -3521,7 +3521,7 @@ function Spinner() { return <span style={{ width: 11, height: 11, border: "2px s
 /* The publish boundary is real: nothing fires until the author confirms, every
    step reports what actually happened, and a failed step stops the run — no
    checkmark is ever painted on something that didn't succeed. */
-function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug }) {
+function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug, draftId }) {
   // the filename is the author's call — it follows the headline until they
   // rename it at the gate, and a custom name sticks with the draft
   const auto = slugify(title) || "untitled";
