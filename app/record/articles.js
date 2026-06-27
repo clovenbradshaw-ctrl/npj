@@ -118,6 +118,18 @@
     const tail = ("000" + Math.floor(Math.random() * 1679616).toString(36)).slice(-4);
     return dirFor(slug) + "/" + stamp + "-" + (OP_TAGS[String(op).toLowerCase()] || "rec") + "-" + tail + ".jsonl";
   }
+  /* REJECT stray per-event archive items from the old write path. A real
+     document is ONE item — npj-article-<slug> — holding a single append-only
+     <slug>.jsonl. An earlier publish path mistakenly created one item PER EVENT,
+     named after the event's version file: npj-article-<slug>-<UTCstamp>z-<op>-<tail>
+     (e.g. npj-article-draft-benches-titles-20260619t181216997z-ins-13at). The tag
+     search then surfaced every INS/REC as its own "article", so the same piece
+     repeated across the front page. We have versioned past that scheme: a slug
+     carrying that <stamp>z-<op>-<tail> tail is not a document, and the reader drops
+     it everywhere — so this junk never paints again, even with no manifest to
+     override it. The tail op set is intentionally broad (ins|rec|eva|def|seg). */
+  const STALE_EVENT_SLUG = /-\d{8}t\d{4,}z-(?:ins|rec|eva|def|seg)-[a-z0-9]{2,8}$/i;
+  function isStaleEventSlug(slug) { return STALE_EVENT_SLUG.test(String(slug || "")); }
 
   /* djb2 → 7 hex chars. Not crypto — just a stable, human-quotable version id
      derived from the event line itself, so every reader derives the same one. */
@@ -625,7 +637,7 @@
     const docs = ((json && json.response && json.response.docs) || []);
     return docs
       .map(d => ({ slug: String(d.identifier || "").indexOf("npj-article-") === 0 ? String(d.identifier).slice("npj-article-".length) : "", ver: String(d.oai_updatedate || d.publicdate || "") }))
-      .filter(d => d.slug);
+      .filter(d => d.slug && !isStaleEventSlug(d.slug)); // drop the old per-event junk items
   }
   async function listFromSearch() {
     const docs = await searchArchiveDocs();
@@ -665,7 +677,7 @@
     let manifest = await fetchManifest();
     if (!manifest) manifest = loadManifestCache();
     if (manifestOk(manifest)) {
-      const metas = manifest.articles.filter(m => m && m.slug && m.headline).map(normalizeMeta).sort(byNewest);
+      const metas = manifest.articles.filter(m => m && m.slug && m.headline && !isStaleEventSlug(m.slug)).map(normalizeMeta).sort(byNewest);
       prefetchBodies(metas); // warm bodies in the background — never gates the front page
       return metas;
     }
@@ -738,6 +750,7 @@
   // and the methods footer all resolve.
   async function loadArticle(slug) {
     const s = slugify(slug) || slug;
+    if (isStaleEventSlug(s)) return null; // a stray per-event item from the old write path — we've versioned past it
     const text = await fetchArchiveText(s, manifestVer(s));
     if (text == null) return null;
     const { article, sources } = foldLog(text);
@@ -1684,7 +1697,7 @@
 
   root.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint, manifestEndpoint, articleEndpoint,
-    foldLog, plainText, readMins, lineSha,
+    foldLog, plainText, readMins, lineSha, isStaleEventSlug,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, dropFromFront, publishedMeta, loadArticle, primeFront, saveFront,

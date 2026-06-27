@@ -16,6 +16,21 @@ test("buildManifest stamps the CURRENT schema version", () => {
   assert.equal(m.v, "npj/site-manifest/2", "the bumped version is what new manifests carry");
 });
 
+test("isStaleEventSlug rejects old per-event items, keeps real document slugs", () => {
+  // the exact junk identifiers archive.org's tag search returns (slug = identifier
+  // minus the npj-article- prefix) — one item per INS/REC event, the old scheme
+  const junk = [
+    "draft-benches-titles-20260619t181216997z-ins-13at",
+    "draft-benches-titles-20260622t035752615z-rec-cbjh",
+    "nashville-s-unauthorized-secret-police-force-and-the-people-20260619t170415352z-rec-9sc8"
+  ];
+  junk.forEach(s => assert.equal(A.isStaleEventSlug(s), true, "must reject: " + s));
+
+  // real, single-item document slugs must survive
+  ["draft-benches-titles", "nashville-secret-police", "demo-article", "a-2026-budget-story"]
+    .forEach(s => assert.equal(A.isStaleEventSlug(s), false, "must keep: " + s));
+});
+
 test("dropFromFront removes a slug and promotes the next piece to lead", () => {
   // dropFromFront reads window.NPJ.FRONT; stand up a minimal global for node.
   const prevWin = globalThis.window;
