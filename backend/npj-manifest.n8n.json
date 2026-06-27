@@ -1,0 +1,241 @@
+{
+  "name": "NPJ site manifest",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/manifest-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wf-manifest-webhook",
+      "name": "Manifest Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [2032, 1504],
+      "webhookId": "site-manifest",
+      "notes": "SITE MANIFEST WRITE (the validated line-up the reader trusts)\nPOST /webhook/site/manifest-npj\nAuthorization: Bearer <matrix token>\nBody: { identifier:'npj-site', filename:'manifest.json', manifest:{ v, updated, articles:[...] } }\nGate: Matrix admin/editor (same roles as publish). PUTs the manifest JSON to the\narchive.org item we own (npj-site/manifest.json, overwrite). Because only this\npath can write that item, the reader trusts a slug iff it is listed here —\nso a stranger who self-tags an upload `npj-article` never enters the site.\nThe client (app/record/articles.js → publishManifest) sends the FULL manifest,\nso this is a plain overwrite — no server-side merge, no half-merged races."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "wf-manifest-whoami",
+      "name": "Manifest Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 1504],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "cb",
+              "value": "={{ Date.now() }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "wf-manifest-roles",
+      "name": "Manifest Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2448, 1504],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Authorize (admin/editor, same as publish) and stage the manifest bytes.\nconst who = $('Manifest Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Manifest Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\n\nconst hook = $('Manifest Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst identifier = (String(body.identifier || 'npj-site').replace(/[^A-Za-z0-9._-]/g, '-').replace(/^-+|-+$/g, '').slice(0, 90)) || 'npj-site';\nconst filename = (String(body.filename || 'manifest.json').replace(/[^A-Za-z0-9._-]/g, '')) || 'manifest.json';\nlet manifest = body.manifest;\nif (typeof manifest === 'string') { try { manifest = JSON.parse(manifest); } catch (e) {} }\nconst valid = !!(manifest && typeof manifest === 'object' && Array.isArray(manifest.articles));\nconst content = valid ? JSON.stringify(manifest) : '';\nreturn [{ json: {\n  authorized, valid, user_id: userId, role, identifier, filename,\n  count: valid ? manifest.articles.length : 0,\n  error: !authorized ? 'unauthorized' : (!valid ? 'manifest must be an object with an articles[] array' : null)\n}, binary: { data: { data: Buffer.from(content, 'utf8').toString('base64'), mimeType: 'application/json', fileName: filename } } }];"
+      },
+      "id": "wf-manifest-authorize",
+      "name": "Manifest Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2656, 1504]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-manifest-authz",
+              "leftValue": "={{ String(($json.authorized === true) && ($json.valid === true)) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf-manifest-authorized",
+      "name": "Manifest Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2864, 1504]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: ($json.error || 'unauthorized'), user: $json.user_id || null, role: $json.role || null }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf-manifest-unauth",
+      "name": "Respond Manifest Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3072, 1696]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://s3.us.archive.org/' + $json.identifier + '/' + $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "authorization",
+              "value": "=LOW rXhRt48QIJvmbSXS:cEjL4BtX1PElGli9"
+            },
+            {
+              "name": "x-amz-auto-make-bucket",
+              "value": "1"
+            },
+            {
+              "name": "x-archive-meta-mediatype",
+              "value": "web"
+            },
+            {
+              "name": "x-archive-meta-subject",
+              "value": "npj-manifest"
+            },
+            {
+              "name": "x-archive-meta-title",
+              "value": "NPJ site manifest"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "wf-manifest-put",
+      "name": "Manifest IA Put",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3072, 1504],
+      "continueOnFail": true,
+      "notes": "Reuses the IA S3 keys (same as the publish flow's mirror). Overwrites npj-site/manifest.json."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst built = $('Manifest Authorize').first().json || {};\nconst status = Number(r.statusCode || 0) || null;\nconst ok = !r.error && (!status || status < 400);\nconst url = ok ? ('https://archive.org/download/' + built.identifier + '/' + built.filename) : null;\nreturn [{ json: { ok, statusCode: ok ? 200 : (status || 502), url,\n  identifier: built.identifier, filename: built.filename, count: built.count,\n  error: ok ? null : ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org manifest PUT failed (' + (status || '?') + ')')) } }];"
+      },
+      "id": "wf-manifest-result",
+      "name": "Manifest Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3280, 1504]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: $json.ok, url: $json.url, error: $json.error, identifier: $json.identifier, filename: $json.filename, count: $json.count }) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "wf-manifest-ok",
+      "name": "Manifest OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3488, 1504]
+    }
+  ],
+  "connections": {
+    "Manifest Webhook": { "main": [[{ "node": "Manifest Whoami", "type": "main", "index": 0 }]] },
+    "Manifest Whoami": { "main": [[{ "node": "Manifest Fetch Roles", "type": "main", "index": 0 }]] },
+    "Manifest Fetch Roles": { "main": [[{ "node": "Manifest Authorize", "type": "main", "index": 0 }]] },
+    "Manifest Authorize": { "main": [[{ "node": "Manifest Authorized?", "type": "main", "index": 0 }]] },
+    "Manifest Authorized?": {
+      "main": [
+        [{ "node": "Manifest IA Put", "type": "main", "index": 0 }],
+        [{ "node": "Respond Manifest Unauthorized", "type": "main", "index": 0 }]
+      ]
+    },
+    "Manifest IA Put": { "main": [[{ "node": "Manifest Result", "type": "main", "index": 0 }]] },
+    "Manifest Result": { "main": [[{ "node": "Manifest OK", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

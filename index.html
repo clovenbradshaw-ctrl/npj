@@ -339,6 +339,10 @@ function App() {
   // articleRev remounts the reader when an article is opened or edited.
   const [frontRev, setFrontRev] = useState(0);
   const [articleRev, setArticleRev] = useState(0);
+  // an article body is fetched from archive.org on open (cache-first, but a cold
+  // read hits the network) — hold a loading flag so the reader route shows a
+  // spinner instead of a blank page while the log streams in
+  const [articleLoading, setArticleLoading] = useState(false);
   // #article;read=<slug> deep link — resolved on mount, and it must hold the
   // "no article → go home" guard open while the log is being fetched
   const pendingRead = useRef((() => {
@@ -406,6 +410,9 @@ function App() {
         readMins: window.NpjArticles.readMins(r.body),
         versions: [{ sha: r.sha, ts, author: me, message: r.note || "Merged a suggestion", headline: A.headline || "", dek: A.dek || "", text: window.NpjArticles.plainText(r.body) }, ...(A.versions || [])] };
       window.NPJ.ARTICLE = updated; setArticleRev(rv => rv + 1);
+      // a merged suggestion changes the body — push the new version into the
+      // archive.org manifest so the front page + cache reflect it
+      try { const tk = fbToken(); if (tk) window.NpjArticles.syncArticleToManifest(updated, tk); } catch (e) {}
       window.NpjArticles.loadFront().then(() => setFrontRev(rv => rv + 1)).catch(() => {});
     }
     return r;
@@ -446,13 +453,18 @@ function App() {
       return;
     }
     if (!slugOrArticle) { if (window.NPJ.ARTICLE) { setRoute("article"); window.scrollTo(0, 0); } return; }
+    // route to the reader immediately and show the loading state while the body
+    // streams from archive.org (a prefetched/cached piece resolves instantly)
+    setArticleLoading(true); setRoute("article"); window.scrollTo(0, 0);
     try {
       const a = await window.NpjArticles.loadArticle(String(slugOrArticle));
       // unpublished pieces don't load for anyone but an admin — hidden from the
-      // site even on a direct link, though the log is still public on GitHub
-      if (a && a.status === "unpublished" && !isAdminRef.current) return;
-      if (a) { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); setRoute("article"); window.scrollTo(0, 0); }
-    } catch (e) { /* unreadable log → stay where we are */ }
+      // site even on a direct link, though the log is still public on archive.org
+      if (a && a.status === "unpublished" && !isAdminRef.current) { setArticleLoading(false); setRoute("home"); return; }
+      if (a) { window.NPJ.ARTICLE = a; setArticleRev(r => r + 1); }
+      else if (!window.NPJ.ARTICLE) { setRoute("home"); } // nothing to show
+    } catch (e) { if (!window.NPJ.ARTICLE) setRoute("home"); }
+    finally { setArticleLoading(false); }
   }, []);
 
   // boot: pull the committed line-up onto the front page, and resolve a deep link
@@ -473,7 +485,7 @@ function App() {
   }, [openArticle]);
 
   // no article? never sit on the article route (unless a deep link is still loading)
-  useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE && !pendingRead.current) setRoute("home"); }, [route]);
+  useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE && !pendingRead.current && !articleLoading) setRoute("home"); }, [route, articleLoading]);
 
   // keep the URL hash in sync so a refresh restores the view — including which
   // article is open (#article;read=<slug> is also the canonical share link)
@@ -547,7 +559,7 @@ function App() {
   return (
     <window.LayoutCtx.Provider value={{ layout, setLayout, isAdmin, isEditor: isEditorRole, role, me, admin: window.SEED_ADMIN }}>
       {route === "home" && <FrontPage key={"front-" + frontRev} onOpen={openArticle} onNewsroom={goNewsroom} onHome={goHome} />}
-      {route === "article" && (ready.read ? (window.NPJ.ARTICLE && (
+      {route === "article" && (ready.read ? (window.NPJ.ARTICLE ? (
         <ArticleRead key={(window.NPJ.ARTICLE.slug || "a") + ":" + articleRev}
           audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
@@ -558,12 +570,16 @@ function App() {
           me={me} onHome={goHome} onNewsroom={goNewsroom}
           onEdited={(a) => {
             window.NPJ.ARTICLE = a; setArticleRev(r => r + 1);
-            // reflect the edit (incl. an unpublish/republish) on the front page
-            // right away, even if the git-tree listing hasn't caught up yet
+            // every post-publish edit, revert, unpublish/republish folds through
+            // here — sync the changed piece into the validated archive.org manifest
+            // (the line-up the front page + reader read) so the change shows at once
+            try { const tk = fbToken(); if (tk) window.NpjArticles.syncArticleToManifest(a, tk); } catch (e) {}
+            // reflect the edit on the front page right away, even before the
+            // archive listing catches up
             const reflect = () => { window.NpjArticles.patchFrontStatus(a.slug, a.status); setFrontRev(r => r + 1); };
             window.NpjArticles.loadFront().then(reflect).catch(reflect);
           }} />
-      )) : <BootLoading />)}
+      ) : <BootLoading label="Loading from archive.org…" />) : <BootLoading />)}
       {route === "newsroom" && (ready.all
         ? ((isEditorRole || isGuest)
           ? <Newsroom key={draftId} session={session} draftId={draftId} onExit={goHome} onDocs={goDocs} onPublished={openArticle} />
