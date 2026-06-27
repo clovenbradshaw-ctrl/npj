@@ -11,6 +11,53 @@
 > `npj-layout.client.js`), and `chain_head.json`. Permissions also mirror to a
 > Matrix control-room state event (`press.npj.permissions`) only admins can write.
 
+## The site READS from archive.org, not GitHub
+
+GitHub is the write target; **the public site reads every byte from the Internet
+Archive.** The publish flow already mirrors each committed article to its own IA
+item (`Mirror to Archive.org`), and `app/record/articles.js` reads from there:
+
+- **One item per article** — `npj-article-<slug>` / `<slug>.jsonl` — holds the
+  full EO event log, so `loadArticle()` fetches and folds it directly (no GitHub,
+  no API rate limit). Bodies are cached in the browser (Cache Storage, keyed by
+  the manifest version) and served stale-while-revalidate, and the whole line-up
+  is **prefetched in the background** after the front page paints, so opening any
+  piece is instant.
+- **One site manifest** — `npj-site` / `manifest.json` — is the front-page
+  line-up: a compact meta row per piece (`slug, headline, dek, column, image,
+  published, updated, status, versions, readMins, ver`). The front page paints
+  from this single fetch and is **never gated on article-body downloads**.
+
+### Validation: the manifest is the trust anchor
+
+Anyone can upload an item and tag it `npj-article`, so the subject tag alone is
+**not** trusted — it's only a bootstrap fallback (`searchArchiveDocs`, optionally
+pinned to an uploader via `window.NPJ.ARCHIVE.articleQuery =
+'uploader:"you@example.com"'`) for the window before a manifest exists. The
+**manifest** is the real trust anchor: the reader trusts a slug *because it is
+listed in our manifest*, and only an authorized admin/editor can write that —
+through the manifest webhook below, which re-verifies the Matrix token and PUTs
+with our IA S3 keys to the `npj-site` item we own. A stranger's self-tagged
+upload therefore never enters the site.
+
+### `POST /webhook/site/manifest-npj` — write the manifest (`npj-manifest.n8n.json`)
+
+```jsonc
+// Authorization: Bearer <matrix token>   (admin/editor, same gate as publish)
+{ "identifier": "npj-site", "filename": "manifest.json",
+  "manifest": { "v": "npj/site-manifest/1", "updated": "…", "articles": [ /* meta rows */ ] } }
+```
+
+The **client sends the full manifest** (`app/record/articles.js` →
+`publishManifest` / `syncArticleToManifest` / `patchManifestStatus`), so the
+webhook is a plain overwrite — no server-side merge, no half-merged race. It
+fires after every publish, edit, revert, merge and unpublish/republish, so the
+index **updates over time** without waiting on archive.org's search index
+(which can lag minutes to ~an hour). Import `npj-manifest.n8n.json` into the same
+n8n instance as the publish workflow (it reuses the same IA S3 keys and the same
+Matrix role gate). Until it's deployed, the reader falls back to the tag search
+and still works — just unvalidated and subject to the search-index lag.
+
 ## Articles are EO event logs — one folder of version files per document
 
 A published article is **not** a markdown file: it's an append-only log of EO

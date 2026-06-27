@@ -466,8 +466,11 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
         setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
           ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "dir", logPath: "articles/" + m.slug }
           : x) } : p);
+        // flip the slug's status in the validated archive.org manifest so the
+        // front page + reader hide/show it right away
+        window.NpjArticles.patchManifestStatus(m.slug, next, token);
         // refresh the front index, then force this slug's new status in (the
-        // git-tree listing can lag a fresh commit) so home hides/shows it at once
+        // archive listing can lag a fresh write) so home hides/shows it at once
         const reflect = () => window.NpjArticles.patchFrontStatus(m.slug, next);
         window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }

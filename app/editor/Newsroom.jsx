@@ -2620,8 +2620,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!out.res.ok) {
         setStatusErr("Rejected (HTTP " + out.res.status + ")" + ((out.res.status === 401 || out.res.status === 403) ? " — that Matrix account isn't authorized to manage publication." : " — nothing changed."));
       } else {
+        // flip the slug's status in the validated manifest so the front page
+        // (and the reader's deep-link gate) hides it right away
+        window.NpjArticles.patchManifestStatus(slug, "unpublished", token);
         // refresh the front index, then force this slug's new status in (the
-        // git-tree listing lags a fresh commit) and re-render so the button flips
+        // archive listing lags a fresh write) and re-render so the button flips
         const reflect = () => { window.NpjArticles.patchFrontStatus(slug, "unpublished"); setRev(r => r + 1); };
         window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }
@@ -3690,6 +3693,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     await tick(400);
     const warn = await verifyRaw(filename);
     upd(4, { state: warn ? "fail" : "done", detail: warn ? warn.short : articleUrl + (sha ? " · committed @ " + sha.slice(0, 7) : "") });
+    // add this piece to the validated site manifest on archive.org (the line-up
+    // the reader trusts) so it appears on the front page without waiting on the
+    // archive search index. Best-effort — a miss is reconciled on the next publish.
+    try { window.NpjArticles.syncArticleToManifest(published.current, p.token); } catch (e) {}
     if (alive.current) setOutcome({ ok: true, sha, warn: warn ? warn.msg : null });
   };
 
