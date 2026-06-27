@@ -78,6 +78,13 @@ function StandardsPage({ onHome, onNewsroom, onSubmit }) {
           ))}
         </div>
 
+        {/* voids */}
+        <SectionHead n="04" title="When the evidence is an absence" />
+        <p style={{ fontFamily: "var(--serif)", fontSize: 16, lineHeight: 1.55, margin: "0 0 22px", color: "var(--ink-soft)", maxWidth: "64ch" }}>
+          Sometimes the finding is that something <em>isn't</em> there — a page that was deleted, a record that was redacted, a report that never names the lawsuit. We treat a documented absence as its own kind of evidence, a <strong>void</strong>. But absences aren't equal: some you can point to, some you can only describe, some you can only reason your way to. So every void we mark carries which of six kinds it is — and the reader sees exactly how far we can stand behind it.
+        </p>
+        <VoidKindsTable />
+
         {/* CTA */}
         <div style={{ border: "2.5px solid var(--ink)", background: "var(--yellow)", padding: "26px 26px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 20, flexWrap: "wrap" }}>
           <div>
@@ -89,6 +96,44 @@ function StandardsPage({ onHome, onNewsroom, onSubmit }) {
           </button>
         </div>
       </main>
+    </div>
+  );
+}
+
+/* The six kinds of void, rendered straight from the shared taxonomy
+   (window.NpjVoidKinds) so this legend can never drift from what the editor
+   enforces and the reader's lens shows. Grouped strongest-first by how the
+   author can back the absence: show it, locate it, or only assert it. */
+function VoidKindsTable() {
+  const VK = window.NpjVoidKinds;
+  if (!VK) return null;
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", marginBottom: 46 }}>
+      {VK.GROUPS.map((g, gi) => {
+        const kinds = VK.kindsIn(g.key);
+        if (!kinds.length) return null;
+        return (
+          <div key={g.key} style={{ borderTop: gi > 0 ? "1.5px solid var(--ink)" : 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", padding: "12px 18px", background: "var(--ink)", color: "var(--paper)" }}>
+              <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17 }}>{g.verb}</span>
+              <span style={{ fontFamily: "var(--serif)", fontSize: 14, opacity: .85 }}>— {g.gloss}</span>
+              <span className="np-mono" style={{ marginLeft: "auto", fontSize: 12, color: "var(--yellow)", textTransform: "uppercase", letterSpacing: ".06em" }}>{g.reader}</span>
+            </div>
+            {kinds.map((k, ki) => {
+              const d = VK.get(k);
+              return (
+                <div key={k} style={{ display: "flex", gap: 14, padding: "14px 18px", borderTop: ki > 0 ? "1px solid var(--rule)" : 0 }}>
+                  <span aria-hidden="true" style={{ flex: "0 0 1.4em", fontSize: 22, lineHeight: 1.1, textAlign: "center", color: "var(--ink)" }}>{d.glyph}</span>
+                  <div>
+                    <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 18 }}>{d.label} </span>
+                    <span style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.5, color: "var(--ink-soft)" }}>{d.blurb}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
