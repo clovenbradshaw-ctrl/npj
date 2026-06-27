@@ -857,6 +857,20 @@ a { color: inherit; }
 .md-preview .cmp-widget-f { color: var(--nr-muted, #8c8676); }
 .md-preview .cmp-tag { color: var(--nr-soft, #b3ad9c); border-color: var(--nr-line-strong, rgba(255,255,255,.25)); }
 
+/* The dark section-nav's column strip contains its own overflow at EVERY width,
+   not just on phones: when the bar gets tight the tabs scroll inside this box
+   instead of spilling out and overlapping the search field beside them (the
+   classic flex min-content leak that made "Sources Archive" sit under the search
+   placeholder on a narrow window). The mobile layer below adds the swipe mask +
+   lets the strip grow to fill the bar. */
+.npj-nav-cols { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.npj-nav-cols::-webkit-scrollbar { display: none; }
+/* On desktop the tabs are load-bearing labels, so they keep their full width and
+   the search field (which can shrink to nothing) yields the space instead — no
+   clipped "Sources Archive". On phones the mobile layer's `flex: 1 1 auto` below
+   wins, turning the strip back into a swipeable scroller. */
+@media (min-width: 761px) { .npj-nav-cols { flex-shrink: 0; } }
+
 /* ============================================================
    Responsive layer
    The prototype shipped desktop-only (no media queries at all).

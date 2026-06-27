@@ -10,6 +10,12 @@
 // it never runs away on ultra-wide displays). On phones every container goes
 // full-width (handled per-component via useIsMobile + the existing mobile CSS).
 const SHELL_W = "min(66.67vw, 1760px)";
+// …but 2/3 of a *narrow* desktop window is too tight for the masthead's dark nav
+// (Latest + Sources Archive + search + the Submit CTA), which is what made the
+// tabs overlap the search field on the front page. The 2/3 shell is a wide-screen
+// nicety, so below this width the front page falls back to the full-width chrome
+// every other route already uses — which has room to spare.
+const SHELL_MIN = 1180;
 
 function Placeholder({ label, h = 220, dark = false }) {
   const stroke = dark ? "rgba(255,255,255,.10)" : "rgba(22,20,13,.09)";
@@ -66,7 +72,10 @@ function CreatorCredits({ compact }) {
 function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
-  const tight = narrow && !mobile; // apply the 2/3 column only on desktop
+  // the 2/3 column is only safe on a genuinely wide desktop; narrower than that
+  // and the centered chrome goes full-width so the nav stops overlapping itself
+  const wide = !window.useIsMobile(SHELL_MIN);
+  const tight = narrow && wide;
   const sections = (layout.sections || []).map(s => s.name);
   const utility = layout.utility || [];
   const taglines = layout.taglines || [];
@@ -132,7 +141,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
               ))}
             </div>
             <div className="npj-nav-spacer" style={{ flex: 1 }} />
-            <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 70 }}>
+            <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 0 }}>
               <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "#8c8676" }}>⌕</span>
               <input type="text" placeholder="Search records, snapshots…" style={{ width: "100%", minWidth: 0, border: 0, borderBottom: "1px solid rgba(255,255,255,.35)", background: "transparent", fontFamily: "var(--mono)", fontSize: 13, color: "var(--paper)", outline: "none", padding: "4px 0" }} />
             </div>
@@ -153,6 +162,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
+  const wide = !window.useIsMobile(SHELL_MIN); // 2/3 shell only on wide desktops
   const F = window.NPJ.FRONT || {};
   const sections = (layout.sections || []).map(s => s.name);
   const [col, setCol] = useState(null);
@@ -175,7 +185,7 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
     <div className="fade-in">
       <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
         activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
-      <main style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 0 0" : "34px 0 0" }}>
+      <main style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "34px 0 0" : (mobile ? "24px 0 0" : "34px 72px 0") }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
           : <FrontLineup items={shown} onOpen={onOpen} />}
@@ -188,15 +198,17 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
 /* ---- Footer ---- */
 function FrontFooter() {
   const mobile = window.useIsMobile();
+  const wide = !window.useIsMobile(SHELL_MIN); // match the front-page shell
   return (
     <footer style={{ background: "var(--ink)", color: "#e3ddcc", marginTop: 36 }}>
-      <div className="npj-footer-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 16px" : "24px 0", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div className="npj-footer-inner" style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "24px 0" : (mobile ? "24px 16px" : "24px 72px"), display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <span aria-hidden="true" style={{ position: "relative", display: "inline-block", width: 15, height: 13, borderBottom: "3px solid var(--yellow)", flexShrink: 0 }}>
           <span style={{ position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)", width: 3, height: 10, background: "var(--yellow)" }} />
         </span>
         <span style={{ fontStyle: "italic", fontSize: 16.5 }}>Every underlined claim stands on an archived source.</span>
         <span style={{ flex: 1, minWidth: 20 }} />
         <button onClick={() => window.__nav && window.__nav.contributors && window.__nav.contributors()} className="np-mono" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3 }}>Contributors</button>
+        <a href="https://archive.org" target="_blank" rel="noopener noreferrer" className="np-mono" style={{ color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3 }}>Powered by Archive.org</a>
         <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY · documents public record</span>
       </div>
     </footer>
