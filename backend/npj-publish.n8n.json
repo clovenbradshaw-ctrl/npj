@@ -1173,42 +1173,33 @@
     },
     {
       "parameters": {
-        "method": "PUT",
-        "url": "=https://api.github.com/repos/clovenbradshaw-ctrl/npj/contents/{{ $json.filename }}",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "githubOAuth2Api",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Accept",
-              "value": "application/vnd.github+json"
-            },
-            {
-              "name": "User-Agent",
-              "value": "npj-n8n"
-            }
-          ]
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "edit",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
         },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ message: $json.message, content: $json.contentBase64, sha: $json.sha, branch: 'main' }) }}",
-        "options": {
-          "response": {
-            "response": {
-              "neverError": true
-            }
+        "filePath": "={{ $json.filename }}",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {
+            "branch": "main"
           }
         }
       },
       "id": "999fec11-de06-4daa-b153-8fc496d6304a",
       "name": "GH Update",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
       "position": [
         3904,
         3280
       ],
+      "webhookId": "gh-update-publish",
       "credentials": {
         "githubOAuth2Api": {
           "id": "818QKPlLgc22aSHm",
