@@ -10,6 +10,12 @@
 // it never runs away on ultra-wide displays). On phones every container goes
 // full-width (handled per-component via useIsMobile + the existing mobile CSS).
 const SHELL_W = "min(66.67vw, 1760px)";
+// …but 2/3 of a *narrow* desktop window is too tight for the masthead's dark nav
+// (Latest + Sources Archive + search + the Submit CTA), which is what made the
+// tabs overlap the search field on the front page. The 2/3 shell is a wide-screen
+// nicety, so below this width the front page falls back to the full-width chrome
+// every other route already uses — which has room to spare.
+const SHELL_MIN = 1180;
 
 function Placeholder({ label, h = 220, dark = false }) {
   const stroke = dark ? "rgba(255,255,255,.10)" : "rgba(22,20,13,.09)";
@@ -66,7 +72,10 @@ function CreatorCredits({ compact }) {
 function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
-  const tight = narrow && !mobile; // apply the 2/3 column only on desktop
+  // the 2/3 column is only safe on a genuinely wide desktop; narrower than that
+  // and the centered chrome goes full-width so the nav stops overlapping itself
+  const wide = !window.useIsMobile(SHELL_MIN);
+  const tight = narrow && wide;
   const sections = (layout.sections || []).map(s => s.name);
   const utility = layout.utility || [];
   const taglines = layout.taglines || [];
@@ -132,7 +141,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
               ))}
             </div>
             <div className="npj-nav-spacer" style={{ flex: 1 }} />
-            <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 70 }}>
+            <div className="npj-search" style={{ display: "flex", alignItems: "center", gap: 9, marginRight: 30, flex: "0 1 240px", minWidth: 0 }}>
               <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "#8c8676" }}>⌕</span>
               <input type="text" placeholder="Search records, snapshots…" style={{ width: "100%", minWidth: 0, border: 0, borderBottom: "1px solid rgba(255,255,255,.35)", background: "transparent", fontFamily: "var(--mono)", fontSize: 13, color: "var(--paper)", outline: "none", padding: "4px 0" }} />
             </div>
@@ -153,6 +162,7 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
+  const wide = !window.useIsMobile(SHELL_MIN); // 2/3 shell only on wide desktops
   const F = window.NPJ.FRONT || {};
   const sections = (layout.sections || []).map(s => s.name);
   const [col, setCol] = useState(null);
@@ -175,7 +185,7 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
     <div className="fade-in">
       <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
         activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
-      <main style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 0 0" : "34px 0 0" }}>
+      <main style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "34px 0 0" : (mobile ? "24px 0 0" : "34px 72px 0") }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />
           : <FrontLineup items={shown} onOpen={onOpen} />}
@@ -185,20 +195,97 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   );
 }
 
+/* The Internet Archive's "temple" mark, inlined (no runtime third-party fetch,
+   matching the rest of the app) and drawn in currentColor so it takes the
+   footer's ink. A plain facade: pediment, lintel, four columns, two base bars. */
+function ArchiveOrgMark({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="currentColor" aria-hidden="true" style={{ flexShrink: 0, display: "block" }}>
+      <polygon points="50,6 93,27 7,27" />
+      <rect x="14" y="31" width="72" height="9" />
+      <rect x="20" y="44" width="9" height="40" rx="1.5" />
+      <rect x="37" y="44" width="9" height="40" rx="1.5" />
+      <rect x="54" y="44" width="9" height="40" rx="1.5" />
+      <rect x="71" y="44" width="9" height="40" rx="1.5" />
+      <rect x="13" y="87" width="74" height="6" />
+      <rect x="8" y="96" width="84" height="4" />
+    </svg>
+  );
+}
+
+/* The "Powered by Archive.org" explainer. The credit is deliberately not a bare
+   outbound link: "powered by" could read as a partnership, so the click opens
+   this sheet, which says plainly what the relationship actually is — the Internet
+   Archive is the journal's content store, not a sponsor — and only THEN links
+   out. Matches the SourceLightbox sheet: scrim + Esc + body-scroll lock. */
+function ArchiveCmsModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); } };
+    document.addEventListener("keydown", onKey, true);
+    const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey, true); document.body.style.overflow = prev; };
+  }, [onClose]);
+  return (
+    <div className="fade-in" role="dialog" aria-modal="true" aria-label="Powered by Archive.org" onClick={onClose}
+      style={{ position: "fixed", inset: 0, zIndex: 7000, display: "flex", alignItems: "center", justifyContent: "center",
+        padding: 22, background: "rgba(8,7,5,0.62)", WebkitBackdropFilter: "blur(2px)", backdropFilter: "blur(2px)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", maxHeight: "calc(100vh - 44px)", overflow: "auto",
+        background: "var(--paper)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "10px 10px 0 rgba(22,20,13,0.22)",
+        animation: "pop .14s ease", padding: "26px 28px 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 18 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <ArchiveOrgMark size={30} />
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Powered by Archive.org</div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{ background: "none", border: 0, padding: 6, margin: -6, cursor: "pointer", color: "var(--ink-soft)", fontSize: 18, lineHeight: 1 }}>✕</button>
+        </div>
+        <h2 style={{ fontFamily: "var(--display)", fontWeight: 400, fontSize: 34, lineHeight: 1.0, textTransform: "uppercase", letterSpacing: ".01em", margin: "0 0 16px" }}>
+          The Internet Archive is our newsroom's CMS.
+        </h2>
+        <div style={{ fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.55, color: "var(--ink)" }}>
+          <p style={{ margin: "0 0 13px" }}>
+            Most newsrooms keep their stories in a private database. We don't. Every article we publish — and every source it cites — is written straight to the Internet Archive as a public, timestamped snapshot.
+          </p>
+          <p style={{ margin: "0 0 13px" }}>
+            That snapshot <em>is</em> the page you're reading. There's no separate copy on a server we control that could quietly change or vanish. The record lives at archive.org, where anyone can read it, fetch it, or keep their own copy.
+          </p>
+          <p style={{ margin: 0 }}>
+            So the journal doesn't depend on us staying online. If this site disappeared tomorrow, the stories and their receipts would still be there — public, dated, and verifiable by anyone.
+          </p>
+        </div>
+        <p className="np-mono" style={{ fontSize: 11, lineHeight: 1.5, color: "var(--ink-soft)", margin: "18px 0 0", paddingTop: 16, borderTop: "1px solid var(--rule)" }}>
+          The Nashville Peoples' Journal isn't affiliated with or endorsed by the Internet Archive. We build on their public infrastructure, the same as anyone can.
+        </p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", marginTop: 20, flexWrap: "wrap" }}>
+          <a className="btn" href="https://archive.org" target="_blank" rel="noopener noreferrer" style={{ display: "inline-flex", alignItems: "center", gap: 7, textDecoration: "none" }}>Visit archive.org ↗</a>
+          <button className="btn btn-primary" onClick={onClose}>Got it</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---- Footer ---- */
 function FrontFooter() {
   const mobile = window.useIsMobile();
+  const wide = !window.useIsMobile(SHELL_MIN); // match the front-page shell
+  const [cmsOpen, setCmsOpen] = useState(false);
   return (
     <footer style={{ background: "var(--ink)", color: "#e3ddcc", marginTop: 36 }}>
-      <div className="npj-footer-inner" style={{ width: mobile ? undefined : SHELL_W, maxWidth: 1760, margin: "0 auto", padding: mobile ? "24px 16px" : "24px 0", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div className="npj-footer-inner" style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "24px 0" : (mobile ? "24px 16px" : "24px 72px"), display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <span aria-hidden="true" style={{ position: "relative", display: "inline-block", width: 15, height: 13, borderBottom: "3px solid var(--yellow)", flexShrink: 0 }}>
           <span style={{ position: "absolute", left: "50%", bottom: 0, transform: "translateX(-50%)", width: 3, height: 10, background: "var(--yellow)" }} />
         </span>
         <span style={{ fontStyle: "italic", fontSize: 16.5 }}>Every underlined claim stands on an archived source.</span>
         <span style={{ flex: 1, minWidth: 20 }} />
         <button onClick={() => window.__nav && window.__nav.contributors && window.__nav.contributors()} className="np-mono" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3 }}>Contributors</button>
-        <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY · documents public record</span>
+        <button onClick={() => setCmsOpen(true)} className="np-mono" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "none", border: 0, padding: 0, cursor: "pointer", color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em" }}>
+          <ArchiveOrgMark />
+          <span style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>Powered by Archive.org</span>
+        </button>
+        <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY</span>
       </div>
+      {cmsOpen && <ArchiveCmsModal onClose={() => setCmsOpen(false)} />}
     </footer>
   );
 }
