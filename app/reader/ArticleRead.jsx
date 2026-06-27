@@ -453,12 +453,17 @@ function GroundingPop({ data, onEnter, onLeave, onClose, onExpand, dockTop }) {
 // ✕ / Esc / a click on the margin exits; the article underneath is untouched.
 // `stage` is { kind:"ground", tok } or { kind:"note", num, text, key }.
 function MainStage({ stage, onClose, onJumpNote }) {
+  // Only trap body scroll while a stage panel is actually OPEN. This component is
+  // always mounted (so it can fade a panel in/out), so an unconditional lock here
+  // would freeze the reader the whole time — and because onClose is a fresh arrow
+  // each render, the effect re-fires constantly and would keep re-applying it.
   useEffect(() => {
+    if (!stage) return undefined;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
+  }, [stage, onClose]);
   if (!stage) return null;
   const isNote = stage.kind === "note";
   const d = isNote ? null : groundingDetail(stage.tok);
@@ -1325,11 +1330,7 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar {...{ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg,
-        suggCount: suggestions.filter(s => s.status === "proposed" || s.status === "review").length,
-        entityOpen, setEntityOpen, entityCount: entityData ? entityData.entities.length : null,
-        canEdit: canEditArticle, onEdit: () => setEditing(true),
-        isAdmin, status: A.status, statusBusy, onSetStatus: changeStatus }} />
+      <ControlBar transLevel={transLevel} setTransLevel={setTransLevel} />
 
       {/* When a docked citation/note/grounding panel is up on a wide window, cede
          a right gutter for it so the column slides left and the two sit centered
@@ -1522,58 +1523,19 @@ function TransparencyControl({ level, setLevel }) {
   );
 }
 
-/* ---- sticky control bar (the reader's instrument panel) ---- */
-function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setShowSugg, suggCount, entityOpen, setEntityOpen, entityCount, canEdit, onEdit, isAdmin, status, statusBusy, onSetStatus }) {
+/* ---- sticky control bar (the reader's instrument panel) ----
+   The public read view is the EXTERNAL face of a piece, so it carries no editing
+   or newsroom chrome — no Edit / Unpublish, no Auditability / Figures /
+   Suggestions rails. The single thing a reader steers is NPJ's transparency
+   layer (how much of the grounding to surface), so that's the only control here.
+   The hover side panel that opens off a claim is on by default (Standard), since
+   `previews` is true at every level but Clean. */
+function ControlBar({ transLevel, setTransLevel }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, flexWrap: "wrap", justifyContent: isPhone ? "flex-start" : undefined }}>
-        {!isPhone && <span style={{ flex: 1 }} />}
-
-        {/* Export lives only in the editor's live Preview (the Substack button on
-           the preview toolbar), where it serializes the byte-for-byte folded draft.
-           Keeping it off the published reader's bar means there's a single, canonical
-           place to export from, so a copy never disagrees with what the author sees. */}
-
-        {canEdit && (
-          <button className="btn btn-sm" onClick={onEdit} title="Edit this published article — your change is appended to its EO event log" style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊛</span> Edit
-          </button>
-        )}
-
-        {isAdmin && (status === "unpublished" ? (
-          <button className="btn btn-sm" onClick={() => onSetStatus("published")} disabled={statusBusy} title="Republish — make this visible on the site again"
-            style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", fontWeight: 700 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>↺</span> {statusBusy ? "Working…" : "Republish"}
-          </button>
-        ) : (
-          <button className="btn btn-sm" onClick={() => onSetStatus("unpublished")} disabled={statusBusy} title="Unpublish — hide from the site (the event log stays in GitHub)"
-            style={{ display: "inline-flex", alignItems: "center", gap: 7, borderColor: "var(--reject)", color: "var(--reject)" }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
-          </button>
-        ))}
-
-        <button className="btn btn-sm" onClick={() => setAudit(!audit)} aria-pressed={audit}
-          title="Auditability — reveal the source ledger, numbered claims and every citation. Off: a clean read."
-          style={{ display: "inline-flex", alignItems: "center", gap: 7,
-            background: audit ? "var(--ink)" : "var(--card)", color: audit ? "var(--yellow)" : "var(--ink)" }}>
-          <I.shield style={{ fontSize: 14 }} /> Auditability
-        </button>
-
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "flex-end" }}>
         <TransparencyControl level={transLevel} setLevel={setTransLevel} />
-
-        <button className="btn btn-sm" onClick={() => setEntityOpen(!entityOpen)} title="Figures & places extracted by eoreader3" style={{ display: "inline-flex", alignItems: "center", gap: 7,
-          background: entityOpen ? "var(--ink)" : "var(--card)", color: entityOpen ? "var(--yellow)" : "var(--ink)" }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>●</span> Figures
-          {entityCount != null && <span className="np-mono" style={{ fontSize: 11, background: "var(--data)", color: "#fff", padding: "0 5px", border: "1px solid var(--ink)" }}>{entityCount}</span>}
-        </button>
-
-        <button className="btn btn-sm" onClick={() => setShowSugg(!showSugg)} style={{ display: "inline-flex", alignItems: "center", gap: 7,
-          background: showSugg ? "var(--ink)" : "var(--card)", color: showSugg ? "var(--yellow)" : "var(--ink)" }}>
-          {showSugg ? <I.eyeoff style={{ fontSize: 14 }} /> : <I.chat style={{ fontSize: 14 }} />}
-          {showSugg ? "Hide" : "Suggestions"}
-          <span className="np-mono" style={{ fontSize: 11, background: "var(--yellow)", color: "var(--ink)", padding: "0 5px", border: "1px solid var(--ink)" }}>{suggCount}</span>
-        </button>
       </div>
     </div>
   );
