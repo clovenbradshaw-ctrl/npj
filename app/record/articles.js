@@ -489,14 +489,25 @@
       await cache.put(bodyKey(slug), new Response(text, { headers: { "Content-Type": "application/x-ndjson", "X-Ver": ver || "" } }));
     } catch (e) {}
   }
-  async function fetchArchiveNet(slug, ver) {
-    try {
-      const res = await fetch(articleDownloadUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
-      if (!res.ok) return null;
-      const text = await res.text();
-      bodyCachePut(slug, text, ver);
-      return text;
-    } catch (e) { return null; }
+  // In-flight de-dupe: loadArticle, the front-page fold and the prefetch can all
+  // ask for the same slug at once — without this they fire 4-5 concurrent GETs
+  // for one file and archive.org answers 503 (rate-limited). One shared request
+  // per slug fixes that; later callers await the same promise.
+  const inflightBody = Object.create(null);
+  function fetchArchiveNet(slug, ver) {
+    if (inflightBody[slug]) return inflightBody[slug];
+    const p = (async () => {
+      try {
+        const res = await fetch(articleDownloadUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
+        if (!res.ok) return null; // 404 = not published yet; 503 = archive busy — caller serves cache/empty, retries next pass
+        const text = await res.text();
+        bodyCachePut(slug, text, ver);
+        return text;
+      } catch (e) { return null; }
+    })();
+    inflightBody[slug] = p;
+    p.then(() => { delete inflightBody[slug]; }, () => { delete inflightBody[slug]; });
+    return p;
   }
   // The article's full event log, cache-first. `ver` (the manifest's per-slug
   // version) decides whether a cache hit is trusted as current.
