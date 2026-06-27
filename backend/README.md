@@ -67,7 +67,7 @@ upload therefore never enters the site.
 ```jsonc
 // Authorization: Bearer <matrix token>   (admin/editor, same gate as publish)
 { "identifier": "npj-site", "filename": "manifest.json",
-  "manifest": { "v": "npj/site-manifest/1", "updated": "…", "articles": [ /* meta rows */ ] } }
+  "manifest": { "v": "npj/site-manifest/2", "updated": "…", "articles": [ /* meta rows */ ] } }
 ```
 
 The **client sends the full manifest** (`app/record/articles.js` →

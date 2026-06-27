@@ -54,7 +54,7 @@ test("buildManifest stamps the schema and sanitizes rows", () => {
   const { article } = NpjArticles.foldLog(sampleLog());
   const meta = NpjArticles.metaFromArticle(article, "demo-article");
   const manifest = NpjArticles.buildManifest([meta, { slug: "", headline: "" }, null]);
-  assert.equal(manifest.v, "npj/site-manifest/1");
+  assert.equal(manifest.v, "npj/site-manifest/2");
   assert.ok(manifest.updated, "carries an updated timestamp");
   assert.equal(manifest.articles.length, 1, "drops rows with no slug/headline");
   const row = manifest.articles[0];
