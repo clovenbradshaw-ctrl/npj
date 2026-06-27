@@ -3616,7 +3616,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
   const upd = (i, patch) => { if (alive.current) setSteps(list => list.map((s, j) => j === i ? { ...s, ...patch } : s)); };
-  const halt = (i, detail, msg) => { upd(i, { state: "fail", detail }); if (alive.current) setOutcome({ ok: false, msg }); };
+  const halt = (i, detail, msg, retry) => { upd(i, { state: "fail", detail }); if (alive.current) setOutcome({ ok: false, msg, retry: !!retry }); };
   const tick = (ms) => new Promise(r => setTimeout(r, ms));
 
   // verify-after-publish: a 200 means the commit landed, but the raw URL is a
@@ -3658,11 +3658,23 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     let res;
     try {
       res = await window.NpjArticles.publishGenesis(p);
-    } catch (e) { return halt(3, "webhook unreachable", "Couldn't reach the article webhook: " + (e.message || "network error") + ". Nothing was written."); }
+    } catch (e) {
+      // A timeout (postArticle aborts the commit after 120s) or a dropped
+      // connection lands here. The held payload is still good, so this is the
+      // textbook retryable case — offer "Retry publish" instead of forcing the
+      // author back through the whole gate.
+      const timedOut = e && (e.name === "AbortError" || /abort/i.test(e.message || ""));
+      return halt(3,
+        timedOut ? "webhook timed out" : "webhook unreachable",
+        timedOut
+          ? "The article webhook didn't answer within 120s — the commit was aborted and nothing was written to archive.org. This is usually transient; retry."
+          : "Couldn't reach the article webhook: " + (e.message || "network error") + ". Nothing was written.",
+        true);
+    }
     const data = await res.json().catch(() => null);
     const success = res.status === 200 && data && data.ok === true;
     if (!success) {
-      let msg, detail;
+      let msg, detail, retry = false;
       if (res.status === 401) {
         detail = "rejected — session invalid (401)";
         msg = "Your Matrix session isn't valid for publishing — sign in again.";
@@ -3672,9 +3684,12 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       } else {
         detail = "HTTP " + res.status;
         msg = "The article webhook answered " + res.status + ((data && data.error) ? " — " + data.error : "") + ". Nothing was written to archive.org.";
+        // 5xx / 429 / a transient gateway error is worth a retry; the payload is
+        // unchanged. (401/403 above are an auth problem and stay non-retryable.)
+        retry = res.status >= 500 || res.status === 429 || res.status === 408;
       }
       upd(3, { state: "fail", detail });
-      if (alive.current) setOutcome({ ok: false, msg, retry: false });
+      if (alive.current) setOutcome({ ok: false, msg, retry });
       return;
     }
     // written for real — persist the receipt (the archive.org log path + bytes)

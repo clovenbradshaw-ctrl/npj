@@ -42,8 +42,8 @@
   const DIR = "articles";
   const OWNER_REPO = "clovenbradshaw-ctrl/npj";
   const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main"; // kept for rawUrl() (legacy/debug links only — the reader no longer fetches GitHub)
-  const IDX_CACHE_KEY = "npj_articles_idx_v3"; // v3: per-document folders — entries are keyed by slug, not filename
-  const FRONT_CACHE_KEY = "npj_front_v1"; // last front-page line-up, painted instantly on the next visit
+  const IDX_CACHE_KEY = "npj_articles_idx_v4"; // v4: bumped with the manifest kick so the last-resort index can't serve dropped pieces
+  const FRONT_CACHE_KEY = "npj_front_v2"; // last front-page line-up; v2 bumped with the manifest kick so no stale junk flashes on first paint
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
 
@@ -74,8 +74,14 @@
   const articleDownloadUrl = (slug) => IA + "/download/" + encodeURIComponent(ARTICLE_ITEM(slug)) + "/" + encodeURIComponent(ARTICLE_FILE(slug));
   const SITE_ITEM = "npj-site";
   const MANIFEST_FILE = "manifest.json";
-  const MANIFEST_SCHEMA = "npj/site-manifest/1";
-  const MANIFEST_CACHE_KEY = "npj_site_manifest_v1"; // last good manifest — instant front paint, offline fallback
+  // Bumped 1→2 to KICK the old line-up: a manifest stamped with an earlier
+  // schema is distrusted on read (see fetchManifest/loadManifestCache), so a
+  // stale manifest carrying since-removed/junk pieces no longer paints the front
+  // page, and every client's locally-cached copy (new cache key) is dropped. The
+  // admin then writes a fresh v2 manifest (publish, or "Remove from the record"
+  // in Documents) holding only the real line-up.
+  const MANIFEST_SCHEMA = "npj/site-manifest/2";
+  const MANIFEST_CACHE_KEY = "npj_site_manifest_v2"; // last good manifest — instant front paint, offline fallback
   const BODY_CACHE = "npj-article-bodies-v1";         // Cache Storage bucket of folded-log text, keyed by slug + version
   const hasCaches = () => (typeof caches !== "undefined" && caches && caches.open);
 
@@ -522,14 +528,18 @@
   }
 
   // —— the site manifest (the validated line-up) ——
-  function loadManifestCache() { try { return JSON.parse(localStorage.getItem(MANIFEST_CACHE_KEY) || "null"); } catch (e) { return null; } }
+  // A manifest is trusted ONLY when stamped with the current schema. An older
+  // (or unstamped) manifest is treated as absent — that's what "kicks" a stale
+  // line-up after a version bump, on both the read path and the local cache.
+  function manifestOk(m) { return !!(m && m.v === MANIFEST_SCHEMA && Array.isArray(m.articles)); }
+  function loadManifestCache() { try { const m = JSON.parse(localStorage.getItem(MANIFEST_CACHE_KEY) || "null"); return manifestOk(m) ? m : null; } catch (e) { return null; } }
   function saveManifestCache(m) { try { localStorage.setItem(MANIFEST_CACHE_KEY, JSON.stringify(m)); } catch (e) {} }
   async function fetchManifest() {
     try {
       const res = await fetch(IA + "/download/" + encodeURIComponent(SITE_ITEM) + "/" + encodeURIComponent(MANIFEST_FILE) + "?cb=" + Date.now(), { cache: "no-store" });
       if (!res.ok) return null;
       const m = await res.json();
-      if (!m || !Array.isArray(m.articles)) return null;
+      if (!manifestOk(m)) return null; // wrong schema version, or no articles[] → distrust it
       saveManifestCache(m);
       return m;
     } catch (e) { return null; }
@@ -642,11 +652,19 @@
      truth (validated — only our backend writes it); a live fetch falls back to
      the last cached manifest (offline), then to the tag search (no manifest
      yet), then to the stored index. The front page paints from this WITHOUT
-     waiting on any article body — bodies prefetch in the background. */
+     waiting on any article body — bodies prefetch in the background.
+
+     A PRESENT, current-version manifest is AUTHORITATIVE even when it lists zero
+     articles: an admin who removed every junk piece (or who runs an
+     intentionally empty site) gets an empty front page, NOT the raw archive
+     tag-search — otherwise the search would resurface exactly the items the
+     manifest was rewritten to drop. The search bootstrap runs only when there is
+     no trusted manifest at all (first deploy, or right after a schema bump and
+     before the fresh manifest is written). */
   async function listArticles() {
     let manifest = await fetchManifest();
     if (!manifest) manifest = loadManifestCache();
-    if (manifest && Array.isArray(manifest.articles) && manifest.articles.length) {
+    if (manifestOk(manifest)) {
       const metas = manifest.articles.filter(m => m && m.slug && m.headline).map(normalizeMeta).sort(byNewest);
       prefetchBodies(metas); // warm bodies in the background — never gates the front page
       return metas;
@@ -680,6 +698,22 @@
     const fix = (it) => (it && it.slug === slug) ? Object.assign({}, it, { status }) : it;
     if (F.lead) F.lead = fix(F.lead);
     if (Array.isArray(F.secondary)) F.secondary = F.secondary.map(fix);
+  }
+
+  // Drop one or more slugs from the in-memory front index right away, so an
+  // admin "remove from the record" reflects on the front page without waiting on
+  // the rewritten manifest to propagate through archive.org. If the lead is one
+  // of the removed pieces, the next surviving piece is promoted to lead.
+  // loadFront() reconciles against the live manifest afterwards.
+  function dropFromFront(slugs) {
+    const F = window.NPJ && window.NPJ.FRONT; if (!F) return;
+    const drop = new Set((Array.isArray(slugs) ? slugs : [slugs]).map(s => slugify(s) || s).filter(Boolean));
+    if (!drop.size) return;
+    let sec = (Array.isArray(F.secondary) ? F.secondary : []).filter(it => it && !drop.has(it.slug));
+    let lead = (F.lead && !drop.has(F.lead.slug)) ? F.lead : null;
+    if (!lead && sec.length) { lead = sec[0]; sec = sec.slice(1); } // promote the next piece up
+    F.lead = lead; F.secondary = sec;
+    try { saveFront(F); } catch (e) {}
   }
 
   /* Is this slug already in the committed record? Scans the loaded front index
@@ -1532,18 +1566,36 @@
   // ever reads archive.org) still works. Deploying npj-article.n8n.json later
   // makes this drop GitHub entirely — no client change needed. Either way, a
   // successful write drops the slug's cached body so the next read is fresh.
+  /* fetch with a hard timeout. A bare fetch() never resolves if the webhook
+     accepts the connection then stalls mid read-modify-append — at the publish
+     boundary that hangs the whole commit on the "Commit the EO event log" spinner
+     with no way out (the step never leaves "active", and "Retry publish" never
+     appears). Abort after `ms` so the commit leg is bounded too; the AbortError
+     surfaces as a normal fetch rejection that postArticle's caller (commit()) and
+     the fallback below already handle. Mirrors fetchT in media-store.js. */
+  function postT(url, opts, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(timer));
+  }
   async function postArticle(bodyObj, token) {
     const auth = { "Content-Type": "application/json", "Authorization": "Bearer " + token };
+    // The webhook reads the current log, appends, and PUTs it back to archive.org,
+    // so a real commit can take a while — give it 120s before treating silence as
+    // a failure (matches the media-freeze budget).
+    const COMMIT_MS = 120000;
     let res = null;
-    try { res = await fetch(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }); }
+    try { res = await postT(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }, COMMIT_MS); }
     catch (e) { res = null; }
     if (!res || res.status === 404) {
       // legacy fallback: the deployed publish webhook (mirror:true puts the full
-      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article)
-      res = await fetch(publishEndpoint(), {
+      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article).
+      // Bounded the same way — an unanswered fallback used to throw straight up out
+      // of postArticle with no timeout, so a stalled legacy webhook hung the commit.
+      res = await postT(publishEndpoint(), {
         method: "POST", headers: auth,
         body: JSON.stringify({ filename: filenameFor(bodyObj.slug), mode: "append", contentRaw: bodyObj.line + "\n", message: bodyObj.message, mirror: true })
-      });
+      }, COMMIT_MS);
     }
     if (res && res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
     return res;
@@ -1635,7 +1687,7 @@
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
-    listArticles, loadFront, patchFrontStatus, publishedMeta, loadArticle, primeFront, saveFront,
+    listArticles, loadFront, patchFrontStatus, dropFromFront, publishedMeta, loadArticle, primeFront, saveFront,
     // archive.org read path + the validated site manifest
     articleItemUrl, articleDownloadUrl, fetchManifest, loadManifestCache, buildManifest, metaFromArticle,
     publishManifest, syncArticleToManifest, patchManifestStatus, prefetchBodies,

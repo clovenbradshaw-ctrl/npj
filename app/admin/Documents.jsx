@@ -443,6 +443,8 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
   const [confirmId, setConfirmId] = useState(null);
   const [statusBusy, setStatusBusy] = useState(null); // slug with an unpublish/republish in flight
   const [statusErr, setStatusErr] = useState(null);
+  const [selected, setSelected] = useState(() => new Set()); // published slugs ticked for removal
+  const [removeBusy, setRemoveBusy] = useState(false);
   const [q, setQ] = useState("");
   const [explorer, setExplorer] = useState(null);   // { items, initialKey } — the source file explorer
   const { isAdmin } = React.useContext(window.LayoutCtx);
@@ -478,6 +480,43 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
       setStatusErr("Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing changed.");
     }
     setStatusBusy(null);
+  };
+
+  // admin-only: REMOVE the ticked pieces from the site's record. Unpublish only
+  // HIDES (the row stays, status flips); this takes them off the line-up
+  // entirely — for clearing out junk/test pieces so only the real record
+  // remains. The append-only event log on archive.org is immutable and is NOT
+  // deleted; what changes is the validated manifest the reader trusts. We
+  // REWRITE that manifest to exactly the pieces we keep (every published row
+  // minus the ticked ones), so the removed slugs are gone and — because a
+  // present manifest is authoritative — the archive search can't resurface them.
+  const toggleSel = (slug) => setSelected(s => { const n = new Set(s); n.has(slug) ? n.delete(slug) : n.add(slug); return n; });
+  const removeSelected = async () => {
+    if (!selected.size || removeBusy) return;
+    const token = window.MatrixAuth && window.MatrixAuth.token();
+    if (!token) { setStatusErr("Sign in with Matrix to manage the record — the webhook re-verifies the token server-side."); return; }
+    const slugs = (published ? published.articles : []).map(a => a.slug).filter(s => selected.has(s));
+    if (!slugs.length) return;
+    if (!window.confirm("Remove " + slugs.length + " piece" + (slugs.length === 1 ? "" : "s") + " from the record?\n\nThey come off the front page and the site line-up for everyone. This is for clearing out junk or test pieces — the append-only event log stays on archive.org; only the published line-up is rewritten. You can republish a piece later from its event log.")) return;
+    setRemoveBusy(true); setStatusErr(null);
+    // the line-up we KEEP: every published row that wasn't ticked, in its current form
+    const keep = published.articles.filter(a => !selected.has(a.slug));
+    try {
+      const out = await window.NpjArticles.publishManifest(token, keep);
+      if (!out || !out.ok) {
+        setStatusErr("Couldn't rewrite the site manifest (HTTP " + ((out && out.status) || "—") + ") — nothing was removed.");
+      } else {
+        // reflect immediately: drop from the admin list AND the in-memory front
+        // index, then reconcile against the freshly written manifest.
+        setPublished(p => p ? { ...p, articles: p.articles.filter(a => !selected.has(a.slug)) } : p);
+        try { window.NpjArticles.dropFromFront(slugs); } catch (e) {}
+        window.NpjArticles.loadFront().catch(() => {});
+        setSelected(new Set());
+      }
+    } catch (e) {
+      setStatusErr("Couldn't reach the manifest webhook: " + (e.message || "network error") + ". Nothing was removed.");
+    }
+    setRemoveBusy(false);
   };
 
   // drafts: both layers, newest first (app/drafts.js heals local vs Matrix).
@@ -804,6 +843,25 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
               <I.check style={{ fontSize: 14 }} /> Published · append-only event logs on archive.org
             </div>
+            {/* admin clean-up bar: tick junk/test pieces and remove them from the
+                site line-up in one rewrite (the event logs stay on archive.org) */}
+            {isAdmin && published && pubArticles.length > 0 && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "8px 12px", marginBottom: 10 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input type="checkbox"
+                    checked={selected.size > 0 && selected.size === pubArticles.length}
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < pubArticles.length; }}
+                    onChange={e => setSelected(e.target.checked ? new Set(pubArticles.map(m => m.slug)) : new Set())} />
+                  <span className="np-mono" style={{ fontSize: 10.5 }}>{selected.size ? selected.size + " selected" : "Select all"}</span>
+                </label>
+                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>Remove takes a piece off the line-up entirely — use it to clear junk/test pieces. Unpublish (per row) only hides.</span>
+                <span style={{ flex: 1 }} />
+                <button className="btn btn-sm" disabled={!selected.size || removeBusy} onClick={removeSelected}
+                  style={{ borderColor: "var(--reject)", color: "var(--reject)", fontWeight: 700, opacity: (!selected.size || removeBusy) ? .5 : 1 }}>
+                  {removeBusy ? "Removing…" : "✕ Remove " + (selected.size || "") + " from the record"}
+                </button>
+              </div>
+            )}
             {statusErr && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)", border: "1px solid var(--reject)", padding: "8px 10px", marginBottom: 8, lineHeight: 1.5 }}>{statusErr}</div>}
             {!published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> reading the public record…</div>}
             {published && pubArticles.length === 0 && published.legacy.length === 0 && (
@@ -823,7 +881,8 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                 : "https://archive.org/details/npj-article-" + m.slug);
               const busy = statusBusy === m.slug;
               return (
-                <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1 }}>
+                <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1, background: selected.has(m.slug) ? "rgba(178,58,38,.06)" : undefined }}>
+                  {isAdmin && <input type="checkbox" title="Tick to remove from the record" checked={selected.has(m.slug)} onChange={() => toggleSel(m.slug)} style={{ alignSelf: "center", cursor: "pointer" }} />}
                   <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, lineHeight: 1.1 }}>{m.headline}</span>
                   <span className="np-mono" style={{ fontSize: 9, fontWeight: 600, letterSpacing: ".06em", color: badge.color, border: "1px solid " + badge.color, padding: "1px 5px", textTransform: "uppercase" }}>{badge.label}</span>
                   <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{m.kicker}{m.published ? " · " + m.published : ""} · {m.versions} version{m.versions !== 1 ? "s" : ""}</span>
