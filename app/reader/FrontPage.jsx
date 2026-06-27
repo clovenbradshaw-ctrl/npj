@@ -195,6 +195,24 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   );
 }
 
+/* The Internet Archive's "temple" mark, inlined (no runtime third-party fetch,
+   matching the rest of the app) and drawn in currentColor so it takes the
+   footer's ink. A plain facade: pediment, lintel, four columns, two base bars. */
+function ArchiveOrgMark({ size = 13 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="currentColor" aria-hidden="true" style={{ flexShrink: 0, display: "block" }}>
+      <polygon points="50,6 93,27 7,27" />
+      <rect x="14" y="31" width="72" height="9" />
+      <rect x="20" y="44" width="9" height="40" rx="1.5" />
+      <rect x="37" y="44" width="9" height="40" rx="1.5" />
+      <rect x="54" y="44" width="9" height="40" rx="1.5" />
+      <rect x="71" y="44" width="9" height="40" rx="1.5" />
+      <rect x="13" y="87" width="74" height="6" />
+      <rect x="8" y="96" width="84" height="4" />
+    </svg>
+  );
+}
+
 /* ---- Footer ---- */
 function FrontFooter() {
   const mobile = window.useIsMobile();
@@ -208,8 +226,11 @@ function FrontFooter() {
         <span style={{ fontStyle: "italic", fontSize: 16.5 }}>Every underlined claim stands on an archived source.</span>
         <span style={{ flex: 1, minWidth: 20 }} />
         <button onClick={() => window.__nav && window.__nav.contributors && window.__nav.contributors()} className="np-mono" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3 }}>Contributors</button>
-        <a href="https://archive.org" target="_blank" rel="noopener noreferrer" className="np-mono" style={{ color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "underline", textUnderlineOffset: 3 }}>Powered by Archive.org</a>
-        <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY · documents public record</span>
+        <a href="https://archive.org" target="_blank" rel="noopener noreferrer" className="np-mono" style={{ display: "inline-flex", alignItems: "center", gap: 7, color: "#e3ddcc", fontSize: 11, letterSpacing: ".06em", textDecoration: "none" }}>
+          <ArchiveOrgMark />
+          <span style={{ textDecoration: "underline", textUnderlineOffset: 3 }}>Powered by Archive.org</span>
+        </a>
+        <span className="np-mono" style={{ fontSize: 11, color: "#8c8676" }}>NPJ · Nashville Peoples' Journalism · text CC BY</span>
       </div>
     </footer>
   );
