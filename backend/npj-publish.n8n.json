@@ -962,7 +962,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const FOUNDER = '@collective_boundary730383:hyphae.social';\nconst ARTICLE_RE = /^articles\\/[A-Za-z0-9][A-Za-z0-9-]*(?:\\/[^\\/]+)?\\.jsonl$/;\nconst hook = $('Publish Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst mode = body && body.mode ? String(body.mode) : 'overwrite';\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nlet roles = {};\ntry { const raw = $('Fetch Roles').first().json || {}; const text = typeof raw.data==='string'?raw.data:JSON.stringify(raw); const parsed=JSON.parse(text); const lay=parsed&&(parsed.layout||parsed); if(lay&&lay.roles&&typeof lay.roles==='object') roles=lay.roles; } catch(e){}\nconst isFounder = userId === FOUNDER;\nconst delegatedRole = userId ? (roles[userId] || null) : null;\nconst isAdmin = isFounder || delegatedRole === 'admin';\nconst role = isAdmin ? 'admin' : delegatedRole;\nconst isArticle = ARTICLE_RE.test(filename);\nconst modeOk = mode === 'append' || mode === 'overwrite';\nconst authorized = !!userId && !!filename && modeOk && (role === 'admin' || (role === 'editor' && isArticle));\nreturn [{ json: { authorized, user_id: userId, role, filename, mode, isArticle } }];"
+        "jsCode": "const FOUNDER = '@collective_boundary730383:hyphae.social';\nconst ARTICLE_RE = /^articles\\/[A-Za-z0-9][A-Za-z0-9-]*(?:\\/[^\\/]+)?\\.jsonl$/;\nconst hook = $('Publish Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst mode = body && body.mode ? String(body.mode) : 'overwrite';\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nlet roles = {};\ntry { const raw = $('Fetch Roles').first().json || {}; const text = typeof raw.data==='string'?raw.data:JSON.stringify(raw); const parsed=JSON.parse(text); const lay=parsed&&(parsed.layout||parsed); if(lay&&lay.roles&&typeof lay.roles==='object') roles=lay.roles; } catch(e){}\nconst isFounder = userId === FOUNDER;\nconst delegatedRole = userId ? (roles[userId] || null) : null;\nconst isAdmin = isFounder || delegatedRole === 'admin';\nconst role = isAdmin ? 'admin' : delegatedRole;\nconst isArticle = ARTICLE_RE.test(filename);\nconst modeOk = mode === 'append' || mode === 'overwrite';\nconst authorized = !!userId && !!filename && modeOk && (role === 'admin' || (role === 'editor' && isArticle));\nconst slug = (filename.match(/^articles\\/([A-Za-z0-9][A-Za-z0-9-]*)(?:\\/|\\.jsonl$)/) || [])[1] || '';\nreturn [{ json: { authorized, user_id: userId, role, filename, mode, isArticle, slug } }];"
       },
       "id": "e9dceb59-c66d-477e-98c5-78b47b2a0e9d",
       "name": "Authorize",
@@ -1067,7 +1067,40 @@
     },
     {
       "parameters": {
-        "jsCode": "const hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = parsed.filename;\nconst mode = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message = parsed.message || `update ${filename}`;\nconst compress = !!parsed.compress;\nconst mirror = parsed.mirror !== false;\nif(!filename) throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\nconst ghResp = $input.first().json || {};\nconst existingSha = (ghResp && ghResp.sha && !ghResp.error) ? ghResp.sha : '';\nconst existingB64 = ghResp.content || '';\nlet existingText = '';\nif(existingB64){ try { existingText = Buffer.from(existingB64,'base64').toString('utf8'); } catch(e){ existingText=''; } }\nconst auth = $('Authorize').first().json || {};\nconst isAdmin = auth.role === 'admin';\nif(!isAdmin && existingText){\n  let assignees=[];\n  try { const genesis=JSON.parse(existingText.split('\\n').find(l=>l.trim())||'{}'); const op=genesis.operand||{}; assignees=Array.isArray(op.assignees)?op.assignees:[]; } catch(e){}\n  if(!assignees.includes(auth.user_id)) return [{ json: { __forbidden:true, user_id:auth.user_id, role:auth.role, filename, error:'not an assignee on this article' } }];\n}\nlet finalText;\nif(mode==='append'){ const prev=existingText?(existingText.endsWith('\\n')?existingText:existingText+'\\n'):''; const next=contentRaw.endsWith('\\n')?contentRaw:contentRaw+'\\n'; finalText=prev+next; } else { finalText=contentRaw; }\nlet b64;\nif(compress){ const zlib=require('zlib'); b64=zlib.gzipSync(Buffer.from(finalText,'utf8')).toString('base64'); } else { b64=Buffer.from(finalText,'utf8').toString('base64'); }\n// snapshot fields for the archive.org mirror (always uncompressed plaintext)\nconst slug = String(filename).replace(/^articles\\//,'').replace(/\\.jsonl$/,'').replace(/[^a-z0-9-]/gi,'-').toLowerCase();\nreturn [{ json: {\n  __forbidden:false, filename, message, contentBase64:b64, sha:existingSha, bytes:finalText.length,\n  user_id:auth.user_id, role:auth.role,\n  mirror,\n  mirror_identifier: 'npj-article-' + slug,\n  mirror_filename: slug + '.jsonl',\n  mirror_contentB64: Buffer.from(finalText,'utf8').toString('base64'),\n  mirror_title: 'NPJ article: ' + slug\n} }];"
+        "authentication": "oAuth2",
+        "resource": "file",
+        "operation": "get",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "={{ 'articles/' + ($('Authorize').first().json.slug || '') + '.jsonl' }}",
+        "additionalParameters": {
+          "reference": "main"
+        }
+      },
+      "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+      "name": "GH Get Genesis",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        3072,
+        3578
+      ],
+      "webhookId": "gh-get-genesis",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const hook = $('Publish Webhook').first().json;\nconst parsed = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst filename = parsed.filename;\nconst mode = parsed.mode || 'overwrite';\nconst contentRaw = parsed.contentRaw != null ? String(parsed.contentRaw) : '';\nconst message = parsed.message || `update ${filename}`;\nconst compress = !!parsed.compress;\nconst mirror = parsed.mirror !== false;\nif(!filename) throw new Error('Build Content: missing filename. Got keys: ' + Object.keys(parsed).join(','));\nconst ghResp = $('GH Get File').first().json || {};\nconst existingSha = (ghResp && ghResp.sha && !ghResp.error) ? ghResp.sha : '';\nconst existingB64 = ghResp.content || '';\nlet existingText = '';\nif(existingB64){ try { existingText = Buffer.from(existingB64,'base64').toString('utf8'); } catch(e){ existingText=''; } }\nconst auth = $('Authorize').first().json || {};\nconst isAdmin = auth.role === 'admin';\n// Authorize the per-article assignee gate against the GENESIS, not the file being\n// written: in the one-event-one-file model the target is a brand-new (empty) event\n// file, so its own content can't carry the assignee list. A first publish (no\n// genesis yet) stays open to any editor.\nconst genResp = $('GH Get Genesis').first().json || {};\nconst genB64 = (genResp && genResp.content && !genResp.error) ? genResp.content : '';\nlet genesisText = '';\nif(genB64){ try { genesisText = Buffer.from(genB64,'base64').toString('utf8'); } catch(e){ genesisText=''; } }\nif(!isAdmin && genesisText){\n  let assignees=[];\n  try { const genesis=JSON.parse(genesisText.split('\\n').find(l=>l.trim())||'{}'); const op=genesis.operand||{}; assignees=Array.isArray(op.assignees)?op.assignees:[]; } catch(e){}\n  if(!assignees.includes(auth.user_id)) return [{ json: { __forbidden:true, user_id:auth.user_id, role:auth.role, filename, error:'not an assignee on this article' } }];\n}\nlet finalText;\nif(mode==='append'){ const prev=existingText?(existingText.endsWith('\\n')?existingText:existingText+'\\n'):''; const next=contentRaw.endsWith('\\n')?contentRaw:contentRaw+'\\n'; finalText=prev+next; } else { finalText=contentRaw; }\nlet b64;\nif(compress){ const zlib=require('zlib'); b64=zlib.gzipSync(Buffer.from(finalText,'utf8')).toString('base64'); } else { b64=Buffer.from(finalText,'utf8').toString('base64'); }\n// snapshot fields for the archive.org mirror (always uncompressed plaintext)\nconst slug = String(filename).replace(/^articles\\//,'').replace(/\\.jsonl$/,'').replace(/[^a-z0-9-]/gi,'-').toLowerCase();\nreturn [{ json: {\n  __forbidden:false, filename, message, contentBase64:b64, sha:existingSha, bytes:finalText.length,\n  user_id:auth.user_id, role:auth.role,\n  mirror,\n  mirror_identifier: 'npj-article-' + slug,\n  mirror_filename: slug + '.jsonl',\n  mirror_contentB64: Buffer.from(finalText,'utf8').toString('base64'),\n  mirror_title: 'NPJ article: ' + slug\n} }];"
       },
       "id": "72b0bda8-6abb-49b3-a377-31eb8684b311",
       "name": "Build Content",
@@ -2119,7 +2152,7 @@
       "main": [
         [
           {
-            "node": "Build Content",
+            "node": "GH Get Genesis",
             "type": "main",
             "index": 0
           }
@@ -2371,6 +2404,17 @@
         [
           {
             "node": "Chain OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Get Genesis": {
+      "main": [
+        [
+          {
+            "node": "Build Content",
             "type": "main",
             "index": 0
           }
