@@ -3542,6 +3542,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   // credit. "Publish unsigned" ships with no author.
   const meMx = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || "";
   const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
+  // Editors are a display credit, so an entry can be a plain NAME (multi-word) or
+  // a Matrix id — split on commas/newlines (not spaces) so names stay intact.
+  const parseEditors = (s) => String(s || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
   const [unsigned, setUnsigned] = useState(false);
   // Byline is a plain name now — type how you want to be credited. It defaults
@@ -3550,7 +3553,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const defaultName = meMx ? nameOfMx(meMx) : "";
   const [nameInput, setNameInput] = useState(defaultName);
   const [editorsInput, setEditorsInput] = useState("");
-  const bylineEditors = parseMx(editorsInput);
+  const bylineEditors = parseEditors(editorsInput);
   // the userid stored on the backend record — you, the signed-in publisher
   const bylineAuthors = meMx ? [meMx] : [];
   // Publishing under your own name keeps the rich contributor chip (the byline
@@ -3878,9 +3881,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                     <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>The name readers see. {meMx ? "Recorded on the record as " + meMx + "." : "Sign in so your account is recorded with the byline."}</div>
                   </React.Fragment>
                 )}
-                <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:server  (optional)" className="np-mono" spellCheck={false}
+                <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="Editor name, or @editor:server  (optional)" className="np-mono" spellCheck={false}
                   style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
-                <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Edited by · optional, shown as a separate credit line.</div>
+                <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>Edited by · optional, shown as a separate credit line. A plain name or a Matrix id; separate several with commas.</div>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginTop: 8, cursor: "pointer" }}>
                   <input type="checkbox" checked={unsigned} onChange={e => setUnsigned(e.target.checked)} />
                   <span className="np-mono" style={{ fontSize: 10.5, color: NR.text }}>Publish unsigned — no author credit</span>

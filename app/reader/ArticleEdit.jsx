@@ -134,6 +134,9 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
   const parseMx = (s) => String(s || "").split(/[\s,]+/).map(x => x.trim()).filter(x => /^@[^:]+:[^:]+$/.test(x));
   const parseAssignees = () => parseMx(assignees);
+  // Editors are a display credit (not access control), so an entry can be a plain
+  // NAME (multi-word) or a Matrix id — split on commas/newlines, never on spaces.
+  const parseEditors = (s) => String(s || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
 
   const save = async () => {
@@ -186,7 +189,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     // falling back to the editor's own id only when the piece had no author yet.
     const origAuthors = (A.authors || []).filter(Boolean);
     const nextAuthors = unsigned ? [] : (origAuthors.length ? origAuthors : (me && /^@[^:]+:[^:]+$/.test(me) ? [me] : []));
-    const nextEditors = parseMx(editorsInput);
+    const nextEditors = parseEditors(editorsInput);
     // keep the rich chip when the name still matches the credited author; store a
     // free-text byline only when it's been customized away from that name
     const defaultName = recordedId ? nameOfMx(recordedId) : "";
@@ -285,7 +288,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
           <div className="np-eyebrow" style={{ margin: "16px 0 6px" }}>Byline · how the piece is credited</div>
           <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 15, marginBottom: 8 }}>
             {unsigned || (!nameInput.trim() && !recordedId) ? "Unsigned" : "By " + (nameInput.trim() || nameOfMx(recordedId))}
-            {parseMx(editorsInput).length ? <span style={{ color: "var(--ink-soft)" }}>{"  ·  Edited by " + parseMx(editorsInput).map(nameOfMx).join(", ")}</span> : null}
+            {parseEditors(editorsInput).length ? <span style={{ color: "var(--ink-soft)" }}>{"  ·  Edited by " + parseEditors(editorsInput).map(nameOfMx).join(", ")}</span> : null}
           </div>
           {!unsigned && (
             <React.Fragment>
@@ -293,8 +296,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
               <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 8px" }}>The name readers see.{recordedId ? " Recorded on the record as " + recordedId + "." : ""}</div>
             </React.Fragment>
           )}
-          <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="@editor:hyphae.social  (optional)" className="np-mono" style={{ ...field, fontSize: 12.5 }} />
-          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 0" }}>Edited by · optional, shown as a separate credit line.</div>
+          <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="Editor name, or @editor:hyphae.social  (optional)" className="np-mono" style={{ ...field, fontSize: 12.5 }} />
+          <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", margin: "4px 0 0" }}>Edited by · optional, shown as a separate credit line. A plain name or a Matrix id; separate several with commas.</div>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 7, marginTop: 9, cursor: "pointer" }}>
             <input type="checkbox" checked={unsigned} onChange={e => setUnsigned(e.target.checked)} />
             <span className="np-mono" style={{ fontSize: 11, color: "var(--ink)" }}>Unsigned — no author credit</span>
