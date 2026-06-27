@@ -16,7 +16,7 @@ function StandardsPage({ onHome, onNewsroom, onSubmit }) {
     ["The community keeps it honest", "Readers audit each claim against its source and suggest corrections. Good suggestions become part of the record."]
   ];
   const standards = [
-    ["We name our evidence.", "No anonymous assertion stands in as fact. If we can't source it, we don't print it as a claim."],
+    ["We disclose where every claim comes from.", "When we assert something in our own voice, we say so. A source willing to go on the record is named; one who isn't is marked as exactly that — never dressed up as established fact."],
     ["We log every correction.", "Changes after publication are visible, attributed, and dated. We don't quietly edit the past."],
     ["We separate fact from argument.", "Sourced claims are marked and auditable; the reasoning built on them is clearly the writer's."],
     ["We are funded by the community, not advertisers.", "Members and readers keep the lights on, so the work answers to them — not to anyone we cover."]
