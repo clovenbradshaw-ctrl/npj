@@ -904,7 +904,7 @@ function ArticleRead(props) {
     setStatusErr(null);
     const token = window.MatrixAuth && window.MatrixAuth.token();
     if (!token) { setStatusErr("Sign in with Matrix to manage publication — the webhook re-verifies the token server-side."); return; }
-    if (next === "unpublished" && !window.confirm("Unpublish “" + A.headline + "”?\n\nIt will be hidden from the site for everyone but admins. The event log stays on archive.org — you can republish anytime.")) return;
+    if (next === "unpublished" && !window.confirm("Unpublish “" + A.headline + "”?\n\nIt will be hidden from the site for everyone but admins. The event log stays in GitHub — you can republish anytime.")) return;
     setStatusBusy(true);
     let out;
     try {
@@ -1302,7 +1302,7 @@ function ArticleRead(props) {
         <div style={{ border: "1.5px solid var(--reject)", background: "color-mix(in srgb, var(--reject) 10%, var(--card))", padding: "10px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--reject)" }}>⊘</span>
           <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5 }}>Unpublished — hidden from the site.</span>
-          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>The event log is still public on archive.org.{isAdmin ? " Only admins can open this page." : ""}</span>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>The event log is still public in GitHub.{isAdmin ? " Only admins can open this page." : ""}</span>
         </div>
       )}
       {statusErr && (
@@ -1315,66 +1315,6 @@ function ArticleRead(props) {
     </div>
   );
 
-  // ── Preview ── the reader's own Header + Body + Sources footer, on the paper
-  // page, with nothing but a Close bar around them. Because it renders the SAME
-  // components from the SAME folded article the publish pipeline produces, what
-  // the author sees here is byte-for-byte what ships: paragraph spacing, soft
-  // line breaks, images, byline, the sources footer — all of it.
-  if (preview) {
-    return (
-      <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
-        <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
-          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
-          </span>
-          <span style={{ flex: 1 }} />
-          <TransparencyControl level={transLevel} setLevel={setTransLevel} />
-          {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
-             with a fresh cache-buster (reloadTick) — so an embed that's in the draft
-             but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
-          <button className="btn btn-sm" onClick={() => { setReloadTick(t => t + 1); if (onRefresh) onRefresh(); }}
-            title="Refresh — rebuild this preview from the editor and reload every embed, bypassing any cached frame"
-            style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <I.redo style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Refresh</span>
-          </button>
-          {/* Export straight from the editor's preview — no need to publish first.
-             SubstackExport reads the SAME folded draft (A) the page renders, so the
-             copy carries every sourced claim with its footnote opening the
-             archive.org snapshot on the exact cited words. */}
-          {window.SubstackExport && (
-            <button className="btn btn-sm" onClick={() => setShowExport(true)} title="Export for Substack — copy the draft as rich text (images + sourcing intact) to paste into a Substack post; every source link opens its archive.org snapshot"
-              style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "var(--yellow)", color: "var(--ink)", fontWeight: 700 }}>
-              <I.ext style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Substack</span>
-            </button>
-          )}
-          <button className="btn btn-sm" onClick={onClose} title="Back to the editor (Esc)">✕ Close</button>
-        </div>
-        <div style={{ transition: "padding .28s", paddingRight: reserveAside ? RESERVE_GUTTER : 0 }}>
-          <div style={{ maxWidth: COL, margin: "0 auto", padding: isPhone ? "18px 16px 80px" : "34px 22px 96px" }}>
-            {Main}
-          </div>
-        </div>
-        {transparency && <GroundingLegend tally={groundTally} onClose={() => setTransLevel("standard")} />}
-        {/* Grounding receipts on hover — the SAME citation card the public reader
-           shows. Hover (or tap, on a phone) a claim and its source card floats
-           up, so the author can audit the grounding in the preview exactly as a
-           reader will. Lives INSIDE the fixed preview overlay so it stacks above
-           it. The body already wires enterClaim on each .claim span; the reader
-           branch just renders this card off the same hover state. */}
-        <HoverCard data={hover} onEnter={cancelLeave} onLeave={scheduleLeave}
-          onClose={() => { setHover(null); setActiveSrc(null); }} dockTop={DRAWER_TOP}
-          spansForSource={spansForSource} onJump={jumpToClaim} onExpand={openLightbox} preview />
-        <FootnotePop data={fnPop} onEnter={cancelFnLeave} onLeave={scheduleFnLeave} dockTop={DRAWER_TOP}
-          onClose={() => setFnPop(null)} onJump={() => fnPop && jumpToFn(fnPop.key)}
-          onExpand={(d) => openStage({ kind: "note", num: d.num, text: d.text, key: d.key })} />
-        <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave} dockTop={DRAWER_TOP}
-          onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
-        <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
-        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
-        {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
-      </div>
-    );
-  }
 
   return (
     <div className="fade-in">
@@ -1601,7 +1541,7 @@ function ControlBar({ audit, setAudit, transLevel, setTransLevel, showSugg, setS
             <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>↺</span> {statusBusy ? "Working…" : "Republish"}
           </button>
         ) : (
-          <button className="btn btn-sm" onClick={() => onSetStatus("unpublished")} disabled={statusBusy} title="Unpublish — hide from the site (the event log stays on archive.org)"
+          <button className="btn btn-sm" onClick={() => onSetStatus("unpublished")} disabled={statusBusy} title="Unpublish — hide from the site (the event log stays in GitHub)"
             style={{ display: "inline-flex", alignItems: "center", gap: 7, borderColor: "var(--reject)", color: "var(--reject)" }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 13 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>

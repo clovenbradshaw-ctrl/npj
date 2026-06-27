@@ -458,7 +458,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     setStatusErr(null);
     const token = window.MatrixAuth && window.MatrixAuth.token();
     if (!token) { setStatusErr("Sign in with Matrix to manage publication — the webhook re-verifies the token server-side."); return; }
-    if (next === "unpublished" && !window.confirm("Unpublish “" + m.headline + "”?\n\nIt comes off the site for everyone but admins. Every version stays on archive.org — you can republish anytime.")) return;
+    if (next === "unpublished" && !window.confirm("Unpublish “" + m.headline + "”?\n\nIt comes off the site for everyone but admins. Every version stays in GitHub — you can republish anytime.")) return;
     setStatusBusy(m.slug);
     try {
       const out = await window.NpjArticles.setArticleStatus({ slug: m.slug, status: next, actor: me, token });
@@ -466,13 +466,11 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
         setStatusErr("Rejected (HTTP " + out.res.status + ") — nothing changed." + (out.res.status === 401 || out.res.status === 403 ? " That Matrix account isn't authorized." : ""));
       } else {
         setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
-          ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "archive", logPath: (window.NpjArticles && window.NpjArticles.articleItemUrl) ? window.NpjArticles.articleItemUrl(m.slug) : ("https://archive.org/details/npj-article-" + m.slug) }
+          ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "github", logPath: (window.NpjArticles && window.NpjArticles.blobUrl) ? window.NpjArticles.blobUrl(m.slug) : ("https://github.com/clovenbradshaw-ctrl/npj/blob/main/articles/" + m.slug + ".jsonl") }
           : x) } : p);
-        // flip the slug's status in the validated archive.org manifest so the
-        // front page + reader hide/show it right away
-        window.NpjArticles.patchManifestStatus(m.slug, next, token);
-        // refresh the front index, then force this slug's new status in (the
-        // archive listing can lag a fresh write) so home hides/shows it at once
+        // the status now rides the REC line we appended; refresh the front index
+        // from the git-tree, then force this slug's new status in (the tree/CDN
+        // can lag a fresh commit) so home hides/shows it at once
         const reflect = () => window.NpjArticles.patchFrontStatus(m.slug, next);
         window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }
@@ -482,14 +480,13 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     setStatusBusy(null);
   };
 
-  // admin-only: REMOVE the ticked pieces from the site's record. Unpublish only
-  // HIDES (the row stays, status flips); this takes them off the line-up
-  // entirely — for clearing out junk/test pieces so only the real record
-  // remains. The append-only event log on archive.org is immutable and is NOT
-  // deleted; what changes is the validated manifest the reader trusts. We
-  // REWRITE that manifest to exactly the pieces we keep (every published row
-  // minus the ticked ones), so the removed slugs are gone and — because a
-  // present manifest is authoritative — the archive search can't resurface them.
+  // admin-only: take the ticked pieces off the site in one sweep. The record is
+  // the GitHub directory (articles/<slug>.jsonl), and the publish webhook is
+  // append-only — there is no destructive delete. So "remove" UNPUBLISHES each
+  // ticked piece: it appends one REC {status:"unpublished"} line per slug, which
+  // drops it from the front page and the reader for everyone but admins. Nothing
+  // is deleted — the append-only event log stays in GitHub and any piece can be
+  // republished later from its log.
   const toggleSel = (slug) => setSelected(s => { const n = new Set(s); n.has(slug) ? n.delete(slug) : n.add(slug); return n; });
   const removeSelected = async () => {
     if (!selected.size || removeBusy) return;
@@ -497,25 +494,26 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     if (!token) { setStatusErr("Sign in with Matrix to manage the record — the webhook re-verifies the token server-side."); return; }
     const slugs = (published ? published.articles : []).map(a => a.slug).filter(s => selected.has(s));
     if (!slugs.length) return;
-    if (!window.confirm("Remove " + slugs.length + " piece" + (slugs.length === 1 ? "" : "s") + " from the record?\n\nThey come off the front page and the site line-up for everyone. This is for clearing out junk or test pieces — the append-only event log stays on archive.org; only the published line-up is rewritten. You can republish a piece later from its event log.")) return;
+    if (!window.confirm("Take " + slugs.length + " piece" + (slugs.length === 1 ? "" : "s") + " off the site?\n\nThey come off the front page and the line-up for everyone but admins. This is for clearing out junk or test pieces — the append-only event log stays in GitHub (nothing is deleted), and you can republish a piece later from its log.")) return;
     setRemoveBusy(true); setStatusErr(null);
-    // the line-up we KEEP: every published row that wasn't ticked, in its current form
-    const keep = published.articles.filter(a => !selected.has(a.slug));
-    try {
-      const out = await window.NpjArticles.publishManifest(token, keep);
-      if (!out || !out.ok) {
-        setStatusErr("Couldn't rewrite the site manifest (HTTP " + ((out && out.status) || "—") + ") — nothing was removed.");
-      } else {
-        // reflect immediately: drop from the admin list AND the in-memory front
-        // index, then reconcile against the freshly written manifest.
-        setPublished(p => p ? { ...p, articles: p.articles.filter(a => !selected.has(a.slug)) } : p);
-        try { window.NpjArticles.dropFromFront(slugs); } catch (e) {}
-        window.NpjArticles.loadFront().catch(() => {});
-        setSelected(new Set());
-      }
-    } catch (e) {
-      setStatusErr("Couldn't reach the manifest webhook: " + (e.message || "network error") + ". Nothing was removed.");
+    let failed = 0;
+    for (const slug of slugs) {
+      try {
+        const out = await window.NpjArticles.setArticleStatus({ slug, status: "unpublished", actor: me, token });
+        if (!out || !out.res || !out.res.ok) failed++;
+      } catch (e) { failed++; }
     }
+    if (failed) {
+      setStatusErr("Couldn't take " + failed + " of " + slugs.length + " off the site — they may be unchanged. Try again.");
+    }
+    // reflect immediately: mark them unpublished in the admin list (admins still
+    // see them, badged) AND drop them from the in-memory front index, then
+    // reconcile against the freshly committed logs.
+    const done = new Set(slugs);
+    setPublished(p => p ? { ...p, articles: p.articles.map(a => done.has(a.slug) ? { ...a, status: "unpublished" } : a) } : p);
+    try { window.NpjArticles.dropFromFront(slugs); } catch (e) {}
+    window.NpjArticles.loadFront().catch(() => {});
+    setSelected(new Set());
     setRemoveBusy(false);
   };
 
@@ -841,10 +839,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
 
             {/* ---- the published record: one version folder per document ---- */}
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.check style={{ fontSize: 14 }} /> Published · append-only event logs on archive.org
+              <I.check style={{ fontSize: 14 }} /> Published · append-only event logs in GitHub
             </div>
-            {/* admin clean-up bar: tick junk/test pieces and remove them from the
-                site line-up in one rewrite (the event logs stay on archive.org) */}
+            {/* admin clean-up bar: tick junk/test pieces and take them off the
+                site in one sweep (each is unpublished; the logs stay in GitHub) */}
             {isAdmin && published && pubArticles.length > 0 && (
               <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "8px 12px", marginBottom: 10 }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
@@ -854,18 +852,18 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     onChange={e => setSelected(e.target.checked ? new Set(pubArticles.map(m => m.slug)) : new Set())} />
                   <span className="np-mono" style={{ fontSize: 10.5 }}>{selected.size ? selected.size + " selected" : "Select all"}</span>
                 </label>
-                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>Remove takes a piece off the line-up entirely — use it to clear junk/test pieces. Unpublish (per row) only hides.</span>
+                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>Takes the ticked pieces off the site (each is unpublished) — use it to clear junk/test pieces. The logs stay in GitHub; republish anytime.</span>
                 <span style={{ flex: 1 }} />
                 <button className="btn btn-sm" disabled={!selected.size || removeBusy} onClick={removeSelected}
                   style={{ borderColor: "var(--reject)", color: "var(--reject)", fontWeight: 700, opacity: (!selected.size || removeBusy) ? .5 : 1 }}>
-                  {removeBusy ? "Removing…" : "✕ Remove " + (selected.size || "") + " from the record"}
+                  {removeBusy ? "Taking off…" : "✕ Take " + (selected.size || "") + " off the site"}
                 </button>
               </div>
             )}
             {statusErr && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)", border: "1px solid var(--reject)", padding: "8px 10px", marginBottom: 8, lineHeight: 1.5 }}>{statusErr}</div>}
             {!published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> reading the public record…</div>}
             {published && pubArticles.length === 0 && published.legacy.length === 0 && (
-              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its archive.org item (npj-article-&lt;slug&gt;) is created and listed here.</div>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its log (articles/&lt;slug&gt;.jsonl) is committed to GitHub and listed here.</div>
             )}
             {published && pubArticles.map(m => {
               // the row's status: unpublished (off the site) · updated (edited
@@ -875,10 +873,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                 : (m.versions || 1) > 1
                 ? { label: "⊛ Updated" + (m.updated ? " " + m.updated : ""), color: "var(--review)" }
                 : { label: "● Published", color: "var(--verified)" };
-              // the event log lives on archive.org now — link to the item
-              const logHref = m.logPath || (window.NpjArticles && window.NpjArticles.articleItemUrl
-                ? window.NpjArticles.articleItemUrl(m.slug)
-                : "https://archive.org/details/npj-article-" + m.slug);
+              // the event log lives in GitHub now — link to the file on GitHub
+              const logHref = m.logPath || (window.NpjArticles && window.NpjArticles.blobUrl
+                ? window.NpjArticles.blobUrl(m.slug)
+                : "https://github.com/clovenbradshaw-ctrl/npj/blob/main/articles/" + m.slug + ".jsonl");
               const busy = statusBusy === m.slug;
               return (
                 <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1, background: selected.has(m.slug) ? "rgba(178,58,38,.06)" : undefined }}>
@@ -896,7 +894,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "published")} title="Republish — put it back on the site"
                       style={{ background: "var(--yellow)", fontWeight: 700, opacity: busy ? .5 : 1 }}>↺ {busy ? "Working…" : "Republish"}</button>
                   ) : (
-                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "unpublished")} title="Unpublish — take it off the site (every version stays on archive.org)"
+                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "unpublished")} title="Unpublish — take it off the site (every version stays in GitHub)"
                       style={{ borderColor: "var(--reject)", color: "var(--reject)", opacity: busy ? .5 : 1 }}>⊘ {busy ? "Working…" : "Unpublish"}</button>
                   ))}
                   <a href={logHref} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>

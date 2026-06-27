@@ -112,23 +112,24 @@ window.NpjPlainText = {
    Where this site actually lives — GitHub Pages, a custom domain, localhost —
    derived from the page URL, never a hardcoded domain. The share link opens the
    formatted reader; the log URL is the committed EO event log itself — the
-   durable, archivable artifact. The log now lives on archive.org (one item per
-   document, npj-article-<slug>), so the log URL points at that item. */
+   durable, archivable artifact. The log lives in GitHub (one append-only file
+   per document, articles/<slug>.jsonl): the raw URL serves the bytes, the blob
+   URL opens the file in the GitHub UI. */
 function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
 function npjArticleUrl(slug) { return npjSiteBase() + "#article;read=" + encodeURIComponent(slug); }
 function npjArticleRawUrl(slug) {
-  return (window.NpjArticles && window.NpjArticles.articleDownloadUrl)
-    ? window.NpjArticles.articleDownloadUrl(slug)
-    : "https://archive.org/download/npj-article-" + slug + "/" + slug + ".jsonl";
+  return (window.NpjArticles && window.NpjArticles.rawUrl)
+    ? window.NpjArticles.rawUrl(slug)
+    : "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/articles/" + slug + ".jsonl";
 }
-// takes a folded article ({slug, logPath}) or a bare slug — the archive.org item
+// takes a folded article ({slug, logPath}) or a bare slug — the GitHub blob page
 function npjArticleLogUrl(slugOrArticle) {
   const a = (slugOrArticle && typeof slugOrArticle === "object") ? slugOrArticle : null;
   const slug = a ? a.slug : slugOrArticle;
   if (a && a.logPath) return a.logPath;
-  return (window.NpjArticles && window.NpjArticles.articleItemUrl)
-    ? window.NpjArticles.articleItemUrl(slug)
-    : "https://archive.org/details/npj-article-" + slug;
+  return (window.NpjArticles && window.NpjArticles.blobUrl)
+    ? window.NpjArticles.blobUrl(slug)
+    : "https://github.com/clovenbradshaw-ctrl/npj/blob/main/articles/" + slug + ".jsonl";
 }
 
 // Parse a date that may be a bare "YYYY-MM-DD" (article dates) OR a full ISO

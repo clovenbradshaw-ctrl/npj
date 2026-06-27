@@ -243,7 +243,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT THE RECORD</span>
-          <span className="np-mono" style={{ fontSize: 10.5, opacity: .75 }}>appends one REC event to npj-article-{A.slug} on archive.org</span>
+          <span className="np-mono" style={{ fontSize: 10.5, opacity: .75 }}>appends one REC event to articles/{A.slug}.jsonl in GitHub</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 18, cursor: "pointer" }}><I.x /></button>
         </div>

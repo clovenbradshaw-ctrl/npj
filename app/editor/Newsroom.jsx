@@ -2612,7 +2612,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     setStatusErr(null);
     const token = window.MatrixAuth && window.MatrixAuth.token();
     if (!token) { setStatusErr("Sign in with Matrix to unpublish — the webhook re-verifies the token server-side."); return; }
-    if (!window.confirm("Unpublish “" + (title || slug) + "”?\n\nIt comes off the site for everyone but admins. Every version stays on archive.org — Republish brings it back anytime.")) return;
+    if (!window.confirm("Unpublish “" + (title || slug) + "”?\n\nIt comes off the site for everyone but admins. Every version stays in GitHub — Republish brings it back anytime.")) return;
     setStatusBusy(true);
     try {
       const actor = (session && session.user_id) || me || ((window.MatrixAuth.current() || {}).user_id) || null;
@@ -2620,11 +2620,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!out.res.ok) {
         setStatusErr("Rejected (HTTP " + out.res.status + ")" + ((out.res.status === 401 || out.res.status === 403) ? " — that Matrix account isn't authorized to manage publication." : " — nothing changed."));
       } else {
-        // flip the slug's status in the validated manifest so the front page
-        // (and the reader's deep-link gate) hides it right away
-        window.NpjArticles.patchManifestStatus(slug, "unpublished", token);
-        // refresh the front index, then force this slug's new status in (the
-        // archive listing lags a fresh write) and re-render so the button flips
+        // the status now rides the REC line we just appended; refresh the front
+        // index from the git-tree, then force this slug's new status in (the
+        // tree/CDN lags a fresh commit) and re-render so the button flips
         const reflect = () => { window.NpjArticles.patchFrontStatus(slug, "unpublished"); setRev(r => r + 1); };
         window.NpjArticles.loadFront().then(reflect).catch(reflect);
       }
@@ -2810,7 +2808,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {statusErr && <span className="np-mono" title={statusErr} style={{ fontSize: 10.5, color: NR.warn, maxWidth: 240, lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis" }}>{statusErr}</span>}
         {isRepublish && !isLive && <span className="np-mono" title="This piece is currently off the site — Republish brings it back live." style={{ fontSize: 10, color: NR.warn, border: "1px solid " + NR.warn, padding: "2px 7px", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 4 }}><span style={{ fontFamily: "var(--mono)" }}>⊘</span> Off the site</span>}
         {isAdmin && isLive && (
-          <button onClick={unpublish} disabled={statusBusy} title="Unpublish — take this off the site for everyone but admins (the event log stays on archive.org)" className="np-cond" style={{ background: "transparent", color: NR.warn, border: "1.5px solid " + NR.warn, padding: "7px 14px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: statusBusy ? "wait" : "pointer", opacity: statusBusy ? .6 : 1 }}>
+          <button onClick={unpublish} disabled={statusBusy} title="Unpublish — take this off the site for everyone but admins (the event log stays in GitHub)" className="np-cond" style={{ background: "transparent", color: NR.warn, border: "1.5px solid " + NR.warn, padding: "7px 14px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: statusBusy ? "wait" : "pointer", opacity: statusBusy ? .6 : 1 }}>
             <span style={{ fontFamily: "var(--mono)", fontSize: 14 }}>⊘</span> {statusBusy ? "Working…" : "Unpublish"}
           </button>
         )}
@@ -3472,8 +3470,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, definitions, sources })} />}
-      {previewDoc && window.ArticleRead && (
-        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
+      {previewDoc && window.NpjPreview && (
+        <window.NpjPreview article={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
       )}
     </div>
   );
@@ -3608,7 +3606,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     { code: "EVA", label: isRepublish ? "Pull the updated piece" : "Pull the finished piece", detail: isRepublish ? "draft → EO event (INS — a new version; the fold restarts from it)" : "draft → EO event (INS — the genesis line)", state: "wait" },
     { code: "SEG", label: "Build: resolve & pin every bound span", detail: flight.spans + " bound span" + (flight.spans === 1 ? "" : "s") + " to check", state: "wait" },
     { code: "INS", label: "Sources archived on archive.org", detail: flight.srcTotal ? flight.archived + " of " + flight.srcTotal + " archived" : "no sources bound", state: "wait", sources: true },
-    { code: "DEF", label: "Commit the EO event log to archive.org", detail: "→ npj-article-" + slug, state: "wait" },
+    { code: "DEF", label: "Commit the EO event log to GitHub", detail: "→ articles/" + slug + ".jsonl", state: "wait" },
     { code: "REC", label: "Live & open to suggestion", detail: articleUrl, state: "wait" }
   ]));
   const published = useRef(null); // the folded article, for "open it" without re-fetching
@@ -3619,106 +3617,112 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const halt = (i, detail, msg, retry) => { upd(i, { state: "fail", detail }); if (alive.current) setOutcome({ ok: false, msg, retry: !!retry }); };
   const tick = (ms) => new Promise(r => setTimeout(r, ms));
 
-  // verify-after-publish: a 200 means the commit landed, but the raw URL is a
-  // CDN — confirm it's serving readable JSONL, not a double-base64'd blob. A
-  // 404 / network miss right after the commit is just CDN lag, not a failure,
-  // so those return null (no flag). The signal we DO flag: a first line that
-  // starts with "eyJ" (base64 of '{') instead of '{' — the workflow encoded the
-  // body twice and the article won't parse.
+  // verify-after-publish: a committed file should read back as the genesis JSONL.
+  // The GitHub raw CDN can lag a fresh commit (or serve a cached 404) for a few
+  // seconds, so a 404 / network miss right after the commit is just CDN lag, not
+  // a failure — those return null (no flag). The signal we DO flag: a first line
+  // that starts with "eyJ" (base64 of '{') instead of '{', or that doesn't parse
+  // as the genesis event — the file landed but won't read as an article.
   const verifyRaw = async () => {
     try {
-      const url = window.NpjArticles.articleDownloadUrl(slug) + "?cb=" + Date.now();
+      const url = window.NpjArticles.rawUrl(slug) + "?cb=" + Date.now();
       const txt = await fetch(url, { cache: "no-store" }).then(r => r.ok ? r.text() : null);
-      if (txt == null) return null; // 404 right after the write is just archive lag, not a failure
+      if (txt == null) return null; // 404 right after the write is just CDN lag, not a failure
       const first = (txt.split("\n", 1)[0] || "").trim();
       if (!first) return null;
       if (/^eyJ/.test(first)) return {
-        short: "archive file is base64, not JSON — double-encoded",
-        msg: "The write landed, but the published file starts with “eyJ”, not “{” — the webhook base64-encoded the body twice, so the article won't parse. Don't rely on the link until the webhook's encoding is fixed."
+        short: "committed file is base64, not JSON — double-encoded",
+        msg: "The commit landed, but the published file starts with “eyJ”, not “{” — the webhook base64-encoded the body twice, so the article won't parse. Don't rely on the link until the webhook's encoding is fixed."
       };
       try { if (JSON.parse(first).op) return null; } catch (e) {}
       return {
-        short: "archive file's first line isn't the genesis event",
-        msg: "The write landed, but the archive.org file's first line didn't parse as the genesis JSONL event. It may be a stale copy — re-check the file before sharing the link."
+        short: "committed file's first line isn't the genesis event",
+        msg: "The commit landed, but the file's first line didn't parse as the genesis JSONL event. It may be a stale CDN copy — re-check the file before sharing the link."
       };
     } catch (e) { return null; }
   };
 
   // The commit itself, factored out so "Retry publish" can re-POST the EXACT
-  // same payload — including the same pre-generated version filename, so a
-  // retry never mints a second file. Every publish CREATES a new file in
-  // articles/<slug>/ (nothing is updated in place), which is what retired the
-  // GitHub update-rejection failures. Success is the JSON body's `ok` flag —
-  // NOT a bare HTTP 200 — because the webhook reports a failed GitHub commit
-  // honestly, with the real status and message, instead of a lying 200.
+  // same payload. publishGenesis appends the genesis line to articles/<slug>.jsonl
+  // through the Matrix-gated publish-npj webhook (bounded — a stalled webhook is
+  // aborted, never left spinning). Success is the JSON body's gh_ok + commit_sha,
+  // NOT a bare 200: the webhook reports a failed GitHub commit honestly, with the
+  // real status, so we never paint a checkmark on a write that didn't land.
   const commit = async () => {
     const p = payloadRef.current; if (!p) return;
     if (alive.current) setOutcome(null);
-    upd(3, { state: "active", detail: "→ npj-article-" + slug + " on archive.org" });
+    upd(3, { state: "active", detail: "→ articles/" + slug + ".jsonl on GitHub" });
     let res;
     try {
       res = await window.NpjArticles.publishGenesis(p);
     } catch (e) {
-      // A timeout (postArticle aborts the commit after 120s) or a dropped
-      // connection lands here. The held payload is still good, so this is the
-      // textbook retryable case — offer "Retry publish" instead of forcing the
-      // author back through the whole gate.
+      // A timeout (the commit aborts after 120s) or a dropped connection lands
+      // here. The held payload is still good, so this is the textbook retryable
+      // case — offer "Retry publish" instead of forcing the author back through
+      // the whole gate.
       const timedOut = e && (e.name === "AbortError" || /abort/i.test(e.message || ""));
       return halt(3,
         timedOut ? "webhook timed out" : "webhook unreachable",
         timedOut
-          ? "The article webhook didn't answer within 120s — the commit was aborted and nothing was written to archive.org. This is usually transient; retry."
-          : "Couldn't reach the article webhook: " + (e.message || "network error") + ". Nothing was written.",
+          ? "The publish webhook didn't answer within 120s — the commit was aborted and nothing was written. This is usually transient; retry."
+          : "Couldn't reach the publish webhook: " + (e.message || "network error") + ". Nothing was written.",
         true);
     }
     const data = await res.json().catch(() => null);
-    const success = res.status === 200 && data && data.ok === true;
+    const forbidden = res.status === 403 || (data && (data.__forbidden || data.error === "not an assignee on this article"));
+    const ghOk = !!(data && data.gh_ok !== false && !data.gh_error && (data.commit_sha || data.gh_ok === true));
+    const success = res.status >= 200 && res.status < 300 && ghOk && !forbidden;
     if (!success) {
       let msg, detail, retry = false;
       if (res.status === 401) {
         detail = "rejected — session invalid (401)";
         msg = "Your Matrix session isn't valid for publishing — sign in again.";
-      } else if (res.status === 403 && data && data.error === "not an assignee on this article") {
+      } else if (forbidden) {
         detail = "rejected — not an assignee (403)";
-        msg = "You're signed in as " + (data.user || "your account") + " (" + (data.role || "no role") + "), but this article's genesis doesn't list you as an assignee.";
+        msg = "You're signed in as " + ((data && data.user_id) || "your account") + " (" + ((data && data.role) || "no role") + "), but this article's genesis doesn't list you as an assignee.";
+      } else if (data && data.gh_error) {
+        const gs = data.gh_status ? " (GitHub " + data.gh_status + ")" : "";
+        detail = "GitHub commit failed" + gs;
+        msg = "The webhook reached GitHub but the commit was rejected" + gs + (data.gh_error ? " — " + data.gh_error : "") + ". Nothing was written. If this is an expired GitHub credential on the webhook, re-bind it; otherwise retry.";
+        // a SHA race (409/422) or a 5xx is worth a retry; a credential problem is not
+        retry = data.gh_status === 409 || data.gh_status === 422 || res.status >= 500;
       } else {
         detail = "HTTP " + res.status;
-        msg = "The article webhook answered " + res.status + ((data && data.error) ? " — " + data.error : "") + ". Nothing was written to archive.org.";
-        // 5xx / 429 / a transient gateway error is worth a retry; the payload is
-        // unchanged. (401/403 above are an auth problem and stay non-retryable.)
+        msg = "The publish webhook answered " + res.status + ((data && (data.error || data.message)) ? " — " + (data.error || data.message) : "") + ". Nothing was written.";
+        // 5xx / 429 / a transient gateway error is worth a retry; the payload is unchanged.
         retry = res.status >= 500 || res.status === 429 || res.status === 408;
       }
       upd(3, { state: "fail", detail });
       if (alive.current) setOutcome({ ok: false, msg, retry });
       return;
     }
-    // written for real — persist the receipt (the archive.org log path + bytes)
-    const sha = (published.current && published.current.base_sha) || data.base_sha || null;
-    const filename = data.filename || (window.NpjArticles.articleDownloadUrl(slug).replace(/^https?:\/\/[^/]+\/download\//, ""));
-    try { window.NpjArticles.saveReceipt({ filename, commit_sha: sha, bytes: data.bytes, published_at: new Date().toISOString() }); } catch (e) {}
+    // committed for real — persist the receipt (the GitHub commit_sha + bytes)
+    const sha = (data && data.commit_sha) || (published.current && published.current.base_sha) || null;
+    const filename = (data && data.filename) || window.NpjArticles.filenameFor(slug);
+    try { window.NpjArticles.saveReceipt({ filename, commit_sha: sha, bytes: data && data.bytes, published_at: new Date().toISOString() }); } catch (e) {}
     const shaTag = sha ? " @ " + sha.slice(0, 7) : "";
-    upd(3, { state: "done", detail: "written to npj-article-" + slug + shaTag });
-    // 5 — live once archive.org serves the file; confirm it's readable JSONL
+    upd(3, { state: "done", detail: "committed to articles/" + slug + ".jsonl" + shaTag });
+    // 5 — live once the raw CDN serves the file; confirm it's readable JSONL
     upd(4, { state: "active", detail: articleUrl + (sha ? " · v." + sha.slice(0, 7) : "") });
     await tick(400);
     const warn = await verifyRaw();
     upd(4, { state: warn ? "fail" : "done", detail: warn ? warn.short : articleUrl + (sha ? " · v." + sha.slice(0, 7) : "") });
-    // add this piece to the validated site manifest on archive.org (the line-up
-    // the reader trusts) so it appears on the front page without waiting on the
-    // archive search index. Best-effort — a miss is reconciled on the next publish.
-    try { window.NpjArticles.syncArticleToManifest(published.current, p.token); } catch (e) {}
+    // refresh the front-page line-up from the git-tree so the new piece appears.
+    // Best-effort — the tree/CDN can lag a few seconds; "Open the article" reads
+    // the committed file directly, and the next visit reconciles the front page.
+    try { if (window.NpjArticles.loadFront) window.NpjArticles.loadFront().catch(() => {}); } catch (e) {}
     if (alive.current) setOutcome({ ok: true, sha, warn: warn ? warn.msg : null });
   };
 
   const run = async () => {
     setPhase("run");
     // the gate may have renamed the document after the steps were initialized
-    upd(3, { detail: "→ npj-article-" + slug });
+    upd(3, { detail: "→ articles/" + slug + ".jsonl" });
     upd(4, { detail: articleUrl });
     // 1 — pull the piece
     upd(0, { state: "active" }); await tick(400);
     if (!flight.words) return halt(0, "the draft is empty", "Write the piece first — there's no text to publish.");
-    upd(0, { state: "done", detail: flight.words + " words → npj-article-" + slug });
+    upd(0, { state: "done", detail: flight.words + " words → articles/" + slug + ".jsonl" });
     // 2 — build: every bound span must resolve to a source record AND pin the
     // exact words in that source (you can't cite a whole page)
     upd(1, { state: "active" }); await tick(400);
@@ -3747,12 +3751,13 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     }));
     upd(2, { state: "done", detail: !flight.srcTotal ? "no sources bound" : archivedNow === flight.srcTotal ? "all " + flight.srcTotal + " verified on archive.org" : archivedNow + " of " + flight.srcTotal + " verified — the rest cite their original URL" });
     // 4 — the actual write. The piece is serialized NOW (so claims carry any
-    // archive URLs found in step 3) into ONE EO event: the INS genesis,
-    // appended to npj-article-<slug>/<slug>.jsonl on archive.org. Every later
-    // edit appends another line to that same file, so the append-only log IS the
-    // article's complete change history. Authority is re-verified server-side by
-    // the webhook (Matrix token).
-    upd(3, { state: "active", detail: flight.mediaToFreeze ? ("moving " + flight.mediaToFreeze + " image" + (flight.mediaToFreeze === 1 ? "" : "s") + " to archive.org — this can take up to a minute each…") : ("→ npj-article-" + slug) });
+    // archive URLs found in step 3) into ONE EO event: the INS genesis, appended
+    // to articles/<slug>.jsonl in GitHub. Every later edit appends another line
+    // to that same file, so the append-only log IS the article's complete change
+    // history. Authority is re-verified server-side by the webhook (Matrix token,
+    // per-article assignee gate). Photos still move to archive.org (a public host
+    // readers can fetch) before the commit; only the article TEXT lives in GitHub.
+    upd(3, { state: "active", detail: flight.mediaToFreeze ? ("moving " + flight.mediaToFreeze + " image" + (flight.mediaToFreeze === 1 ? "" : "s") + " to archive.org — this can take up to a minute each…") : ("→ articles/" + slug + ".jsonl") });
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     const gen = window.NpjArticles.genesisFromContent(flight.content, {
       slug, headline: title, actor,
@@ -3792,11 +3797,11 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     const token = window.MatrixAuth.token();
     if (!token) return halt(3, "no verified Matrix session", "Sign in with your admin Matrix account to publish.");
     // hold the payload (with any archive.org-frozen image srcs) so a retry
-    // re-POSTs the exact same line; the article webhook appends it to the
-    // npj-article-<slug> log on archive.org (idempotent enough — a duplicate
-    // genesis just re-seeds the same state on fold).
+    // re-POSTs the exact same line; the webhook appends it to articles/<slug>.jsonl
+    // in GitHub (idempotent enough — a duplicate genesis just re-seeds the same
+    // state on fold).
     payloadRef.current = { slug, line, token, message: (isRepublish ? "republish: " : "publish: ") + slug };
-    upd(3, { detail: "→ npj-article-" + slug });
+    upd(3, { detail: "→ articles/" + slug + ".jsonl" });
     await commit();
   };
 
@@ -3830,7 +3835,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
           <span style={{ fontFamily: "var(--mono)", fontSize: 18 }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21 }}>{isRepublish ? "REPUBLISH BOUNDARY" : "PUBLISH BOUNDARY"}</span>
           <span style={{ flex: 1 }} />
-          <span className="np-mono" style={{ fontSize: 11 }}>archive.org</span>
+          <span className="np-mono" style={{ fontSize: 11 }}>GitHub</span>
         </div>
 
         {phase === "confirm" && (
@@ -3841,14 +3846,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                 ? (liveUnpublished
                     ? "This piece is in the record but unpublished. Confirming commits a new version to its event log and returns it to the site — every prior version stays in the public record."
                     : "This piece is already live. Confirming commits an updated version to its event log — it replaces what's on the site the moment you confirm, and every prior version stays in the public record.")
-                : "Nothing has been published yet. This is what goes out the moment you confirm — written to archive.org and served from there."
+                : "Nothing has been published yet. This is what goes out the moment you confirm — committed to GitHub and served from there."
             }</div>
             <Row k="Item">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                 <input value={slugVal} onChange={e => editSlug(e.target.value)} placeholder={auto} title="Name the document anything — it doesn't have to match the headline" className="np-mono" spellCheck={false}
                   style={{ width: "min(300px, 56vw)", border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
                 <span className="np-mono" style={{ fontSize: 11 }}>/</span>
-                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ archive.org · npj-article-{slug}{slugVal !== slug ? " · saved as " + slug : ""} — each publish &amp; edit appends one line to its append-only log</span>
+                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ GitHub · articles/{slug}.jsonl{slugVal !== slug ? " · saved as " + slug : ""} — each publish &amp; edit appends one line to its append-only log</span>
               </span>
             </Row>
             <Row k="Live at">{articleUrl}</Row>
@@ -3921,7 +3926,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                 {outcome.ok
                   ? <React.Fragment>
                       <div style={{ fontFamily: "var(--display)", fontSize: 26, color: outcome.warn ? NR.warn : "var(--yellow)", marginBottom: 4 }}>{outcome.warn ? "COMMITTED — CHECK THE FILE" : "COMMITTED — GOING LIVE"}</div>
-                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || (isRepublish ? ("npj-article-" + slug + " has a new version appended to its archive.org log — every prior version stays in the log. The front page reflects the update and the link below opens the formatted reader.") : ("npj-article-" + slug + " is on archive.org — the genesis of the article's append-only event log. Every future edit appends another event to it. The front page lists it and the link below opens the formatted reader."))}</div>
+                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || (isRepublish ? ("articles/" + slug + ".jsonl has a new version appended to its log in GitHub — every prior version stays in the log. The front page reflects the update and the link below opens the formatted reader.") : ("articles/" + slug + ".jsonl is committed to GitHub — the genesis of the article's append-only event log. Every future edit appends another event to it. The front page lists it and the link below opens the formatted reader."))}</div>
                       {outcome.sha && <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, marginBottom: 16 }}>committed @ {outcome.sha.slice(0, 7)}</div>}
                       {!outcome.warn && (
                         <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
