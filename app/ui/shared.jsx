@@ -112,18 +112,23 @@ window.NpjPlainText = {
    Where this site actually lives — GitHub Pages, a custom domain, localhost —
    derived from the page URL, never a hardcoded domain. The share link opens the
    formatted reader; the log URL is the committed EO event log itself — the
-   durable, archivable artifact. Documents now live as FOLDERS of timestamped
-   version files (articles/<slug>/), so the log URL points at the folder on
-   GitHub; legacy single-file logs (articles/<slug>.jsonl) keep their raw URL. */
+   durable, archivable artifact. The log now lives on archive.org (one item per
+   document, npj-article-<slug>), so the log URL points at that item. */
 function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
 function npjArticleUrl(slug) { return npjSiteBase() + "#article;read=" + encodeURIComponent(slug); }
-function npjArticleRawUrl(slug) { return npjSiteBase() + "articles/" + slug + ".jsonl"; }
-// takes a folded article ({slug, storage, logPath}) or a bare slug (assumed folder)
+function npjArticleRawUrl(slug) {
+  return (window.NpjArticles && window.NpjArticles.articleDownloadUrl)
+    ? window.NpjArticles.articleDownloadUrl(slug)
+    : "https://archive.org/download/npj-article-" + slug + "/" + slug + ".jsonl";
+}
+// takes a folded article ({slug, logPath}) or a bare slug — the archive.org item
 function npjArticleLogUrl(slugOrArticle) {
   const a = (slugOrArticle && typeof slugOrArticle === "object") ? slugOrArticle : null;
   const slug = a ? a.slug : slugOrArticle;
-  if (a && a.storage === "file") return npjArticleRawUrl(slug);
-  return "https://github.com/clovenbradshaw-ctrl/npj/tree/main/articles/" + slug;
+  if (a && a.logPath) return a.logPath;
+  return (window.NpjArticles && window.NpjArticles.articleItemUrl)
+    ? window.NpjArticles.articleItemUrl(slug)
+    : "https://archive.org/details/npj-article-" + slug;
 }
 
 // Parse a date that may be a bare "YYYY-MM-DD" (article dates) OR a full ISO
