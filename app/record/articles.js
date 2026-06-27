@@ -41,9 +41,7 @@
   const SCHEMA = "npj/article-eo/1";
   const DIR = "articles";
   const OWNER_REPO = "clovenbradshaw-ctrl/npj";
-  const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
-  const API_CONTENTS = "https://api.github.com/repos/" + OWNER_REPO + "/contents/" + DIR;
-  const API_TREE = "https://api.github.com/repos/" + OWNER_REPO + "/git/trees/main?recursive=1";
+  const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main"; // kept for rawUrl() (legacy/debug links only — the reader no longer fetches GitHub)
   const IDX_CACHE_KEY = "npj_articles_idx_v3"; // v3: per-document folders — entries are keyed by slug, not filename
   const FRONT_CACHE_KEY = "npj_front_v1"; // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
@@ -461,79 +459,13 @@
     } catch (e) {}
   }
 
-  async function fetchRaw(path) {
-    // cb param busts the raw CDN's ~5 min cache (including cached 404s) so a
-    // fresh commit reads back immediately
-    const res = await fetch(RAW_BASE + "/" + path + "?cb=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) return null;
-    return await res.text();
-  }
-  // join event files into one log text; order in = fold order
-  function joinParts(texts) {
-    const parts = (texts || []).filter(t => t != null && String(t).trim());
-    return parts.length ? parts.map(t => String(t).replace(/\n+$/, "")).join("\n") + "\n" : null;
-  }
-
-  /* One git-tree call lists every document at once: the folders of version
-     files (articles/<slug>/<stamp>-<op>.jsonl) and any legacy single-file logs
-     (articles/<slug>.jsonl). One API request no matter how many documents. */
-  const LEGACY_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\.jsonl$/;
-  const VERSION_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\/[^\/]+\.jsonl$/;
-  async function listDocs() {
-    const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" } });
-    if (!res.ok) throw new Error("github " + res.status);
-    const tree = ((await res.json()) || {}).tree || [];
-    const docs = {};
-    const doc = (slug) => docs[slug] || (docs[slug] = { slug, legacy: null, files: [] });
-    tree.forEach(e => {
-      if (!e || e.type !== "blob") return;
-      let m = LEGACY_RE.exec(e.path);
-      if (m) { doc(m[1]).legacy = { path: e.path, sha: e.sha }; return; }
-      m = VERSION_RE.exec(e.path);
-      if (m) doc(m[1]).files.push({ path: e.path, sha: e.sha });
-    });
-    Object.values(docs).forEach(d => d.files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)));
-    return Object.values(docs);
-  }
-
-  // the version files inside ONE document's folder ([] when there's no folder)
-  async function listDocFiles(slug) {
-    const res = await fetch(API_CONTENTS + "/" + slug + "?ref=main", { headers: { Accept: "application/vnd.github+json" } });
-    if (res.status === 404) return [];
-    if (!res.ok) throw new Error("github " + res.status);
-    const list = await res.json();
-    return (Array.isArray(list) ? list : [])
-      .filter(f => f.type === "file" && /\.jsonl$/i.test(f.name))
-      .map(f => ({ path: dirFor(slug) + "/" + f.name, sha: f.sha }))
-      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  }
-
-  // a doc's full event text: the legacy log first (it predates the folder),
-  // then each version file in stamp order
-  async function fetchDocText(d) {
-    const paths = (d.legacy ? [d.legacy.path] : []).concat(d.files.map(f => f.path));
-    if (!paths.length) return null;
-    return joinParts(await Promise.all(paths.map(fetchRaw)));
-  }
-
-  // fetch ONE document by slug without the full tree: probe its folder and the
-  // legacy file in parallel → { text, storage: "dir"|"file" } or null
-  async function fetchLog(slug) {
-    const [files, legacyText] = await Promise.all([
-      listDocFiles(slug).catch(() => []),
-      fetchRaw(filenameFor(slug))
-    ]);
-    const versionTexts = await Promise.all(files.map(f => fetchRaw(f.path)));
-    const text = joinParts([legacyText].concat(versionTexts));
-    if (text == null) return null;
-    return { text, storage: files.length ? "dir" : "file" };
-  }
-
   /* ===================== archive.org read layer =====================
-     What the SITE reads. The GitHub helpers above stay for the write side
-     (publish receipts) and reader feedback (EVA deposits live only in the
-     GitHub folder, never mirrored), but loadArticle/listArticles/loadFront
-     below all read from archive.org. */
+     The published record lives entirely on archive.org now — GitHub is no
+     longer read OR written for article content (it still hosts the layout +
+     roles). loadArticle/listArticles/loadFront/fetchEvents below all read from
+     IA; the write path (publishGenesis/appendEdit/…) appends to the same IA
+     log. The earlier GitHub tree/contents/raw readers were removed with that
+     cutover. */
 
   // —— a per-slug body cache (Cache Storage), served stale-while-revalidate ——
   // The folded-log text for each article, keyed by slug, tagged with the
@@ -1561,79 +1493,101 @@
     return { line, operand, article: folded.article };
   }
 
-  async function post(bodyObj, token) {
-    const res = await fetch(publishEndpoint(), {
+  /* ---------------- the write path: archive.org is the home ----------------
+     Publishing writes the EO event log straight to archive.org — never GitHub.
+     Each document is one IA item, npj-article-<slug>, holding one append-only
+     file <slug>.jsonl. Every event (INS publish, REC edit, EVA feedback) POSTs
+     ONE line to the article webhook, which re-verifies the Matrix token, reads
+     the current log, appends the line, and PUTs it back (read-modify-append —
+     IA S3 has no atomic append, so the webhook owns the merge). The reader
+     folds that same file. There is no git history and no version-file folder
+     anymore; the appended log IS the history.
+
+     NOTE on concurrency: two writers appending to one slug in the same instant
+     can race (both read the same base, last PUT wins, one line lost). Publishing
+     and editing are single-author/admin actions, so this is rare; a lost EVA
+     deposit can simply be re-sent. */
+  function articleEndpoint() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.articleEndpoint) return c.articleEndpoint; } catch (e) {}
+    const m = String(publishEndpoint()).match(/^(https?:\/\/[^/]+\/webhook)\//i);
+    return m ? m[1] + "/site/article-npj" : DEFAULT_ENDPOINT.replace(/\/[^/]*$/, "/article-npj");
+  }
+  // POST one event line to the article webhook. The webhook appends it to
+  // npj-article-<slug>/<slug>.jsonl on archive.org. After a write we drop this
+  // slug's cached body so the next read refetches the freshly-appended log.
+  async function postArticle(bodyObj, token) {
+    const res = await fetch(articleEndpoint(), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify(bodyObj)
     });
+    if (res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
     return res;
   }
-  /* Every commit below CREATES a brand-new version file in the document's
-     folder — no write ever targets an existing file, so GitHub's
-     update-with-SHA path (the one that kept rejecting commits) is never hit.
-     `mode:"overwrite"` is kept for webhook compatibility: on a path that
-     doesn't exist it is simply a create. Re-publishing a slug lands a newer
-     INS file and the fold restarts from it; the old versions stay put. */
-  function publishGenesis({ slug, line, token, message, filename }) {
-    // `filename` may be pre-generated by the caller so a retry re-POSTs the
-    // exact same path instead of minting a second version file
-    return post({ filename: filename || versionFilenameFor(slug, "ins"), mode: "overwrite", contentRaw: line + "\n", message: message || ("publish: " + slug) }, token);
+  // forget a slug's cached body (after a write) so a reload pulls the new log
+  async function invalidateBody(slug) {
+    if (!hasCaches()) return;
+    try { const cache = await caches.open(BODY_CACHE); await cache.delete(bodyKey(slug)); } catch (e) {}
+    try { delete prefetched[slug]; } catch (e) {}
   }
-  // One REC event in a new version file — the edit-after-publish path.
+  // Publish the genesis (INS) — appended to the article's archive.org log. The
+  // `filename` arg is accepted for caller compatibility but ignored (there are
+  // no version files anymore — the single <slug>.jsonl is appended to).
+  function publishGenesis({ slug, line, token, message }) {
+    return postArticle({ slug, line, message: message || ("publish: " + slug) }, token);
+  }
+  // One REC event appended to the article's archive.org log — the edit path.
   async function appendEdit({ slug, operand, actor, note, token, message }) {
     const line = editLine(slug, operand, actor, note);
-    const filename = versionFilenameFor(slug, "rec");
-    const res = await post({ filename, mode: "overwrite", contentRaw: line + "\n", message: message || ("edit: " + slug) }, token);
-    return { res, line, sha: lineSha(line), filename };
+    const res = await postArticle({ slug, line, message: message || ("edit: " + slug) }, token);
+    return { res, line, sha: lineSha(line), filename: ARTICLE_ITEM(slug) + "/" + ARTICLE_FILE(slug) };
   }
-  /* A generic event writer — one NEW version file carrying any EO op. Used by
-     the feedback layer (app/feedback.js) to land reader EVA deposits in the
-     same auditable folder as the article's own events. `schema` overrides the
-     event's `v` so feedback lines self-identify (npj/feedback-eo/1) while still
-     folding harmlessly through the article reader (EVA never touches state). */
+  /* A generic event writer — appends any EO op to the article's archive.org log.
+     Used by the feedback layer (app/feedback.js) to land reader EVA deposits in
+     the same append-only file as the article's own events. `schema` overrides
+     the event's `v` so feedback lines self-identify (npj/feedback-eo/1) while
+     still folding harmlessly through the article reader (EVA never touches state). */
   async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema }) {
     const head = { v: schema || SCHEMA, op, target: "article/" + slug, ts: nowIso(), actor: actor || null, operand: operand || {} };
     if (note) head.note = note;
     const line = JSON.stringify(Object.assign(head, extra || {}));
-    const filename = versionFilenameFor(slug, op);
-    const res = await post({ filename, mode: "overwrite", contentRaw: line + "\n", message: message || (String(op).toLowerCase() + ": " + slug) }, token);
-    return { res, line, sha: lineSha(line), filename };
+    const res = await postArticle({ slug, line, message: message || (String(op).toLowerCase() + ": " + slug) }, token);
+    return { res, line, sha: lineSha(line), filename: ARTICLE_ITEM(slug) + "/" + ARTICLE_FILE(slug) };
   }
 
-  /* Every event in a document's folder, folded once — the article reader keeps
+  /* Every event in the document's log, folded once — the article reader keeps
      only the article, but feedback needs the raw EVA deposits riding alongside
-     it. Returns { events, base_sha } (base_sha is the current article version,
-     used to flag a suggestion made against a since-superseded draft as stale). */
+     it. Read from archive.org (the log's home). Returns { events, base_sha }
+     (base_sha is the current article version, used to flag a suggestion made
+     against a since-superseded draft as stale). */
   async function fetchEvents(slug) {
     const s = slugify(slug) || slug;
-    const log = await fetchLog(s);
-    if (log == null) return { events: [], base_sha: null };
-    const folded = foldLog(log.text);
+    const text = await fetchArchiveText(s, manifestVer(s));
+    if (text == null) return { events: [], base_sha: null };
+    const folded = foldLog(text);
     return { events: folded.events || [], base_sha: folded.article ? folded.article.base_sha : null };
   }
 
-  // Unpublish / republish — one REC version file carrying only the status.
-  // Unpublish just takes the piece off the site: nothing is deleted, the whole
-  // folder (every prior version) stays in GitHub, and the act of hiding it is
-  // itself recorded as one more event in the record. Authorized exactly like
-  // any other edit (the webhook re-verifies the Matrix token); the UI
-  // restricts the action to admins.
+  // Unpublish / republish — one REC event appended to the archive.org log.
+  // Unpublish just takes the piece off the site (the reader + front page hide
+  // it); nothing is deleted — the whole append-only log stays on archive.org,
+  // and the act of hiding it is itself recorded as one more event. Authorized
+  // exactly like any other edit (the webhook re-verifies the Matrix token); the
+  // UI restricts the action to admins.
   function setArticleStatus({ slug, status, actor, note, token }) {
     const next = status === "unpublished" ? "unpublished" : "published";
     const message = (next === "unpublished" ? "unpublish: " : "republish: ") + slug;
     const finalNote = note || (next === "unpublished"
-      ? "Unpublished — hidden from the site (the event log stays in GitHub)"
+      ? "Unpublished — hidden from the site (the event log stays on archive.org)"
       : "Republished");
     return appendEdit({ slug, operand: { status: next }, actor, note: finalNote, token, message });
   }
 
-  /* Publish receipts. The webhook now returns the post-commit provenance the
-     client can't know up front — the GitHub commit_sha of the line it wrote and
-     its byte count. The genesis event is serialized BEFORE the commit, so the
-     SHA can't live in the event operand; it lives here, keyed by filename, so a
-     later load can confirm the raw URL is serving the commit we actually made
-     rather than a stale CDN copy. Local-only, best-effort: never throws. */
+  /* Publish receipts. The article webhook returns the post-write provenance the
+     client can't know up front — the byte count of the appended log (and, when
+     present, a content sha). It's keyed by the archive.org log path, so a later
+     load can confirm the file it serves matches the write we just made rather
+     than a stale copy. Local-only, best-effort: never throws. */
   function saveReceipt(rec) {
     if (!rec || !rec.filename) return rec;
     try {
@@ -1653,7 +1607,7 @@
   }
 
   root.NpjArticles = {
-    SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint, manifestEndpoint,
+    SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint, manifestEndpoint, articleEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,

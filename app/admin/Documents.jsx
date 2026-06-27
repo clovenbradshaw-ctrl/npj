@@ -456,7 +456,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
     setStatusErr(null);
     const token = window.MatrixAuth && window.MatrixAuth.token();
     if (!token) { setStatusErr("Sign in with Matrix to manage publication — the webhook re-verifies the token server-side."); return; }
-    if (next === "unpublished" && !window.confirm("Unpublish “" + m.headline + "”?\n\nIt comes off the site for everyone but admins. Every version stays in GitHub — you can republish anytime.")) return;
+    if (next === "unpublished" && !window.confirm("Unpublish “" + m.headline + "”?\n\nIt comes off the site for everyone but admins. Every version stays on archive.org — you can republish anytime.")) return;
     setStatusBusy(m.slug);
     try {
       const out = await window.NpjArticles.setArticleStatus({ slug: m.slug, status: next, actor: me, token });
@@ -464,7 +464,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
         setStatusErr("Rejected (HTTP " + out.res.status + ") — nothing changed." + (out.res.status === 401 || out.res.status === 403 ? " That Matrix account isn't authorized." : ""));
       } else {
         setPublished(p => p ? { ...p, articles: p.articles.map(x => x.slug === m.slug
-          ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "dir", logPath: "articles/" + m.slug }
+          ? { ...x, status: next, versions: (x.versions || 1) + 1, updated: new Date().toISOString().slice(0, 10), storage: "archive", logPath: (window.NpjArticles && window.NpjArticles.articleItemUrl) ? window.NpjArticles.articleItemUrl(m.slug) : ("https://archive.org/details/npj-article-" + m.slug) }
           : x) } : p);
         // flip the slug's status in the validated archive.org manifest so the
         // front page + reader hide/show it right away
@@ -802,12 +802,12 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
 
             {/* ---- the published record: one version folder per document ---- */}
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "28px 0 10px", display: "flex", alignItems: "center", gap: 7 }}>
-              <I.check style={{ fontSize: 14 }} /> Published · versioned event logs committed to GitHub
+              <I.check style={{ fontSize: 14 }} /> Published · append-only event logs on archive.org
             </div>
             {statusErr && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--reject)", border: "1px solid var(--reject)", padding: "8px 10px", marginBottom: 8, lineHeight: 1.5 }}>{statusErr}</div>}
             {!published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", gap: 7, alignItems: "center" }}><DocSpinner /> reading the public record…</div>}
             {published && pubArticles.length === 0 && published.legacy.length === 0 && (
-              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its version folder lands in articles/ and is listed here.</div>
+              <div style={{ fontFamily: "var(--serif)", fontSize: 14, color: "var(--ink-soft)" }}>Nothing published yet. When a piece ships, its archive.org item (npj-article-&lt;slug&gt;) is created and listed here.</div>
             )}
             {published && pubArticles.map(m => {
               // the row's status: unpublished (off the site) · updated (edited
@@ -817,11 +817,10 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                 : (m.versions || 1) > 1
                 ? { label: "⊛ Updated" + (m.updated ? " " + m.updated : ""), color: "var(--review)" }
                 : { label: "● Published", color: "var(--verified)" };
-              // folder docs link to their version folder; legacy single-file
-              // logs to the file's commit history
-              const logHref = m.storage === "file"
-                ? "https://github.com/clovenbradshaw-ctrl/npj/commits/main/" + (m.logPath || ("articles/" + m.slug + ".jsonl"))
-                : "https://github.com/clovenbradshaw-ctrl/npj/tree/main/" + (m.logPath || ("articles/" + m.slug));
+              // the event log lives on archive.org now — link to the item
+              const logHref = m.logPath || (window.NpjArticles && window.NpjArticles.articleItemUrl
+                ? window.NpjArticles.articleItemUrl(m.slug)
+                : "https://archive.org/details/npj-article-" + m.slug);
               const busy = statusBusy === m.slug;
               return (
                 <div key={m.slug} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 2px", display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", opacity: m.status === "unpublished" ? .6 : 1 }}>
@@ -838,11 +837,11 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
                     <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "published")} title="Republish — put it back on the site"
                       style={{ background: "var(--yellow)", fontWeight: 700, opacity: busy ? .5 : 1 }}>↺ {busy ? "Working…" : "Republish"}</button>
                   ) : (
-                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "unpublished")} title="Unpublish — take it off the site (every version stays in GitHub)"
+                    <button className="btn btn-sm" disabled={busy} onClick={() => setDocStatus(m, "unpublished")} title="Unpublish — take it off the site (every version stays on archive.org)"
                       style={{ borderColor: "var(--reject)", color: "var(--reject)", opacity: busy ? .5 : 1 }}>⊘ {busy ? "Working…" : "Unpublish"}</button>
                   ))}
                   <a href={logHref} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 10.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    <I.ext style={{ fontSize: 12 }} /> {m.storage === "file" ? "event log" : "versions"}
+                    <I.ext style={{ fontSize: 12 }} /> event log
                   </a>
                 </div>
               );

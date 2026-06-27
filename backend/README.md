@@ -11,18 +11,40 @@
 > `npj-layout.client.js`), and `chain_head.json`. Permissions also mirror to a
 > Matrix control-room state event (`press.npj.permissions`) only admins can write.
 
-## The site READS from archive.org, not GitHub
+## Article content lives on archive.org — read AND write
 
-GitHub is the write target; **the public site reads every byte from the Internet
-Archive.** The publish flow already mirrors each committed article to its own IA
-item (`Mirror to Archive.org`), and `app/record/articles.js` reads from there:
+**Articles no longer touch GitHub.** Both reading and writing happen on the
+Internet Archive (`app/record/articles.js`). GitHub still hosts the *layout +
+roles* (`site/layout.json`) — that's where the auth gate reads roles from — but
+the article event logs are archive.org-native:
 
 - **One item per article** — `npj-article-<slug>` / `<slug>.jsonl` — holds the
-  full EO event log, so `loadArticle()` fetches and folds it directly (no GitHub,
-  no API rate limit). Bodies are cached in the browser (Cache Storage, keyed by
-  the manifest version) and served stale-while-revalidate, and the whole line-up
-  is **prefetched in the background** after the front page paints, so opening any
-  piece is instant.
+  full append-only EO event log, so `loadArticle()` fetches and folds it directly
+  (no GitHub, no API rate limit). Bodies are cached in the browser (Cache Storage,
+  keyed by the manifest version) and served stale-while-revalidate, and the whole
+  line-up is **prefetched in the background** after the front page paints, so
+  opening any piece is instant.
+- **Writing appends one line** to that same file via the article webhook below —
+  publish (INS), edit (REC), unpublish/republish (REC status) and reader feedback
+  (EVA) all append to `<slug>.jsonl`. There is no version-file folder and no git
+  history anymore: the append-only log *is* the history.
+
+### `POST /webhook/site/article-npj` — append to the log (`npj-article.n8n.json`)
+
+```jsonc
+// Authorization: Bearer <matrix token>
+{ "slug": "demo-article", "line": "{\"v\":\"npj/article-eo/1\",\"op\":\"INS\",…}", "message": "publish: demo-article" }
+```
+
+The webhook re-verifies the token (admin always; editor only if the article is
+new or lists them in its genesis `assignees`), **GETs** the current
+`<slug>.jsonl`, **appends** the line, and **PUTs** it back (read-modify-append —
+IA S3 has no atomic append, so the node owns the merge). Returns
+`{ ok, url, bytes, base_sha }`. Import `npj-article.n8n.json` alongside the
+manifest workflow (same IA S3 keys, same role gate). **Concurrency:** two writers
+appending to one slug in the same instant can race (last PUT wins, one line lost)
+— fine for single-author editorial writes; a lost reader EVA can be re-sent. The
+old GitHub `publish` flow is now only used for `site/layout.json` + `chain_head`.
 - **One site manifest** — `npj-site` / `manifest.json` — is the front-page
   line-up: a compact meta row per piece (`slug, headline, dek, column, image,
   published, updated, status, versions, readMins, ver`). The front page paints

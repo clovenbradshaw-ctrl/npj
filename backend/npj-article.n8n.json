@@ -1,0 +1,246 @@
+{
+  "name": "NPJ article write (archive.org)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/article-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wf-article-webhook",
+      "name": "Article Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [2032, 1504],
+      "webhookId": "site-article",
+      "notes": "PUBLISH / EDIT (article EO log -> archive.org, append-only)\nPOST /webhook/site/article-npj\nAuthorization: Bearer <matrix token>\nBody: { slug, line, message? }   (line = ONE EO event: INS publish, REC edit, or EVA feedback)\nGate: Matrix admin always; editor only if new OR an assignee on the article's genesis.\nReads npj-article-<slug>/<slug>.jsonl from archive.org, appends `line`, PUTs it back\n(read-modify-append — IA S3 has no atomic append, so this node owns the merge).\nThe reader folds that same file. No GitHub. Returns { ok, url, bytes, base_sha }."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": { "response": { "response": { "neverError": true } } }
+      },
+      "id": "wf-article-whoami",
+      "name": "Article Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 1504],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "url": "https://raw.githubusercontent.com/clovenbradshaw-ctrl/npj/main/site/layout.json",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "cb", "value": "={{ Date.now() }}" } ] },
+        "options": { "response": { "response": { "neverError": true, "responseFormat": "text" } } }
+      },
+      "id": "wf-article-roles",
+      "name": "Article Fetch Roles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2448, 1504],
+      "continueOnFail": true,
+      "notes": "Roles still live in site/layout.json on GitHub (the layout is published there). Only the ARTICLE content moved to archive.org."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Resolve the caller's role and normalize the body.\nconst who = $('Article Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst FOUNDER = '@collective_boundary730383:hyphae.social';\nlet roles = {};\ntry {\n  const raw = $('Article Fetch Roles').first().json || {};\n  const text = typeof raw.data === 'string' ? raw.data : JSON.stringify(raw);\n  const parsed = JSON.parse(text);\n  const lay = (parsed && parsed.layout) || parsed;\n  if (lay && lay.roles && typeof lay.roles === 'object') roles = lay.roles;\n} catch (e) {}\nconst role = userId === FOUNDER ? 'admin' : (userId ? (roles[userId] || null) : null);\nconst authorized = !!userId && (role === 'admin' || role === 'editor');\n\nconst hook = $('Article Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst slug = (String(body.slug || '').replace(/[^a-z0-9-]/gi, '-').replace(/^-+|-+$/g, '').slice(0, 80)).toLowerCase();\nconst line = body.line != null ? String(body.line).replace(/\\r?\\n/g, ' ').trim() : '';\nconst valid = !!(slug && line);\nconst identifier = ('npj-article-' + slug).slice(0, 90);\nconst filename = slug + '.jsonl';\nreturn [{ json: {\n  authorized, valid, user_id: userId, role, slug, line, identifier, filename, isAdmin: role === 'admin',\n  downloadUrl: 'https://archive.org/download/' + identifier + '/' + filename,\n  error: !authorized ? 'unauthorized' : (!valid ? 'missing slug or line' : null)\n} }];"
+      },
+      "id": "wf-article-authorize",
+      "name": "Article Authorize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2656, 1504]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c-article-authz",
+              "leftValue": "={{ String(($json.authorized === true) && ($json.valid === true)) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf-article-authorized",
+      "name": "Article Authorized?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2864, 1504]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: ($json.error || 'unauthorized'), user: $json.user_id || null, role: $json.role || null }) }}",
+        "options": {
+          "responseCode": 401,
+          "responseHeaders": { "entries": [ { "name": "Access-Control-Allow-Origin", "value": "*" } ] }
+        }
+      },
+      "id": "wf-article-unauth",
+      "name": "Respond Article Unauthorized",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3072, 1696]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.downloadUrl }}",
+        "sendQuery": true,
+        "queryParameters": { "parameters": [ { "name": "cb", "value": "={{ Date.now() }}" } ] },
+        "options": { "response": { "response": { "neverError": true, "responseFormat": "text" } } }
+      },
+      "id": "wf-article-fetch",
+      "name": "Article Fetch Existing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3072, 1504],
+      "continueOnFail": true,
+      "notes": "Current append-only log (404 -> empty for a brand-new article)."
+    },
+    {
+      "parameters": {
+        "jsCode": "// Read-modify-append: existing log + the new line. Enforce the per-article\n// assignee gate (admin always; editor only if the article is new or lists them).\nfunction djb2(line){ let h=5381; for(let i=0;i<line.length;i++) h=((h<<5)+h+line.charCodeAt(i))>>>0; return ('0000000'+h.toString(16)).slice(-7); }\nconst meta = $('Article Authorize').first().json || {};\nconst resp = $input.first().json || {};\nlet existing = '';\nif (resp && typeof resp.data === 'string') existing = resp.data;\nelse if (typeof resp.body === 'string') existing = resp.body;\nelse if (typeof resp === 'string') existing = resp;\n// a 404/HTML error page is not a log — treat anything that isn't NDJSON-ish as empty\nif (existing && existing.trim()[0] !== '{') existing = '';\n\n// assignee gate for a non-admin editor on an EXISTING article\nif (!meta.isAdmin && existing) {\n  let assignees = [];\n  try { const genesis = JSON.parse(existing.split('\\n').find(l => l.trim()) || '{}'); const op = genesis.operand || {}; assignees = Array.isArray(op.assignees) ? op.assignees : []; } catch (e) {}\n  if (assignees.indexOf(meta.user_id) < 0) return [{ json: { __forbidden: true, user_id: meta.user_id, role: meta.role, slug: meta.slug, error: 'not an assignee on this article' } }];\n}\n\nconst prev = existing ? (existing.endsWith('\\n') ? existing : existing + '\\n') : '';\nconst finalText = prev + meta.line + '\\n';\nreturn [{ json: {\n  __forbidden: false, identifier: meta.identifier, filename: meta.filename,\n  user_id: meta.user_id, role: meta.role, bytes: finalText.length, base_sha: djb2(meta.line)\n}, binary: { data: { data: Buffer.from(finalText, 'utf8').toString('base64'), mimeType: 'application/x-ndjson', fileName: meta.filename } } }];"
+      },
+      "id": "wf-article-build",
+      "name": "Article Build",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3280, 1504]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "c-article-forbid",
+              "leftValue": "={{ String($json.__forbidden === true) }}",
+              "rightValue": "true",
+              "operator": { "type": "string", "operation": "equals", "name": "filter.operator.equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "wf-article-forbidden",
+      "name": "Article Forbidden?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3488, 1504]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: ($json.error || 'forbidden'), user: $json.user_id || null, role: $json.role || null, slug: $json.slug || null }) }}",
+        "options": {
+          "responseCode": 403,
+          "responseHeaders": { "entries": [ { "name": "Access-Control-Allow-Origin", "value": "*" } ] }
+        }
+      },
+      "id": "wf-article-forbid-resp",
+      "name": "Respond Article Forbidden",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [3696, 1696]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "={{ 'https://s3.us.archive.org/' + $json.identifier + '/' + $json.filename }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "authorization", "value": "=LOW rXhRt48QIJvmbSXS:cEjL4BtX1PElGli9" },
+            { "name": "x-amz-auto-make-bucket", "value": "1" },
+            { "name": "x-archive-meta-mediatype", "value": "texts" },
+            { "name": "x-archive-meta-subject", "value": "npj-article" },
+            { "name": "x-archive-meta-title", "value": "={{ 'NPJ article: ' + $json.identifier.replace(/^npj-article-/, '') }}" },
+            { "name": "x-archive-meta01-collection", "value": "opensource" },
+            { "name": "Content-Type", "value": "application/x-ndjson" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {
+          "response": { "response": { "fullResponse": true, "neverError": true } },
+          "timeout": 120000
+        }
+      },
+      "id": "wf-article-put",
+      "name": "Article IA Put",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3696, 1504],
+      "continueOnFail": true,
+      "notes": "Reuses the IA S3 keys (same as the publish/mirror flows). Overwrites the item's <slug>.jsonl with the appended log."
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $input.first().json || {};\nconst built = $('Article Build').first().json || {};\nconst status = Number(r.statusCode || 0) || null;\nconst ok = !r.error && (!status || status < 400);\nconst url = ok ? ('https://archive.org/download/' + built.identifier + '/' + built.filename) : null;\nreturn [{ json: {\n  ok, statusCode: ok ? 200 : (status || 502), url,\n  identifier: built.identifier, filename: built.filename, bytes: built.bytes, base_sha: built.base_sha,\n  user: built.user_id, role: built.role,\n  error: ok ? null : ((typeof r.error === 'string' ? r.error : (r.error && r.error.message)) || ('archive.org PUT failed (' + (status || '?') + ')'))\n} }];"
+      },
+      "id": "wf-article-result",
+      "name": "Article Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3904, 1504]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": { "entries": [ { "name": "Access-Control-Allow-Origin", "value": "*" } ] }
+        }
+      },
+      "id": "wf-article-ok",
+      "name": "Article OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [4112, 1504]
+    }
+  ],
+  "connections": {
+    "Article Webhook": { "main": [[{ "node": "Article Whoami", "type": "main", "index": 0 }]] },
+    "Article Whoami": { "main": [[{ "node": "Article Fetch Roles", "type": "main", "index": 0 }]] },
+    "Article Fetch Roles": { "main": [[{ "node": "Article Authorize", "type": "main", "index": 0 }]] },
+    "Article Authorize": { "main": [[{ "node": "Article Authorized?", "type": "main", "index": 0 }]] },
+    "Article Authorized?": {
+      "main": [
+        [{ "node": "Article Fetch Existing", "type": "main", "index": 0 }],
+        [{ "node": "Respond Article Unauthorized", "type": "main", "index": 0 }]
+      ]
+    },
+    "Article Fetch Existing": { "main": [[{ "node": "Article Build", "type": "main", "index": 0 }]] },
+    "Article Build": { "main": [[{ "node": "Article Forbidden?", "type": "main", "index": 0 }]] },
+    "Article Forbidden?": {
+      "main": [
+        [{ "node": "Respond Article Forbidden", "type": "main", "index": 0 }],
+        [{ "node": "Article IA Put", "type": "main", "index": 0 }]
+      ]
+    },
+    "Article IA Put": { "main": [[{ "node": "Article Result", "type": "main", "index": 0 }]] },
+    "Article Result": { "main": [[{ "node": "Article OK", "type": "main", "index": 0 }]] }
+  },
+  "pinData": {},
+  "meta": { "templateCredsSetupCompleted": true }
+}
