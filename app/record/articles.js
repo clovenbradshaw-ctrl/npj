@@ -1532,18 +1532,36 @@
   // ever reads archive.org) still works. Deploying npj-article.n8n.json later
   // makes this drop GitHub entirely — no client change needed. Either way, a
   // successful write drops the slug's cached body so the next read is fresh.
+  /* fetch with a hard timeout. A bare fetch() never resolves if the webhook
+     accepts the connection then stalls mid read-modify-append — at the publish
+     boundary that hangs the whole commit on the "Commit the EO event log" spinner
+     with no way out (the step never leaves "active", and "Retry publish" never
+     appears). Abort after `ms` so the commit leg is bounded too; the AbortError
+     surfaces as a normal fetch rejection that postArticle's caller (commit()) and
+     the fallback below already handle. Mirrors fetchT in media-store.js. */
+  function postT(url, opts, ms) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(timer));
+  }
   async function postArticle(bodyObj, token) {
     const auth = { "Content-Type": "application/json", "Authorization": "Bearer " + token };
+    // The webhook reads the current log, appends, and PUTs it back to archive.org,
+    // so a real commit can take a while — give it 120s before treating silence as
+    // a failure (matches the media-freeze budget).
+    const COMMIT_MS = 120000;
     let res = null;
-    try { res = await fetch(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }); }
+    try { res = await postT(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }, COMMIT_MS); }
     catch (e) { res = null; }
     if (!res || res.status === 404) {
       // legacy fallback: the deployed publish webhook (mirror:true puts the full
-      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article)
-      res = await fetch(publishEndpoint(), {
+      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article).
+      // Bounded the same way — an unanswered fallback used to throw straight up out
+      // of postArticle with no timeout, so a stalled legacy webhook hung the commit.
+      res = await postT(publishEndpoint(), {
         method: "POST", headers: auth,
         body: JSON.stringify({ filename: filenameFor(bodyObj.slug), mode: "append", contentRaw: bodyObj.line + "\n", message: bodyObj.message, mirror: true })
-      });
+      }, COMMIT_MS);
     }
     if (res && res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
     return res;
