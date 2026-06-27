@@ -1300,6 +1300,14 @@
     }
     const actor = o.actor || null;
     const mxids = (arr) => (Array.isArray(arr) ? arr : []).map(s => String(s || "").trim()).filter(s => /^@[^:]+:[^:]+$/.test(s));
+    // Editors are an outward-facing CREDIT, not access control (assignees gate
+    // edits). So an editor can be listed by a plain NAME as well as a Matrix id —
+    // each entry is just trimmed, collapsed, length-clamped and capped in count.
+    // (authors stay mxid-only above, so attribution always resolves to an account.)
+    const credits = (arr) => (Array.isArray(arr) ? arr : [])
+      .map(s => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, 80))
+      .filter(Boolean)
+      .slice(0, 16);
     // Byline: authors default to the publisher; "Unsigned" is an explicit override
     // that ships with NO credited author. Editors are an optional separate credit.
     // Either way the ACTOR stays an assignee, so they can always edit after publish.
@@ -1317,7 +1325,7 @@
         ? window.NpjDefinitions.normList(c.definitions)
         : (Array.isArray(c.definitions) ? c.definitions : []),
       authors: unsigned ? [] : authors,
-      editors: mxids(o.editors),
+      editors: credits(o.editors),
       byline: unsigned ? "Unsigned" : (typeof o.byline === "string" ? o.byline : ""),
       assignees: actor ? [actor] : [], // the publisher can edit after publish; admin always can
       published: today(),

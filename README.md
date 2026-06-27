@@ -209,8 +209,9 @@ public profile — a display **name** and a **≤250-character "About me."**
   `byline`), so the credit is part of the permanent, auditable log.
 - **Names pull from the contributor's account.** A byline name defaults to the
   contributor's **Matrix display name** (`app/identity/profiles.js` → the profile API) —
-  the byline is right without anyone typing it. Editor names are optional; a
-  byline can be **Unsigned**.
+  the byline is right without anyone typing it. Editor names are optional and can
+  be listed as a **plain name** (for someone with no account) or a Matrix id —
+  separate several with commas; a byline can be **Unsigned**.
 - **"About me" is the contributor's to set.** From **Documents → "Your byline &
   About me,"** any signed-in contributor edits their name + a 250-char bio. It
   saves to **their Matrix account** (`press.npj.profile`), so it survives a
