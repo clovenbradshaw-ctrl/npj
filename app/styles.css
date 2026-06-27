@@ -266,7 +266,15 @@ a { color: inherit; }
   border-width: 0 0 0 1.5px;
   box-shadow: -18px 0 44px rgba(22,20,13,.13);
   animation: npj-drawer-in .32s cubic-bezier(.22,.61,.36,1);
+  /* Sit BELOW the sticky header (masthead z 1600, control bar z 1500) so the
+     full-height side drawer never paints over the top chrome. Still above the
+     reading column. */
+  z-index: 1400;
 }
+/* The masthead band owns a stacking context above the docked reader drawer, so a
+   full-height citation/footnote/grounding panel tucks under it instead of paving
+   over the logo + tagline at the top of the page. */
+.npj-masthead { position: relative; z-index: 1600; }
 @keyframes npj-drawer-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
 
 /* ---- footnote inline preview (FootnotePop) — the Substack hover/tap card ----

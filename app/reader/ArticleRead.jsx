@@ -453,12 +453,16 @@ function GroundingPop({ data, onEnter, onLeave, onClose, onExpand, dockTop }) {
 // ✕ / Esc / a click on the margin exits; the article underneath is untouched.
 // `stage` is { kind:"ground", tok } or { kind:"note", num, text, key }.
 function MainStage({ stage, onClose, onJumpNote }) {
+  // MainStage is mounted unconditionally (it returns null until a stage opens),
+  // so the body scroll-lock MUST be gated on `stage` — otherwise it fires on the
+  // reader's first paint and freezes the whole page even though no overlay is up.
   useEffect(() => {
+    if (!stage) return;
     const onKey = (e) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
     const prev = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
-  }, [onClose]);
+  }, [onClose, stage]);
   if (!stage) return null;
   const isNote = stage.kind === "note";
   const d = isNote ? null : groundingDetail(stage.tok);
