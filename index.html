@@ -410,9 +410,8 @@ function App() {
         readMins: window.NpjArticles.readMins(r.body),
         versions: [{ sha: r.sha, ts, author: me, message: r.note || "Merged a suggestion", headline: A.headline || "", dek: A.dek || "", text: window.NpjArticles.plainText(r.body) }, ...(A.versions || [])] };
       window.NPJ.ARTICLE = updated; setArticleRev(rv => rv + 1);
-      // a merged suggestion changes the body — push the new version into the
-      // archive.org manifest so the front page + cache reflect it
-      try { const tk = fbToken(); if (tk) window.NpjArticles.syncArticleToManifest(updated, tk); } catch (e) {}
+      // a merged suggestion appended a REC line to the article's GitHub log —
+      // refresh the front page from the git-tree so the new version shows
       window.NpjArticles.loadFront().then(() => setFrontRev(rv => rv + 1)).catch(() => {});
     }
     return r;
@@ -570,12 +569,10 @@ function App() {
           me={me} onHome={goHome} onNewsroom={goNewsroom}
           onEdited={(a) => {
             window.NPJ.ARTICLE = a; setArticleRev(r => r + 1);
-            // every post-publish edit, revert, unpublish/republish folds through
-            // here — sync the changed piece into the validated archive.org manifest
-            // (the line-up the front page + reader read) so the change shows at once
-            try { const tk = fbToken(); if (tk) window.NpjArticles.syncArticleToManifest(a, tk); } catch (e) {}
-            // reflect the edit on the front page right away, even before the
-            // archive listing catches up
+            // every post-publish edit, revert, unpublish/republish appended a REC
+            // line to the article's GitHub log — refresh the front page from the
+            // git-tree, and reflect the change at once even before the tree/CDN
+            // catches up
             const reflect = () => { window.NpjArticles.patchFrontStatus(a.slug, a.status); setFrontRev(r => r + 1); };
             window.NpjArticles.loadFront().then(reflect).catch(reflect);
           }} />

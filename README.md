@@ -49,31 +49,34 @@ founding admin curates the site and grows the network from there.
 
 ## Articles are append-only EO event logs — one folder of version files per document
 
-Each document owns a folder, and every event lands as a **new timestamped
-file** inside it:
+Each document is **one append-only file** — every event is one more line:
 
 ```
-articles/<slug>/20260610T231501123Z-ins-x7k2.jsonl   ← the publish (INS, the whole piece)
-articles/<slug>/20260611T010203456Z-rec-9bd1.jsonl   ← an edit (REC, just what changed)
+articles/<slug>.jsonl
+  {"op":"INS", …}   ← the publish (the whole piece: headline, dek, body, sources, authors)
+  {"op":"REC", …}   ← an edit (just what changed)
+  {"op":"REC", "operand":{"status":"unpublished"}}   ← unpublish (the act is itself recorded)
 ```
 
-Publishing commits one `INS` event file carrying the whole piece (headline,
-dek, body blocks, span-bound sources, authors, assignees). Every edit after
-publish commits one more `REC` file into the same folder. **No commit ever
-updates an existing file** — the old single-file `append` mode rode GitHub's
-update-with-SHA call, which kept rejecting commits; create-only version files
-can't conflict. The folder is the article's complete, auditable change
-history, and uploading the same document again simply lands a newer `INS`
-file: it becomes the current version and every earlier version stays on the
-shelf. Pre-existing single-file logs (`articles/<slug>.jsonl`) are still read,
-folding in before the folder's files.
+Publishing commits one `INS` line carrying the whole piece (headline, dek, body
+blocks, span-bound sources, authors, assignees). Every edit after publish
+appends one more `REC` line to the same file. The append is owned **server-side**
+by the Matrix-gated `publish-npj` webhook (it reads the current file, appends the
+line, and commits it back to GitHub) — so the per-article **assignee gate** runs
+against the genesis event on the server, not just in the UI, and the file is the
+article's complete, auditable change history. Uploading the same document again
+appends a newer `INS`: the fold restarts from it and every earlier version stays
+in the log (and in git history).
 
-The front page lists the record straight from GitHub (one git-tree call), the
-reader folds a document's version files into the formatted article
-(`#article;read=<slug>` is the share link), and the version badge opens a
-word-level diff between any two events. **Edit after publish** is gated to the
-admin and the article's `assignees` (the publisher by default) — enforced in
-the n8n webhook against the document's genesis event, not just in the UI.
+The front page lists the record straight from GitHub (**one git-tree call** over
+`articles/*.jsonl` — the directory *is* the index; there is no separate
+manifest), the reader folds a document's log into the formatted article
+(`#article;read=<slug>` is the share link, served from the GitHub raw CDN), and
+the version badge opens a word-level diff between any two events. **Edit after
+publish** is gated to the admin and the article's `assignees` (the publisher by
+default). *(Only the article text + line-up live in GitHub; photos still freeze
+to archive.org at publish as the public image host — see “Images ride
+archive.org”.)*
 
 **Unpublish never deletes — it just takes the piece off the site.** An admin
 can do it from the article control bar or straight from its row under
@@ -362,11 +365,17 @@ way; inside a code/verse block a Return is a literal newline instead.
 
 **Preview is the real thing, not a mock.** The editor's **Preview** button folds
 the live draft through the *same* builder that publishing uses
-(`NpjArticles.genesisFromContent`) and hands the result to the reader's own
-renderer (`ArticleRead` in preview mode) — same Header, same body blocks, same
-paper page. So what you see in Preview is byte-for-byte what ships: paragraph
-spacing, soft line breaks, images, the byline and the sources footer. Esc (or
-✕ Close) drops you back in the editor.
+(`NpjArticles.genesisFromContent`, with `{preview:true}` so not-yet-uploaded
+photos still show, badged) and renders that block model in a dedicated, standalone
+preview (`app/editor/PreviewScreen.jsx` → `window.NpjPreview`) — same Header, body
+blocks, byline and sources footer, on the paper page. Two guarantees the preview
+is built to hold: it shares **one fold** with publish (so it can never drift from
+the editor, and a citation marker's number never leaks into prose — the fold
+strips it; a number only ever paints as an explicit chip behind the Grounding
+toggle), and it **draws every photo straight from the Matrix media-store** (the
+shared `MediaImg`/`resolveDisplay` path auth-fetches the bytes to a `blob:` URL),
+so what you placed is what you see. So what you see in Preview is byte-for-byte
+what ships. Esc (or ✕ Close) drops you back in the editor.
 
 **Transparency — the grounding, painted onto the prose.** Both the **Preview**
 overlay and the published reader carry a **Transparency** toggle that colours

@@ -1,0 +1,118 @@
+/* front-tree.test.js — the GitHub read path's front-page listing.
+ *
+ * The published record lives in GitHub: one append-only file per document
+ * (articles/<slug>.jsonl), and the front-page line-up is ONE git-tree call that
+ * lists articles/*.jsonl. There is no archive.org and no separate manifest —
+ * the repository directory IS the index. These tests stub fetch so listArticles
+ * runs in node, and guard:
+ *
+ *   • a full EO log (INS + REC) folds to the current article + its history.
+ *   • listArticles turns the git-tree + raw bodies into sorted front-page metas.
+ *   • a REC status flip folds through to the meta (unpublished survives).
+ *   • dropFromFront drops a slug from the in-memory index and promotes the next.
+ *
+ * `node --test`.
+ */
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const A = require("../app/record/articles.js");
+
+function logFor(slug, headline, { dek, status, published } = {}) {
+  const ins = A.genesisLine({
+    slug, headline, dek: dek || "A subtitle", column: "Investigations",
+    tags: ["bench"], authors: ["@a:h"], published: published || "2026-06-01",
+    body: [{ type: "p", tokens: ["Lorem ipsum dolor sit amet, the argument begins."] }]
+  }, "@a:h");
+  let text = ins + "\n";
+  if (status) text += A.editLine(slug, { status }, "@a:h", "status flip") + "\n";
+  return text;
+}
+
+test("a full GitHub log folds to the current article + its versions", () => {
+  const text = logFor("demo-article", "Demo headline") +
+    A.editLine("demo-article", { dek: "An edited subtitle" }, "@a:h", "tightened the dek") + "\n";
+  const { article, versions } = A.foldLog(text);
+  assert.ok(article, "should fold to an article");
+  assert.equal(article.slug, "demo-article");
+  assert.equal(article.dek, "An edited subtitle", "the REC edit wins");
+  assert.equal(versions.length, 2, "INS + REC both recorded");
+  assert.ok(article.base_sha && article.base_sha !== "0000000", "carries a version id");
+});
+
+// Stub a GitHub repo: one git-tree listing + a raw body per document.
+function stubGitHub(bodies) {
+  const tree = { tree: Object.keys(bodies).map((slug, i) => ({
+    type: "blob", path: "articles/" + slug + ".jsonl", sha: "sha" + i
+  })) };
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    if (/git\/trees\/main/.test(url)) return { ok: true, status: 200, json: async () => tree };
+    const m = /articles\/([^/?]+)\.jsonl/.exec(url);
+    const slug = m && decodeURIComponent(m[1]);
+    if (slug && bodies[slug] != null) return { ok: true, status: 200, text: async () => bodies[slug] };
+    return { ok: false, status: 404, text: async () => "" };
+  };
+  return () => { if (prev === undefined) delete globalThis.fetch; else globalThis.fetch = prev; };
+}
+
+test("listArticles folds the git-tree + raw bodies into sorted front-page metas", async () => {
+  const restore = stubGitHub({
+    "older-piece": logFor("older-piece", "Older piece", { published: "2026-05-01" }),
+    "newer-piece": logFor("newer-piece", "Newer piece", { published: "2026-06-20" })
+  });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 2, "both documents listed");
+    assert.equal(metas[0].slug, "newer-piece", "sorted newest-first by published date");
+    assert.equal(metas[0].headline, "Newer piece");
+    assert.equal(metas[0].status, "published");
+    assert.equal(metas[0].storage, "github");
+    assert.match(metas[0].logPath, /github\.com\/.*\/blob\/main\/articles\/newer-piece\.jsonl$/);
+  } finally { restore(); }
+});
+
+test("a REC status flip folds through to the meta — unpublished survives", async () => {
+  const restore = stubGitHub({
+    "hidden-piece": logFor("hidden-piece", "Hidden piece", { status: "unpublished" })
+  });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 1);
+    assert.equal(metas[0].status, "unpublished", "the unpublish REC wins, never published-by-accident");
+  } finally { restore(); }
+});
+
+test("listArticles falls back to the cached index when the listing is down", async () => {
+  // git-tree throws (rate limit / offline) → no cache in node → empty, never throws
+  const prev = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("offline"); };
+  try {
+    const metas = await A.listArticles();
+    assert.deepEqual(metas, [], "a listing failure paints nothing rather than crashing");
+  } finally { if (prev === undefined) delete globalThis.fetch; else globalThis.fetch = prev; }
+});
+
+test("dropFromFront removes a slug and promotes the next piece to lead", () => {
+  const prevWin = globalThis.window;
+  globalThis.window = globalThis;
+  globalThis.NPJ = { FRONT: {
+    lead: { slug: "junk-1", headline: "Junk 1" },
+    secondary: [
+      { slug: "junk-2", headline: "Junk 2" },
+      { slug: "real", headline: "Real piece" }
+    ]
+  } };
+  try {
+    A.dropFromFront(["junk-1", "junk-2"]);
+    const F = globalThis.NPJ.FRONT;
+    assert.equal(F.lead.slug, "real", "the surviving piece is promoted to lead");
+    assert.equal(F.secondary.length, 0, "no junk left in the secondary line-up");
+
+    A.dropFromFront("real");
+    assert.equal(globalThis.NPJ.FRONT.lead, null, "lead clears when nothing survives");
+    assert.equal(globalThis.NPJ.FRONT.secondary.length, 0);
+  } finally {
+    if (prevWin === undefined) delete globalThis.window; else globalThis.window = prevWin;
+    delete globalThis.NPJ;
+  }
+});

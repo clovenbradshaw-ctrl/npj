@@ -41,49 +41,25 @@
   const SCHEMA = "npj/article-eo/1";
   const DIR = "articles";
   const OWNER_REPO = "clovenbradshaw-ctrl/npj";
-  const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main"; // kept for rawUrl() (legacy/debug links only — the reader no longer fetches GitHub)
-  const IDX_CACHE_KEY = "npj_articles_idx_v4"; // v4: bumped with the manifest kick so the last-resort index can't serve dropped pieces
-  const FRONT_CACHE_KEY = "npj_front_v2"; // last front-page line-up; v2 bumped with the manifest kick so no stale junk flashes on first paint
+  const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
+  const API_TREE = "https://api.github.com/repos/" + OWNER_REPO + "/git/trees/main?recursive=1";
+  const BLOB_BASE = "https://github.com/" + OWNER_REPO + "/blob/main"; // human-facing "view the log" link
+  const IDX_CACHE_KEY = "npj_articles_idx_gh1"; // GitHub model: entries keyed by slug, cache-busted by blob sha
+  const FRONT_CACHE_KEY = "npj_front_gh1";       // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
+  const COMMIT_MS = 120000; // a stalled publish webhook is aborted after this, never left hanging
 
-  /* ---------------- archive.org is the read path ----------------
-     The SITE reads its content from the Internet Archive, never from GitHub.
-     GitHub stays the write target (the publish webhook commits the EO log and
-     the n8n flow mirrors it to archive.org), but every byte a reader sees is
-     served from IA:
-
-       • one item per article — npj-article-<slug> / <slug>.jsonl — holding the
-         full EO event log (folds to the current article + its version history).
-       • one site manifest — npj-site / manifest.json — the line-up the front
-         page paints from: a compact meta row per published piece.
-
-     VALIDATION. The reader trusts a slug because it is listed in OUR manifest,
-     not because it carries a subject tag. Anyone can upload an item tagged
-     `npj-article`, but only an authorized admin/editor can write the manifest
-     (the manifest webhook re-verifies a Matrix token, then PUTs with our IA S3
-     keys to the npj-site item we own). So a stranger's self-tagged upload never
-     enters the site. The `npj-article` tag search below is ONLY a bootstrap
-     fallback for the window before the first manifest exists; to harden even
-     that, set window.NPJ.ARCHIVE.articleQuery = 'uploader:"you@example.com"'. */
-  const IA = "https://archive.org";
-  const ARTICLE_TAG = "npj-article";
-  const ARTICLE_ITEM = (slug) => "npj-article-" + slug;
-  const ARTICLE_FILE = (slug) => slug + ".jsonl";
-  const articleItemUrl = (slug) => IA + "/details/" + encodeURIComponent(ARTICLE_ITEM(slug));
-  const articleDownloadUrl = (slug) => IA + "/download/" + encodeURIComponent(ARTICLE_ITEM(slug)) + "/" + encodeURIComponent(ARTICLE_FILE(slug));
-  const SITE_ITEM = "npj-site";
-  const MANIFEST_FILE = "manifest.json";
-  // Bumped 1→2 to KICK the old line-up: a manifest stamped with an earlier
-  // schema is distrusted on read (see fetchManifest/loadManifestCache), so a
-  // stale manifest carrying since-removed/junk pieces no longer paints the front
-  // page, and every client's locally-cached copy (new cache key) is dropped. The
-  // admin then writes a fresh v2 manifest (publish, or "Remove from the record"
-  // in Documents) holding only the real line-up.
-  const MANIFEST_SCHEMA = "npj/site-manifest/2";
-  const MANIFEST_CACHE_KEY = "npj_site_manifest_v2"; // last good manifest — instant front paint, offline fallback
-  const BODY_CACHE = "npj-article-bodies-v1";         // Cache Storage bucket of folded-log text, keyed by slug + version
-  const hasCaches = () => (typeof caches !== "undefined" && caches && caches.open);
+  /* ---------------- GitHub is the home of the record ----------------
+     One append-only file per document — articles/<slug>.jsonl — committed
+     through the Matrix-gated /site/publish-npj webhook: it re-verifies the
+     token, reads the current file, appends the line, and commits it back to
+     GitHub (the per-article assignee gate runs server-side against the genesis
+     event). The front page lists articles/*.jsonl in ONE git-tree call; each
+     article body reads from the GitHub raw CDN. No archive.org, no separate
+     manifest — the repository directory IS the index, and the commit IS the
+     record. (Media still freezes to a public host at publish; only the article
+     TEXT + line-up live here.) */
 
   const nowIso = () => new Date().toISOString();
   const today = () => nowIso().slice(0, 10);
@@ -93,43 +69,10 @@
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.endpoint) return c.endpoint; } catch (e) {}
     return DEFAULT_ENDPOINT;
   }
-  // The manifest writer — same n8n host as publish, the /site/manifest-npj path.
-  // A configured override wins; otherwise it's derived from the publish endpoint
-  // (so a self-hosted instance only needs to set one URL).
-  function manifestEndpoint() {
-    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.manifestEndpoint) return c.manifestEndpoint; } catch (e) {}
-    const m = String(publishEndpoint()).match(/^(https?:\/\/[^/]+\/webhook)\//i);
-    return m ? m[1] + "/site/manifest-npj" : DEFAULT_ENDPOINT.replace(/\/[^/]*$/, "/manifest-npj");
-  }
-  // legacy single-file log — still read, never written to anymore
+  // one append-only log per document
   const filenameFor = (slug) => DIR + "/" + slug + ".jsonl";
-  const rawUrl = (slug) => RAW_BASE + "/" + filenameFor(slug);
-  // the document's folder of version files
-  const dirFor = (slug) => DIR + "/" + slug;
-  /* One event = one NEW file: <UTC stamp>-<op>-<entropy>.jsonl. The stamp makes
-     lexical order chronological; the random tail means two writers landing in
-     the same millisecond create two files instead of one clobbering the other. */
-  // op tag in the filename: ins (publish), rec (edit), eva (reader feedback —
-  // a span-anchored suggestion/comment that folds as a no-op for the article
-  // state but rides the same auditable folder). Anything else lands as rec.
-  const OP_TAGS = { ins: "ins", rec: "rec", eva: "eva" };
-  function versionFilenameFor(slug, op) {
-    const stamp = nowIso().replace(/[-:.]/g, ""); // 2026-06-10T23:15:01.123Z → 20260610T231501123Z
-    const tail = ("000" + Math.floor(Math.random() * 1679616).toString(36)).slice(-4);
-    return dirFor(slug) + "/" + stamp + "-" + (OP_TAGS[String(op).toLowerCase()] || "rec") + "-" + tail + ".jsonl";
-  }
-  /* REJECT stray per-event archive items from the old write path. A real
-     document is ONE item — npj-article-<slug> — holding a single append-only
-     <slug>.jsonl. An earlier publish path mistakenly created one item PER EVENT,
-     named after the event's version file: npj-article-<slug>-<UTCstamp>z-<op>-<tail>
-     (e.g. npj-article-draft-benches-titles-20260619t181216997z-ins-13at). The tag
-     search then surfaced every INS/REC as its own "article", so the same piece
-     repeated across the front page. We have versioned past that scheme: a slug
-     carrying that <stamp>z-<op>-<tail> tail is not a document, and the reader drops
-     it everywhere — so this junk never paints again, even with no manifest to
-     override it. The tail op set is intentionally broad (ins|rec|eva|def|seg). */
-  const STALE_EVENT_SLUG = /-\d{8}t\d{4,}z-(?:ins|rec|eva|def|seg)-[a-z0-9]{2,8}$/i;
-  function isStaleEventSlug(slug) { return STALE_EVENT_SLUG.test(String(slug || "")); }
+  const rawUrl = (slug) => RAW_BASE + "/" + filenameFor(slug);   // raw CDN — the reader fetches this
+  const blobUrl = (slug) => BLOB_BASE + "/" + filenameFor(slug); // GitHub UI — the "view the log" link
 
   /* djb2 → 7 hex chars. Not crypto — just a stable, human-quotable version id
      derived from the event line itself, so every reader derives the same one. */
@@ -477,225 +420,84 @@
     } catch (e) {}
   }
 
-  /* ===================== archive.org read layer =====================
-     The published record lives entirely on archive.org now — GitHub is no
-     longer read OR written for article content (it still hosts the layout +
-     roles). loadArticle/listArticles/loadFront/fetchEvents below all read from
-     IA; the write path (publishGenesis/appendEdit/…) appends to the same IA
-     log. The earlier GitHub tree/contents/raw readers were removed with that
-     cutover. */
+  /* ===================== GitHub read layer =====================
+     Article bodies read from the raw CDN; the front-page line-up is ONE git-tree
+     call listing articles/*.jsonl. GitHub is the whole record now — there is no
+     archive.org read and no separate manifest. */
 
-  // —— a per-slug body cache (Cache Storage), served stale-while-revalidate ——
-  // The folded-log text for each article, keyed by slug, tagged with the
-  // manifest version (base_sha) it was fetched at. A hit whose version matches
-  // the manifest is current — returned with no network at all; a hit with an
-  // unknown/older version is served instantly and refreshed in the background.
-  function bodyKey(slug) { return "/__npjbody__/" + encodeURIComponent(slug); }
-  async function bodyCacheGet(slug) {
-    if (!hasCaches()) return null;
+  // The cb param busts the raw CDN's ~5 min cache (including cached 404s) so a
+  // fresh commit reads back immediately.
+  async function fetchRaw(path) {
     try {
-      const cache = await caches.open(BODY_CACHE);
-      const hit = await cache.match(bodyKey(slug));
-      if (!hit) return null;
-      return { text: await hit.text(), ver: hit.headers.get("X-Ver") || "" };
-    } catch (e) { return null; }
-  }
-  async function bodyCachePut(slug, text, ver) {
-    if (!hasCaches() || text == null) return;
-    try {
-      const cache = await caches.open(BODY_CACHE);
-      await cache.put(bodyKey(slug), new Response(text, { headers: { "Content-Type": "application/x-ndjson", "X-Ver": ver || "" } }));
-    } catch (e) {}
-  }
-  // In-flight de-dupe: loadArticle, the front-page fold and the prefetch can all
-  // ask for the same slug at once — without this they fire 4-5 concurrent GETs
-  // for one file and archive.org answers 503 (rate-limited). One shared request
-  // per slug fixes that; later callers await the same promise.
-  const inflightBody = Object.create(null);
-  function fetchArchiveNet(slug, ver) {
-    if (inflightBody[slug]) return inflightBody[slug];
-    const p = (async () => {
-      try {
-        const res = await fetch(articleDownloadUrl(slug) + "?cb=" + Date.now(), { cache: "no-store" });
-        if (!res.ok) return null; // 404 = not published yet; 503 = archive busy — caller serves cache/empty, retries next pass
-        const text = await res.text();
-        bodyCachePut(slug, text, ver);
-        return text;
-      } catch (e) { return null; }
-    })();
-    inflightBody[slug] = p;
-    p.then(() => { delete inflightBody[slug]; }, () => { delete inflightBody[slug]; });
-    return p;
-  }
-  // The article's full event log, cache-first. `ver` (the manifest's per-slug
-  // version) decides whether a cache hit is trusted as current.
-  async function fetchArchiveText(slug, ver) {
-    const cached = await bodyCacheGet(slug);
-    if (cached) {
-      if (ver && cached.ver === ver) return cached.text;            // manifest confirms current
-      if (!ver) { fetchArchiveNet(slug, "").catch(() => {}); return cached.text; } // unknown → serve stale, refresh
-      // ver mismatch → edited since we cached; fall through to the network
-    }
-    return await fetchArchiveNet(slug, ver);
-  }
-
-  // —— the site manifest (the validated line-up) ——
-  // A manifest is trusted ONLY when stamped with the current schema. An older
-  // (or unstamped) manifest is treated as absent — that's what "kicks" a stale
-  // line-up after a version bump, on both the read path and the local cache.
-  function manifestOk(m) { return !!(m && m.v === MANIFEST_SCHEMA && Array.isArray(m.articles)); }
-  function loadManifestCache() { try { const m = JSON.parse(localStorage.getItem(MANIFEST_CACHE_KEY) || "null"); return manifestOk(m) ? m : null; } catch (e) { return null; } }
-  function saveManifestCache(m) { try { localStorage.setItem(MANIFEST_CACHE_KEY, JSON.stringify(m)); } catch (e) {} }
-  async function fetchManifest() {
-    try {
-      const res = await fetch(IA + "/download/" + encodeURIComponent(SITE_ITEM) + "/" + encodeURIComponent(MANIFEST_FILE) + "?cb=" + Date.now(), { cache: "no-store" });
+      const res = await fetch(RAW_BASE + "/" + path + "?cb=" + Date.now(), { cache: "no-store" });
       if (!res.ok) return null;
-      const m = await res.json();
-      if (!manifestOk(m)) return null; // wrong schema version, or no articles[] → distrust it
-      saveManifestCache(m);
-      return m;
+      return await res.text();
     } catch (e) { return null; }
   }
-  // the current version recorded for a slug, read from the cached manifest — so
-  // loadArticle can validate (or bypass) its body cache without a manifest fetch
-  function manifestVer(slug) {
-    const m = loadManifestCache();
-    const e = m && Array.isArray(m.articles) && m.articles.find(a => a && a.slug === slug);
-    return (e && e.ver) || "";
-  }
 
-  // a folded article → the compact meta the front page + manifest carry
-  function metaFromArticle(a, slug) {
-    return {
-      slug: a.slug || slug, headline: a.headline, dek: a.dek, kicker: a.kicker,
-      column: a.column, tags: a.tags, published: a.published, updated: a.updated,
-      authors: a.authors, assignees: a.assignees, versions: a.versions.length, readMins: a.readMins,
-      status: a.status, image: a.image, ver: a.base_sha,
-      storage: "archive", logPath: articleItemUrl(a.slug || slug)
-    };
-  }
-  // a manifest row → a render-ready meta (defaults filled, so an older/sparse
-  // manifest never crashes the front page)
-  function normalizeMeta(m) {
-    return {
-      slug: m.slug, headline: m.headline || "", dek: m.dek || "", kicker: m.kicker || m.column || "Published",
-      column: m.column || "", tags: Array.isArray(m.tags) ? m.tags : [], authors: Array.isArray(m.authors) ? m.authors : [],
-      assignees: Array.isArray(m.assignees) ? m.assignees : [], published: m.published || "", updated: m.updated || null,
-      versions: m.versions || 0, readMins: m.readMins || 1,
-      status: m.status === "unpublished" ? "unpublished" : "published",
-      image: m.image || null, ver: m.ver || "", storage: "archive", logPath: articleItemUrl(m.slug)
-    };
-  }
-
-  // —— proactive prefetch: warm the body cache for the whole line-up during idle
-  // time, so opening any article is instant. NEVER blocks the front page — it
-  // runs after paint, yields between items, and is gentle on archive.org. ——
-  const prefetched = Object.create(null); // slug → version already warmed
-  function prefetchBodies(metas) {
-    if (typeof window === "undefined" || !hasCaches()) return;
-    const idle = window.requestIdleCallback || function (cb) { return setTimeout(cb, 300); };
-    idle(async function () {
-      for (const m of (metas || [])) {
-        if (!m || !m.slug) continue;
-        const ver = m.ver || "";
-        if (prefetched[m.slug] === ver) continue;
-        const cached = await bodyCacheGet(m.slug);
-        if (cached && ver && cached.ver === ver) { prefetched[m.slug] = ver; continue; }
-        await fetchArchiveNet(m.slug, ver);
-        prefetched[m.slug] = ver;
-        await new Promise(r => setTimeout(r, 80)); // don't hammer the archive
-      }
+  /* One git-tree call lists every document at once (articles/<slug>.jsonl), no
+     matter how many there are — one API request, then each body is read (and
+     folded) from the raw CDN only when its blob sha is new. */
+  const DOC_RE = /^articles\/([A-Za-z0-9][A-Za-z0-9-]*)\.jsonl$/;
+  async function listDocs() {
+    const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" } });
+    if (!res.ok) throw new Error("github " + res.status);
+    const tree = ((await res.json()) || {}).tree || [];
+    const docs = [];
+    tree.forEach(e => {
+      if (!e || e.type !== "blob") return;
+      const m = DOC_RE.exec(e.path);
+      if (m) docs.push({ slug: m[1], path: e.path, sha: e.sha });
     });
+    return docs;
   }
 
-  // —— bootstrap discovery: the npj-article tag search (advancedsearch) ——
-  // Used ONLY when no manifest exists yet (a fresh site, or before the first
-  // manifest publish). Spoofable on its own, so it's the fallback, not the
-  // trust anchor; window.NPJ.ARCHIVE.articleQuery can pin it to an uploader.
-  function searchJsonp(url) {
-    return new Promise((resolve, reject) => {
-      const cb = "__npjArt" + Date.now().toString(36);
-      const s = document.createElement("script");
-      const timer = setTimeout(() => { cleanup(); reject(new Error("archive.org timed out")); }, 15000);
-      function cleanup() { clearTimeout(timer); try { delete window[cb]; } catch (e) {} if (s.parentNode) s.parentNode.removeChild(s); }
-      window[cb] = (data) => { cleanup(); resolve(data); };
-      s.onerror = () => { cleanup(); reject(new Error("archive.org unreachable")); };
-      s.src = url + "&callback=" + cb;
-      document.head.appendChild(s);
-    });
-  }
-  async function searchArchiveDocs() {
-    const CFG = (typeof window !== "undefined" && window.NPJ && window.NPJ.ARCHIVE) || {};
-    const extra = CFG.articleQuery || "";
-    const q = 'subject:"' + ARTICLE_TAG + '"' + (extra ? " AND " + extra : "");
-    const url = IA + "/advancedsearch.php?q=" + encodeURIComponent(q) +
-      "&fl[]=identifier&fl[]=publicdate&fl[]=oai_updatedate&sort[]=" + encodeURIComponent("publicdate desc") +
-      "&rows=500&page=1&output=json";
-    let json;
-    try { const res = await fetch(url, { headers: { Accept: "application/json" } }); if (!res.ok) throw new Error("HTTP " + res.status); json = await res.json(); }
-    catch (e) { json = await searchJsonp(url); }
-    const docs = ((json && json.response && json.response.docs) || []);
-    return docs
-      .map(d => ({ slug: String(d.identifier || "").indexOf("npj-article-") === 0 ? String(d.identifier).slice("npj-article-".length) : "", ver: String(d.oai_updatedate || d.publicdate || "") }))
-      .filter(d => d.slug && !isStaleEventSlug(d.slug)); // drop the old per-event junk items
-  }
-  async function listFromSearch() {
-    const docs = await searchArchiveDocs();
-    const cache = loadIdxCache();
-    const live = {};
-    const metas = await Promise.all(docs.map(async d => {
-      const hit = cache[d.slug];
-      if (hit && hit.key === d.ver && hit.meta) { live[d.slug] = hit; return hit.meta; }
-      const text = await fetchArchiveText(d.slug, "");
-      if (text == null) return null;
-      const { article } = foldLog(text);
-      if (!article) return null;
-      const meta = metaFromArticle(article, d.slug);
-      live[d.slug] = { key: d.ver, meta };
-      return meta;
-    }));
-    saveIdxCache(live);
-    const out = metas.filter(Boolean);
-    prefetchBodies(out);
-    return out.sort(byNewest);
-  }
-
-  /* The published line-up, read from archive.org. The manifest is the source of
-     truth (validated — only our backend writes it); a live fetch falls back to
-     the last cached manifest (offline), then to the tag search (no manifest
-     yet), then to the stored index. The front page paints from this WITHOUT
-     waiting on any article body — bodies prefetch in the background.
-
-     A PRESENT, current-version manifest is AUTHORITATIVE even when it lists zero
-     articles: an admin who removed every junk piece (or who runs an
-     intentionally empty site) gets an empty front page, NOT the raw archive
-     tag-search — otherwise the search would resurface exactly the items the
-     manifest was rewritten to drop. The search bootstrap runs only when there is
-     no trusted manifest at all (first deploy, or right after a schema bump and
-     before the fresh manifest is written). */
-  async function listArticles() {
-    let manifest = await fetchManifest();
-    if (!manifest) manifest = loadManifestCache();
-    if (manifestOk(manifest)) {
-      const metas = manifest.articles.filter(m => m && m.slug && m.headline && !isStaleEventSlug(m.slug)).map(normalizeMeta).sort(byNewest);
-      prefetchBodies(metas); // warm bodies in the background — never gates the front page
-      return metas;
-    }
-    try { return await listFromSearch(); }
-    catch (e) {
-      const cached = loadIdxCache();
-      return Object.values(cached).map(c => c.meta).filter(Boolean).sort(byNewest);
-    }
-  }
   function byNewest(a, b) {
     return String(b.published || "").localeCompare(String(a.published || "")) ||
            String(b.updated || "").localeCompare(String(a.updated || ""));
   }
 
-  // Fill window.NPJ.FRONT from the committed record. Returns the metas.
+  /* List + fold every document into the front-page metas. Cached by blob sha, so
+     an unchanged doc never refolds; a listing failure (rate limit, offline)
+     serves the last cached index so the front page still paints. The front page
+     paints from these metas WITHOUT waiting on any article body. */
+  async function listArticles() {
+    let docs;
+    try { docs = await listDocs(); }
+    catch (e) {
+      const cached = loadIdxCache();
+      return Object.values(cached).map(c => c.meta).filter(Boolean).sort(byNewest);
+    }
+    const cache = loadIdxCache();
+    const live = {};
+    const metas = await Promise.all(docs.map(async d => {
+      // the cache key is the blob sha — a new commit to the file changes its sha,
+      // so it misses the cache and refolds; an unchanged file is served instantly
+      const hit = cache[d.slug];
+      if (hit && hit.key === d.sha && hit.meta) { live[d.slug] = hit; return hit.meta; }
+      const text = await fetchRaw(d.path);
+      if (text == null) return null;
+      const { article } = foldLog(text);
+      if (!article) return null;
+      const meta = {
+        slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
+        column: article.column, tags: article.tags, published: article.published, updated: article.updated,
+        authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
+        status: article.status, image: article.image,
+        storage: "github", logPath: blobUrl(d.slug)
+      };
+      live[d.slug] = { key: d.sha, meta };
+      return meta;
+    }));
+    saveIdxCache(live); // only live docs — a removed file drops out of the cache
+    return metas.filter(Boolean).sort(byNewest);
+  }
+
+  // Fill window.NPJ.FRONT from the committed record. Returns the metas. Carries
+  // each piece's `status` so the front page + reader can hide an unpublished one.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null, ver: m.ver || "" });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
@@ -744,88 +546,20 @@
     return all.find((a) => a && a.slug === s) || null;
   }
 
-  // Fetch + fold one article from archive.org (npj-article-<slug>/<slug>.jsonl).
-  // Served cache-first (stale-while-revalidate) so a prefetched/return visit is
-  // instant; its sources join the global ledger so hover cards, the source rail
-  // and the methods footer all resolve.
+  // Fetch + fold one article from the GitHub raw CDN (articles/<slug>.jsonl).
+  // Its sources join the global ledger so hover cards, the source rail and the
+  // methods footer all resolve.
   async function loadArticle(slug) {
     const s = slugify(slug) || slug;
-    if (isStaleEventSlug(s)) return null; // a stray per-event item from the old write path — we've versioned past it
-    const text = await fetchArchiveText(s, manifestVer(s));
+    const text = await fetchRaw(filenameFor(s));
     if (text == null) return null;
     const { article, sources } = foldLog(text);
     if (article) {
-      article.storage = "archive";
-      article.logPath = articleItemUrl(article.slug || s);
+      article.storage = "github";
+      article.logPath = blobUrl(article.slug || s);
       Object.keys(sources).forEach(k => { window.NPJ.SOURCES[k] = Object.assign(window.NPJ.SOURCES[k] || {}, sources[k]); });
     }
     return article;
-  }
-
-  /* ---------------- the site manifest: write side ----------------
-     The manifest is what makes archive.org content VALIDATED and the line-up
-     instant: only this path writes it, and it goes through the Matrix-gated
-     /site/manifest-npj webhook (re-verifies the token, PUTs with our IA keys to
-     the npj-site item we own). The reader trusts a slug only because it is here.
-     Every helper is best-effort and non-blocking — a failure just means the
-     next publish (or the tag-search fallback) reconciles the index. */
-  function buildManifest(metas) {
-    const articles = (metas || []).filter(m => m && m.slug && m.headline).map(m => ({
-      slug: m.slug, headline: m.headline, dek: m.dek || "", kicker: m.kicker || "", column: m.column || "",
-      tags: Array.isArray(m.tags) ? m.tags : [], authors: Array.isArray(m.authors) ? m.authors : [],
-      published: m.published || "", updated: m.updated || "", versions: m.versions || 0,
-      readMins: m.readMins || 1, status: m.status === "unpublished" ? "unpublished" : "published",
-      image: m.image || null, ver: m.ver || m.base_sha || ""
-    }));
-    return { v: MANIFEST_SCHEMA, updated: nowIso(), articles };
-  }
-  // POST the full manifest to the webhook (it PUTs to archive.org, overwrite —
-  // no server-side merge, so two writers can't half-merge a list). On success we
-  // mirror it to the local cache so the next paint is instantly current.
-  async function publishManifest(token, metas) {
-    if (!token) return { ok: false, skipped: true };
-    const manifest = buildManifest(metas);
-    try {
-      const res = await fetch(manifestEndpoint(), {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
-        body: JSON.stringify({ identifier: SITE_ITEM, filename: MANIFEST_FILE, manifest })
-      });
-      if (res.ok) saveManifestCache(manifest);
-      return { ok: res.ok, status: res.status, manifest };
-    } catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
-  }
-  // The current manifest list (live, else cached, else empty) as a mutable array.
-  async function currentManifestList() {
-    const m = (await fetchManifest()) || loadManifestCache() || { articles: [] };
-    return Array.isArray(m.articles) ? m.articles.slice() : [];
-  }
-  // Upsert one just-published/edited article into the manifest and rewrite it.
-  // This is what makes the index "update over time": each publish merges its own
-  // row, so the piece appears on the front page without waiting on archive.org's
-  // search index. An unpublish keeps the row (status flips); pass {remove:true}
-  // for a true delete.
-  async function syncArticleToManifest(article, token, opts) {
-    opts = opts || {};
-    if (!token || !article || !article.slug) return { ok: false, skipped: true };
-    const list = await currentManifestList();
-    const i = list.findIndex(a => a && a.slug === article.slug);
-    if (opts.remove) { if (i >= 0) list.splice(i, 1); }
-    else {
-      const row = buildManifest([metaFromArticle(article, article.slug)]).articles[0];
-      if (i >= 0) list[i] = row; else list.push(row);
-    }
-    return await publishManifest(token, list);
-  }
-  // A status-only flip (unpublish / republish) when we don't hold a folded
-  // article — just patch the row's status and rewrite.
-  async function patchManifestStatus(slug, status, token) {
-    if (!token || !slug) return { ok: false, skipped: true };
-    const list = await currentManifestList();
-    const i = list.findIndex(a => a && a.slug === slug);
-    if (i < 0) return { ok: false, skipped: true };
-    list[i] = Object.assign({}, list[i], { status: status === "unpublished" ? "unpublished" : "published" });
-    return await publishManifest(token, list);
   }
 
   /* ---------------- composer HTML → body blocks ----------------
@@ -1551,132 +1285,99 @@
     return { line, operand, article: folded.article };
   }
 
-  /* ---------------- the write path: archive.org is the home ----------------
-     Publishing writes the EO event log straight to archive.org — never GitHub.
-     Each document is one IA item, npj-article-<slug>, holding one append-only
-     file <slug>.jsonl. Every event (INS publish, REC edit, EVA feedback) POSTs
-     ONE line to the article webhook, which re-verifies the Matrix token, reads
-     the current log, appends the line, and PUTs it back (read-modify-append —
-     IA S3 has no atomic append, so the webhook owns the merge). The reader
-     folds that same file. There is no git history and no version-file folder
-     anymore; the appended log IS the history.
+  /* ---------------- the write path: GitHub is the home ----------------
+     Every event (INS publish, REC edit, EVA feedback, status flip) appends ONE
+     line to articles/<slug>.jsonl through the Matrix-gated /site/publish-npj
+     webhook: it re-verifies the token, reads the current file, appends the line,
+     and commits it back to GitHub (mirror:false — archive.org is not in the
+     article path). The webhook owns the read-modify-append, so the per-article
+     assignee gate runs server-side against the genesis event (it fires once the
+     file exists; creating a brand-new article is open to any editor).
 
-     NOTE on concurrency: two writers appending to one slug in the same instant
-     can race (both read the same base, last PUT wins, one line lost). Publishing
-     and editing are single-author/admin actions, so this is rare; a lost EVA
-     deposit can simply be re-sent. */
-  function articleEndpoint() {
-    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.articleEndpoint) return c.articleEndpoint; } catch (e) {}
-    const m = String(publishEndpoint()).match(/^(https?:\/\/[^/]+\/webhook)\//i);
-    return m ? m[1] + "/site/article-npj" : DEFAULT_ENDPOINT.replace(/\/[^/]*$/, "/article-npj");
-  }
-  // POST one event line to the article webhook, which appends it to
-  // npj-article-<slug>/<slug>.jsonl on archive.org. If that endpoint isn't
-  // deployed yet (n8n answers 404 for an unregistered path, or it's
-  // unreachable), fall back to the existing /site/publish-npj webhook with its
-  // single-file append + mirror contract: it commits the log to GitHub AND
-  // mirrors the full log to the same archive.org item, so the reader (which only
-  // ever reads archive.org) still works. Deploying npj-article.n8n.json later
-  // makes this drop GitHub entirely — no client change needed. Either way, a
-  // successful write drops the slug's cached body so the next read is fresh.
-  /* fetch with a hard timeout. A bare fetch() never resolves if the webhook
-     accepts the connection then stalls mid read-modify-append — at the publish
-     boundary that hangs the whole commit on the "Commit the EO event log" spinner
-     with no way out (the step never leaves "active", and "Retry publish" never
-     appears). Abort after `ms` so the commit leg is bounded too; the AbortError
-     surfaces as a normal fetch rejection that postArticle's caller (commit()) and
-     the fallback below already handle. Mirrors fetchT in media-store.js. */
-  function postT(url, opts, ms) {
+     The commit is BOUNDED: a stalled webhook is aborted after COMMIT_MS and
+     surfaces as a normal fetch rejection the gate turns into a retryable
+     failure, instead of hanging the "Commit" spinner forever.
+
+     Success is judged on the JSON body, not a bare HTTP 200 — the webhook
+     answers a failed GitHub commit honestly with { gh_ok:false, gh_status,
+     gh_error }, so the gate can tell a real verdict (don't retry, surface it)
+     from a transient gateway blip (retry). NOTE on concurrency: two writers
+     appending to one slug in the same instant can race; publishing/editing are
+     single-author/admin actions, so this is rare and a lost line is re-sent. */
+  function postCommit(bodyObj, token) {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), ms);
-    return fetch(url, Object.assign({}, opts, { signal: ctrl.signal })).finally(() => clearTimeout(timer));
+    const timer = setTimeout(() => ctrl.abort(), COMMIT_MS);
+    return fetch(publishEndpoint(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+      body: JSON.stringify(bodyObj),
+      signal: ctrl.signal
+    }).finally(() => clearTimeout(timer));
   }
-  async function postArticle(bodyObj, token) {
-    const auth = { "Content-Type": "application/json", "Authorization": "Bearer " + token };
-    // The webhook reads the current log, appends, and PUTs it back to archive.org,
-    // so a real commit can take a while — give it 120s before treating silence as
-    // a failure (matches the media-freeze budget).
-    const COMMIT_MS = 120000;
-    let res = null;
-    try { res = await postT(articleEndpoint(), { method: "POST", headers: auth, body: JSON.stringify(bodyObj) }, COMMIT_MS); }
-    catch (e) { res = null; }
-    if (!res || res.status === 404) {
-      // legacy fallback: the deployed publish webhook (mirror:true puts the full
-      // log on archive.org as npj-article-<slug>/<slug>.jsonl, subject npj-article).
-      // Bounded the same way — an unanswered fallback used to throw straight up out
-      // of postArticle with no timeout, so a stalled legacy webhook hung the commit.
-      res = await postT(publishEndpoint(), {
-        method: "POST", headers: auth,
-        body: JSON.stringify({ filename: filenameFor(bodyObj.slug), mode: "append", contentRaw: bodyObj.line + "\n", message: bodyObj.message, mirror: true })
-      }, COMMIT_MS);
-    }
-    if (res && res.ok && bodyObj && bodyObj.slug) invalidateBody(bodyObj.slug);
-    return res;
+  // Append one EO line to the document's log. mirror:false keeps it on GitHub.
+  function commitLine({ slug, line, token, message }) {
+    return postCommit({
+      filename: filenameFor(slug), mode: "append",
+      contentRaw: String(line).replace(/\n+$/, "") + "\n",
+      message: message || ("update: " + slug), mirror: false
+    }, token);
   }
-  // forget a slug's cached body (after a write) so a reload pulls the new log
-  async function invalidateBody(slug) {
-    if (!hasCaches()) return;
-    try { const cache = await caches.open(BODY_CACHE); await cache.delete(bodyKey(slug)); } catch (e) {}
-    try { delete prefetched[slug]; } catch (e) {}
-  }
-  // Publish the genesis (INS) — appended to the article's archive.org log. The
-  // `filename` arg is accepted for caller compatibility but ignored (there are
-  // no version files anymore — the single <slug>.jsonl is appended to).
+  // Publish the genesis (INS) — appended to the document's log (created on first write).
   function publishGenesis({ slug, line, token, message }) {
-    return postArticle({ slug, line, message: message || ("publish: " + slug) }, token);
+    return commitLine({ slug, line, token, message: message || ("publish: " + slug) });
   }
-  // One REC event appended to the article's archive.org log — the edit path.
+  // One REC event appended to the document's log — the edit-after-publish path.
   async function appendEdit({ slug, operand, actor, note, token, message }) {
     const line = editLine(slug, operand, actor, note);
-    const res = await postArticle({ slug, line, message: message || ("edit: " + slug) }, token);
-    return { res, line, sha: lineSha(line), filename: ARTICLE_ITEM(slug) + "/" + ARTICLE_FILE(slug) };
+    const res = await commitLine({ slug, line, token, message: message || ("edit: " + slug) });
+    return { res, line, sha: lineSha(line), filename: filenameFor(slug) };
   }
-  /* A generic event writer — appends any EO op to the article's archive.org log.
-     Used by the feedback layer (app/feedback.js) to land reader EVA deposits in
-     the same append-only file as the article's own events. `schema` overrides
-     the event's `v` so feedback lines self-identify (npj/feedback-eo/1) while
-     still folding harmlessly through the article reader (EVA never touches state). */
+  /* A generic event writer — appends any EO op to the document's log. Used by
+     the feedback layer (app/feedback.js) to land reader EVA deposits in the same
+     append-only file as the article's own events. `schema` overrides the event's
+     `v` so feedback lines self-identify (npj/feedback-eo/1) while still folding
+     harmlessly through the article reader (EVA never touches state). */
   async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema }) {
     const head = { v: schema || SCHEMA, op, target: "article/" + slug, ts: nowIso(), actor: actor || null, operand: operand || {} };
     if (note) head.note = note;
     const line = JSON.stringify(Object.assign(head, extra || {}));
-    const res = await postArticle({ slug, line, message: message || (String(op).toLowerCase() + ": " + slug) }, token);
-    return { res, line, sha: lineSha(line), filename: ARTICLE_ITEM(slug) + "/" + ARTICLE_FILE(slug) };
+    const res = await commitLine({ slug, line, token, message: message || (String(op).toLowerCase() + ": " + slug) });
+    return { res, line, sha: lineSha(line), filename: filenameFor(slug) };
   }
 
   /* Every event in the document's log, folded once — the article reader keeps
      only the article, but feedback needs the raw EVA deposits riding alongside
-     it. Read from archive.org (the log's home). Returns { events, base_sha }
-     (base_sha is the current article version, used to flag a suggestion made
-     against a since-superseded draft as stale). */
+     it. Read from the GitHub raw CDN. Returns { events, base_sha } (base_sha is
+     the current article version, used to flag a suggestion made against a
+     since-superseded draft as stale). */
   async function fetchEvents(slug) {
     const s = slugify(slug) || slug;
-    const text = await fetchArchiveText(s, manifestVer(s));
+    const text = await fetchRaw(filenameFor(s));
     if (text == null) return { events: [], base_sha: null };
     const folded = foldLog(text);
     return { events: folded.events || [], base_sha: folded.article ? folded.article.base_sha : null };
   }
 
-  // Unpublish / republish — one REC event appended to the archive.org log.
-  // Unpublish just takes the piece off the site (the reader + front page hide
-  // it); nothing is deleted — the whole append-only log stays on archive.org,
-  // and the act of hiding it is itself recorded as one more event. Authorized
-  // exactly like any other edit (the webhook re-verifies the Matrix token); the
-  // UI restricts the action to admins.
+  // Unpublish / republish — one REC event appended to the log. Unpublish just
+  // takes the piece off the site (the reader + front page hide it); nothing is
+  // deleted — the whole append-only log stays in GitHub, and the act of hiding
+  // it is itself recorded as one more event. Authorized exactly like any other
+  // edit (the webhook re-verifies the Matrix token); the UI restricts it to admins.
   function setArticleStatus({ slug, status, actor, note, token }) {
     const next = status === "unpublished" ? "unpublished" : "published";
     const message = (next === "unpublished" ? "unpublish: " : "republish: ") + slug;
     const finalNote = note || (next === "unpublished"
-      ? "Unpublished — hidden from the site (the event log stays on archive.org)"
+      ? "Unpublished — hidden from the site (the event log stays in GitHub)"
       : "Republished");
     return appendEdit({ slug, operand: { status: next }, actor, note: finalNote, token, message });
   }
 
-  /* Publish receipts. The article webhook returns the post-write provenance the
-     client can't know up front — the byte count of the appended log (and, when
-     present, a content sha). It's keyed by the archive.org log path, so a later
-     load can confirm the file it serves matches the write we just made rather
-     than a stale copy. Local-only, best-effort: never throws. */
+  /* Publish receipts. The webhook returns the post-commit provenance the client
+     can't know up front — the GitHub commit_sha of the line it wrote and its
+     byte count. The genesis event is serialized BEFORE the commit, so the SHA
+     can't live in the event operand; it lives here, keyed by filename, so a
+     later load can confirm the raw URL is serving the commit we actually made
+     rather than a stale CDN copy. Local-only, best-effort: never throws. */
   function saveReceipt(rec) {
     if (!rec || !rec.filename) return rec;
     try {
@@ -1696,14 +1397,11 @@
   }
 
   root.NpjArticles = {
-    SCHEMA, DIR, RAW_BASE, rawUrl, filenameFor, dirFor, versionFilenameFor, publishEndpoint, manifestEndpoint, articleEndpoint,
-    foldLog, plainText, readMins, lineSha, isStaleEventSlug,
+    SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, filenameFor, publishEndpoint,
+    foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, dropFromFront, publishedMeta, loadArticle, primeFront, saveFront,
-    // archive.org read path + the validated site manifest
-    articleItemUrl, articleDownloadUrl, fetchManifest, loadManifestCache, buildManifest, metaFromArticle,
-    publishManifest, syncArticleToManifest, patchManifestStatus, prefetchBodies,
     htmlToBlocks, blocksToHtml, tokensToHtml, mergeSplitWords,
     genesisLine, editLine, genesisFromContent, publishableSource, publishGenesis, appendEdit, appendEvent, fetchEvents, setArticleStatus,
     saveReceipt, getReceipt
