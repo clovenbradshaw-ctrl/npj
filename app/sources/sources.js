@@ -128,6 +128,31 @@
   // the cross-project synthetic links the Documents page surfaces.
   function draftGroups(drafts) { return buildGroups((drafts || []).map(draftToCarrier)); }
 
+  // The shared source shelf of one project: every source bound to any document
+  // in `roomId`, deduped by content signature (the same upload to two drafts
+  // collapses to one) so a NEW article in that project can inherit it and tag
+  // claims against it from the first keystroke — no re-uploading the same
+  // documents. Returns { sources:[{key,archived}], sourceRecords:{key:rec} },
+  // shaped to seed a draft directly. Inheriting an uncited source is free: only
+  // CITED sources ride into a published article (the publish build ships the
+  // used set alone), so this never bloats the committed record.
+  function projectSources(drafts, roomId) {
+    var seenKey = {}, seenSig = {}, out = [], records = {};
+    (drafts || []).forEach(function (d) {
+      if (!d || !d.room || d.room.roomId !== roomId) return;
+      (d.sources || []).forEach(function (s) {
+        if (!s || !s.key || seenKey[s.key]) return;
+        var rec = (d.sourceRecords && d.sourceRecords[s.key]) || (NPJ.SOURCES || {})[s.key] || null;
+        var sig = rec ? signatureOf(rec) : '';
+        if (sig && seenSig[sig]) return;             // same content, already inherited
+        seenKey[s.key] = 1; if (sig) seenSig[sig] = 1;
+        out.push({ key: s.key, archived: !!(rec && rec.archive_url) });
+        if (rec) records[s.key] = rec;
+      });
+    });
+    return { sources: out, sourceRecords: records };
+  }
+
   /* ---------------- published carriers (async, cached) ---------------- */
   function citesFromArticle(a) {
     var map = {};
@@ -180,7 +205,7 @@
 
   root.NpjSources = {
     signatureOf: signatureOf, srcKind: srcKind, iaIdentifier: iaIdentifier, normUrl: normUrl,
-    buildGroups: buildGroups, draftGroups: draftGroups, citesFromArticle: citesFromArticle,
+    buildGroups: buildGroups, draftGroups: draftGroups, projectSources: projectSources, citesFromArticle: citesFromArticle,
     buildPublishedIndex: buildPublishedIndex,
     publishedGroups: function () { return _pub.groups; },
     publishedState: function () { return _pub.state; },

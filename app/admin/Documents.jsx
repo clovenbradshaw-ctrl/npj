@@ -609,10 +609,16 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
   const newDoc = () => onOpen("d" + Date.now().toString(36));
   // New article that already belongs to a project: pre-seed the draft with the
   // project's room so the Newsroom opens it inside the project (and every save
-  // keeps it there), then open it. Same id scheme as newDoc.
+  // keeps it there), inherit the project's shared source shelf so the author can
+  // tag claims against those documents from the first keystroke (deduped by
+  // content signature; uncited sources never ride into the published record),
+  // then open it. Same id scheme as newDoc.
   const newDocInProject = (p) => {
     const id = "d" + Date.now().toString(36);
-    try { window.NpjDrafts.save(id, { room: { roomId: p.roomId, title: p.title || "Untitled project" }, title: "" }); } catch (e) {}
+    const inh = (window.NpjSources && window.NpjSources.projectSources)
+      ? window.NpjSources.projectSources(drafts, p.roomId)
+      : { sources: [], sourceRecords: {} };
+    try { window.NpjDrafts.save(id, { room: { roomId: p.roomId, title: p.title || "Untitled project" }, title: "", sources: inh.sources, sourceRecords: inh.sourceRecords }); } catch (e) {}
     onOpen(id);
   };
 
