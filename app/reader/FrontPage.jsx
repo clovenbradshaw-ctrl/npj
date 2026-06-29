@@ -159,6 +159,39 @@ function Masthead({ route, onHome, onNewsroom, activeColumn, onColumn, narrow })
 }
 
 /* ---- Front Page ---- */
+/* Universal tag filters — a wrapping row of toggle chips under the masthead.
+   Each chip filters the lineup in place (it is NOT a nav route); the active chip
+   reads as filled ink, the rest as outlined. Curated by the admin (layout.filters). */
+function FrontFilters({ tags, active, onToggle, wide, mobile }) {
+  return (
+    <div style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "18px 0 0" : (mobile ? "16px 16px 0" : "18px 72px 0") }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, paddingBottom: 16, borderBottom: "1px solid var(--rule)" }}>
+        <span className="np-eyebrow" style={{ color: "var(--ink-soft)", marginRight: 4, flex: "0 0 auto" }}>Filter</span>
+        {tags.map(({ tag, count }) => {
+          const on = active === tag;
+          return (
+            <button key={tag} onClick={() => onToggle(tag)} aria-pressed={on}
+              className="np-mono"
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+                background: on ? "var(--ink)" : "transparent", color: on ? "var(--paper)" : "var(--ink)",
+                border: "1.5px solid var(--ink)", borderRadius: 999, padding: "5px 12px",
+                fontSize: 11.5, letterSpacing: ".02em", lineHeight: 1, transition: "background .12s, color .12s" }}>
+              {tag}
+              <span style={{ opacity: .6, fontSize: 10 }}>{count}</span>
+            </button>
+          );
+        })}
+        {active && tags.some(t => t.tag === active) && (
+          <button onClick={() => onToggle(active)} className="np-mono"
+            style={{ background: "none", border: 0, color: "var(--ink-soft)", cursor: "pointer", fontSize: 11, textDecoration: "underline", textUnderlineOffset: 2, padding: "5px 4px", flex: "0 0 auto" }}>
+            clear
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function FrontPage({ onOpen, onNewsroom, onHome }) {
   const { layout, isAdmin } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
@@ -180,11 +213,20 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   // link / from Documents, where the reader shows the Unpublished banner.)
   const visible = all.filter(a => a.status !== "unpublished");
   const shown = col ? visible.filter(a => (a.tags || []).includes(col)) : visible;
+  // Universal tag filters (admin-curated, layout.filters) → toggle chips that
+  // drive the SAME tag filter as the nav columns. Only surface a chip when at
+  // least one visible piece carries it, so the row never shows a dead filter.
+  const filterTags = (layout.filters || [])
+    .map(t => ({ tag: t, count: visible.filter(a => (a.tags || []).includes(t)).length }))
+    .filter(f => f.count > 0);
 
   return (
     <div className="fade-in">
       <Masthead route="home" onHome={onHome} onNewsroom={onNewsroom} narrow
         activeColumn={col} onColumn={(name) => setCol(c => (c === name || isLatest(name)) ? null : name)} />
+      {filterTags.length > 0 && (
+        <FrontFilters tags={filterTags} active={col} onToggle={(t) => setCol(c => c === t ? null : t)} wide={wide} mobile={mobile} />
+      )}
       <main style={{ width: wide ? SHELL_W : undefined, maxWidth: 1760, margin: "0 auto", padding: wide ? "34px 0 0" : (mobile ? "24px 0 0" : "34px 72px 0") }}>
         {shown.length === 0
           ? <EmptyFront col={col} sections={sections} onNewsroom={onNewsroom} onSubmit={() => window.__nav && window.__nav.submit()} />

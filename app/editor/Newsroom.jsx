@@ -40,10 +40,14 @@ const DEK_PH = "Subtitle — one line under the headline";
 // The description is the photo's alt text — read aloud by screen readers and
 // indexed by search engines; it rides as the image's real `alt`, not a visible
 // caption line.
+// Colour is left to .cmp-cap/.cmp-credit/.cmp-desc in styles.css (entered text =
+// --nr-soft for legible contrast, placeholder = --nr-muted) — no inline colour,
+// so a single rule governs both these freshly-inserted figures and the ones
+// blocksToHtml re-emits on edit.
 const FIG_CAPS =
-  '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;color:var(--nr-muted);margin-top:4px"></figcaption>' +
-  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>' +
-  '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;color:var(--nr-muted);margin-top:2px"></figcaption>';
+  '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px"></figcaption>' +
+  '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>' +
+  '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px"></figcaption>';
 
 // One carousel slide: the SAME editable image-slot a single inline image uses
 // (so a drop still uploads to the media store and freezes to archive.org at
@@ -57,7 +61,7 @@ const CAROUSEL_SLIDE = (id) =>
 // contenteditable=false chips inside the (non-editable) figure — the caret never
 // lands on them; a delegated click handler in the editor runs add/remove.
 const CAROUSEL_ADD = '<span class="cmp-carousel-add np-mono" contenteditable="false" role="button">+ Add image</span>';
-const CAROUSEL_CAP = '<figcaption class="cmp-carousel-cap np-mono" contenteditable="true" data-ph="Gallery caption (optional)" style="font-size:11px;color:var(--nr-muted);margin-top:6px"></figcaption>';
+const CAROUSEL_CAP = '<figcaption class="cmp-carousel-cap np-mono" contenteditable="true" data-ph="Gallery caption (optional)" style="font-size:11px;color:var(--nr-soft);margin-top:6px"></figcaption>';
 // The headline + dek live in the body as <h1>/.nr-dek so the whole publish,
 // restore and reader pipeline is unchanged — but they're driven by the explicit
 // Title/Subtitle fields above the sheet (and hidden in-canvas via .nr-fielded),
@@ -375,6 +379,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [title, setTitle] = useState("");            // explicit Title field (mirrors the body <h1>)
   const [dek, setDek] = useState("");                // explicit Subtitle field (mirrors .nr-dek)
   const [fileSlug, setFileSlug] = useState("");      // custom filename; "" = derived from the title
+  // Byline + editors are set HERE, in the editor, so they're ready before the
+  // publish gate ever opens — the gate just inherits them (and can still tweak).
+  // byline = the public name readers see; editors = a raw string (names or mxids,
+  // comma/newline separated) for the optional "Edited by" credit. Both ride the draft.
+  const [byline, setByline] = useState("");
+  const [editorsField, setEditorsField] = useState("");
   const [tags, setTags] = useState([]);
   const [column, setColumn] = useState(columns[0] || "");
   const [toc, setToc] = useState([]);
@@ -431,9 +441,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const citations = window.NpjCitations ? window.NpjCitations.serialize() : [];
     const sentenceLedgerJson = window.NpjSentences ? window.NpjSentences.serializeLedger(sentenceLedger.current) : undefined;
     const composition = window.NpjComposition ? window.NpjComposition.serialize(draftId) : undefined;
-    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, tags, column, definitions, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
+    window.NpjDrafts.save(draftId, { html, title, slug: fileSlug, byline, editors: editorsField, tags, column, definitions, sources, citeOrder: citeOrderRef.current, sourceRecords, citations, sentenceLedger: sentenceLedgerJson, composition, room, structure: structLog.current });
     saveTimer.current = null;
-  }, [draftId, title, fileSlug, tags, column, definitions, sources, room]);
+  }, [draftId, title, fileSlug, byline, editorsField, tags, column, definitions, sources, room]);
   const persistRef = useRef(persist);
   useEffect(() => { persistRef.current = persist; });
   const scheduleSave = useCallback(() => {
@@ -499,6 +509,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         }
         if (d.title) setTitle(d.title);
         if (typeof d.slug === "string") setFileSlug(d.slug);
+        if (typeof d.byline === "string") setByline(d.byline);
+        if (typeof d.editors === "string") setEditorsField(d.editors);
         if (Array.isArray(d.tags)) setTags(d.tags);
         if (Array.isArray(d.definitions)) setDefinitions(window.NpjDefinitions ? window.NpjDefinitions.normList(d.definitions) : d.definitions);
         if (d.column) setColumn(d.column);
@@ -531,7 +543,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   }, [draftId]);
 
   useEffect(() => { if (session) window.NpjDrafts.flush(draftId); }, [session, draftId]); // push local-only work up after sign-in
-  useEffect(() => { scheduleSave(); }, [title, fileSlug, tags, column, sources, room, scheduleSave]);
+  useEffect(() => { scheduleSave(); }, [title, fileSlug, byline, editorsField, tags, column, sources, room, scheduleSave]);
   // entering a grounding view builds/extends the stable-id ledger (track()) — save
   // so those ids persist even if the author switches views without editing
   useEffect(() => { if (view !== "prose") scheduleSave(); }, [view, scheduleSave]);
@@ -3115,6 +3127,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <label htmlFor="nr-dek-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, margin: "14px 0 3px" }}>Subtitle</label>
             <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
               style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
+            {/* Byline + editors, set here so they're ready before the publish gate —
+                the gate inherits these (and still lets you tweak at publish time). */}
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14 }}>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                <label htmlFor="nr-byline-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>By</label>
+                <input id="nr-byline-field" value={byline} onChange={e => setByline(e.target.value)} placeholder="Author name readers see" spellCheck={true}
+                  className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
+              </div>
+              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                <label htmlFor="nr-editors-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Edited by <span style={{ color: NR.muted, textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
+                <input id="nr-editors-field" value={editorsField} onChange={e => setEditorsField(e.target.value)} placeholder="Editor name, or @editor:server" spellCheck={false}
+                  className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
+              </div>
+            </div>
           </div>
           <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
@@ -3542,7 +3568,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
       {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
-        customSlug={fileSlug} onSlug={setFileSlug}
+        customSlug={fileSlug} onSlug={setFileSlug} initialByline={byline} initialEditors={editorsField}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, definitions, sources })} />}
       {previewDoc && window.ArticleRead && (
         <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
@@ -3593,7 +3619,7 @@ function Spinner() { return <span style={{ width: 11, height: 11, border: "2px s
 /* The publish boundary is real: nothing fires until the author confirms, every
    step reports what actually happened, and a failed step stops the run — no
    checkmark is ever painted on something that didn't succeed. */
-function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug, draftId }) {
+function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug, draftId, initialByline, initialEditors }) {
   // the filename is the author's call — it follows the headline until they
   // rename it at the gate, and a custom name sticks with the draft
   const auto = slugify(title) || "untitled";
@@ -3630,8 +3656,10 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   // the name readers see if you type nothing: your profile name, else the Matrix
   // localpart (the "matrix name"). Shown in the preview so the fallback is never hidden.
   const defaultName = meMx ? nameOfMx(meMx) : "";
-  const [nameInput, setNameInput] = useState(profileName);
-  const [editorsInput, setEditorsInput] = useState("");
+  // Seed from whatever the author set in the editor's By / Edited-by fields; fall
+  // back to the committed profile name only when the editor byline was left blank.
+  const [nameInput, setNameInput] = useState((initialByline && initialByline.trim()) || profileName);
+  const [editorsInput, setEditorsInput] = useState(initialEditors || "");
   const bylineEditors = parseEditors(editorsInput);
   // the userid stored on the backend record — you, the signed-in publisher
   const bylineAuthors = meMx ? [meMx] : [];

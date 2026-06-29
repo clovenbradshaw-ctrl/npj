@@ -44,6 +44,7 @@ function AdminEditor() {
   const patch = (next) => setLayout({ ...layout, ...next });
   const setSections = (sections) => patch({ sections });
   const setTaglines = (taglines) => patch({ taglines });
+  const setFilters = (filters) => patch({ filters });
   const setUtility = (utility) => patch({ utility });
   const setRoles = (roles) => patch({ roles });
   const setBrand = (brand) => patch({ brand: { ...(layout.brand || {}), ...brand } });
@@ -240,6 +241,23 @@ function AdminEditor() {
                 </div>
               ))}
               {layout.taglines.length < 4 && <button onClick={() => setTaglines([...layout.taglines, "word"])} style={addBtn}>+ Add line</button>}
+            </Section>
+
+            {/* Universal tag filters — toggle chips on the front page (filter the
+                lineup in place), distinct from the nav columns above. */}
+            <Section label="Front-page filters">
+              <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 7, lineHeight: 1.5 }}>
+                Curated tags shown as <b style={{ color: AE.text }}>toggle chips</b> on the front page — readers filter the lineup in place. Not nav columns. An article appears under a chip when it carries that tag.
+              </div>
+              {(layout.filters || []).map((t, i) => (
+                <div key={i} style={{ display: "flex", gap: 5, marginBottom: 6, alignItems: "center" }}>
+                  <AdminField value={t} onChange={(v) => setFilters((layout.filters || []).map((x, j) => j === i ? v : x))} placeholder="Tag, e.g. Housing is a Human Right" />
+                  <MiniBtn onClick={() => setFilters(move(layout.filters || [], i, -1))} title="Move up">↑</MiniBtn>
+                  <MiniBtn onClick={() => setFilters(move(layout.filters || [], i, 1))} title="Move down">↓</MiniBtn>
+                  <MiniBtn danger onClick={() => setFilters((layout.filters || []).filter((_, j) => j !== i))} title="Remove">×</MiniBtn>
+                </div>
+              ))}
+              {(layout.filters || []).length < 12 && <button onClick={() => setFilters([...(layout.filters || []), "New tag"])} style={addBtn}>+ Add filter</button>}
             </Section>
 
             {/* Utility links */}

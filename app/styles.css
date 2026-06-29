@@ -740,7 +740,11 @@ a { color: inherit; }
    so the author can write it — it never renders on the published page. The
    placeholder is shown via data-ph while a line is empty (or holds a stray <br>). */
 .cmp-cap, .cmp-credit, .cmp-desc { outline: none; min-height: 1.2em; }
-.cmp-credit, .cmp-desc { color: var(--nr-muted, var(--ink-soft)); }
+/* ENTERED caption/credit/description text reads as confident secondary copy
+   (--nr-soft): in dark mode --nr-muted on the page only clears ~4.8:1 at 11px,
+   which read as barely-legible. --nr-soft lifts it to ~7.7:1 (and helps light
+   too). The EMPTY-state placeholders below stay --nr-muted — a hint, not copy. */
+.cmp-cap, .cmp-credit, .cmp-desc { color: var(--nr-soft, var(--ink-soft)); }
 .cmp-cap:empty::before, .cmp-cap:has(> br:only-child)::before,
 .cmp-credit:empty::before, .cmp-credit:has(> br:only-child)::before,
 .cmp-desc:empty::before, .cmp-desc:has(> br:only-child)::before {
