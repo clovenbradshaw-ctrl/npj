@@ -375,18 +375,33 @@ function App() {
   // the live signed-in id (post-signup it's fresh even before `me` re-derives),
   // so a just-created reader is credited correctly on their own deposit
   const liveMe = () => (window.MatrixAuth && window.MatrixAuth.current && (window.MatrixAuth.current() || {}).user_id) || me;
+  // a newly minted account's one-time credentials, surfaced for the reader to save
+  // as a login doc; cleared once they download or dismiss it
+  const [signupRecovery, setSignupRecovery] = useState(null);
   // Anyone online can post a suggestion: if they have no account yet, mint one on
   // the site's homeserver and sign them in IN PLACE (no navigation away from the
   // story), so the queued deposit posts as them through the open suggest webhook.
   const onSignUp = useCallback(async ({ username, displayName } = {}) => {
     const sess = await window.MatrixAuth.signUp({ username, displayName });
+    const { recovery, ...clean } = sess || {};
+    setSession(clean);
+    if (clean && clean.user_id && !window.NPJ.PEOPLE[clean.user_id]) {
+      const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(clean.user_id) : "#b23a26";
+      window.NPJ.PEOPLE[clean.user_id] = { name: (displayName && displayName.trim()) || clean.user_id.replace(/^@/, "").split(":")[0], role: "Reader", trust: "open", color: col };
+    }
+    if (recovery) setSignupRecovery(recovery);
+    return clean;
+  }, [me]);
+  // reader who already has a Matrix account: sign in in place, no new account minted
+  const onSignIn = useCallback(async ({ mxid, password } = {}) => {
+    const sess = await window.MatrixAuth.login(mxid, password);
     setSession(sess);
     if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
       const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(sess.user_id) : "#b23a26";
-      window.NPJ.PEOPLE[sess.user_id] = { name: (displayName && displayName.trim()) || sess.user_id.replace(/^@/, "").split(":")[0], role: "Reader", trust: "open", color: col };
+      window.NPJ.PEOPLE[sess.user_id] = { name: sess.user_id.replace(/^@/, "").split(":")[0], role: "Reader", trust: "open", color: col };
     }
     return sess;
-  }, [me]);
+  }, []);
   const reloadFeedback = useCallback(() => {
     const A = window.NPJ.ARTICLE; if (!A || !A.slug) { setSuggestions([]); return Promise.resolve(); }
     return window.NpjFeedback.load(A.slug, { base_sha: A.base_sha }).then(setSuggestions).catch(() => {});
@@ -578,7 +593,8 @@ function App() {
           audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
           suggestions={suggestions} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onAddSuggestion={onAddSuggestion}
-          signedIn={!!session} onSignUp={onSignUp}
+          signedIn={!!session} onSignUp={onSignUp} onSignIn={onSignIn}
+          signupRecovery={signupRecovery} onDismissRecovery={() => setSignupRecovery(null)}
           filter={filter} setFilter={setFilter}
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}
@@ -602,7 +618,16 @@ function App() {
       {route === "contributors" && (ready.read ? <ContributorsPage onHome={goHome} onNewsroom={goNewsroom} /> : <BootLoading />)}
       {route === "submit" && (ready.read ? <SubmitPage session={session} onSignIn={signIn} onSignOut={signOut} onHome={goHome} onNewsroom={goNewsroom} onDocs={goDocs} /> : <BootLoading />)}
       {route === "explore" && (ready.read ? <DataExplorer onHome={goHome} onNewsroom={goNewsroom} onOpenArticle={openArticle} /> : <BootLoading />)}
-      {route === "docs" && (ready.read ? <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} /> : <BootLoading />)}
+      {/* the document/project explorer is the newsroom's front door — gate it the
+          same way as the editor itself, so a self-signup or signed-in reader can't
+          reach it (and self-grant access by creating a project). Only the admin's
+          allowlisted contributors (editor/admin) or someone invited into a project
+          room (→ isGuest) gets in; everyone else hits the invite-only screen. */}
+      {route === "docs" && (ready.read
+        ? ((isEditorRole || isGuest)
+          ? <DocumentsPage session={session} onOpen={openDoc} onOpenArticle={openArticle} onHome={goHome} onNewsroom={goNewsroom} onSignIn={goSubmit} />
+          : <NewsroomLocked signedIn={!!session} me={me} onSignIn={goSubmit} onHome={goHome} />)
+        : <BootLoading />)}
 
       <TweaksPanel title="Tweaks">
         <TweakSection label="Brand" />

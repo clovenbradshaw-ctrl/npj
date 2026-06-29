@@ -583,7 +583,17 @@
       await login(acct.mxid, pw);
     }
     if (displayName && String(displayName).trim()) { try { await setDisplayName(String(displayName).trim()); } catch (e) {} }
-    return current();
+    // The auto-minted password is surfaced to the user exactly once — here — so they
+    // can save a recovery doc and sign back in on another device or after a storage
+    // wipe. current() never carries it; this return is the only place it escapes.
+    return Object.assign({}, current(), {
+      recovery: {
+        mxid: (session && session.user_id) || acct.mxid,
+        password: pw,
+        homeserver: dom,
+        displayName: (displayName && String(displayName).trim()) || null
+      }
+    });
   }
 
   async function setDisplayName(name) {

@@ -175,11 +175,88 @@ function signupErrorText(e) {
   return "Couldn't create the account — please try again.";
 }
 
+/* friendly text for a sign-in failure — login() throws coded errors (bad mxid,
+   network) or a homeserver rejection (wrong password → M_FORBIDDEN / 403) */
+function signinErrorText(e) {
+  if (!e) return "Couldn't sign in — check your details and try again.";
+  if (e.code === "network") return "Couldn't reach the homeserver. Check your connection and try again.";
+  if (e.code === "badmxid") return e.message;
+  if (e.errcode === "M_FORBIDDEN" || e.status === 403) return "That Matrix ID and password don't match.";
+  if (e.status === 429) return "Too many attempts — wait a moment, then try again.";
+  return e.message || "Couldn't sign in — check your details and try again.";
+}
+
+/* The one-time login a freshly-minted reader account gets. The password is
+   auto-generated and shown exactly once, so we hand the whole thing over as a
+   small text file the reader can keep — their only way back in (on another
+   device, or after this browser forgets them) until they set their own. */
+function recoveryDocText(rec) {
+  return [
+    "PEOPLE'S JOURNALISM — YOUR LOGIN",
+    "================================",
+    "",
+    "You created an account to suggest an edit. Keep this file to sign back",
+    "in on another device, or if this browser forgets you.",
+    "",
+    "  Matrix ID     " + rec.mxid,
+    rec.displayName ? "  Display name  " + rec.displayName : null,
+    "  Password      " + rec.password,
+    "  Homeserver    " + rec.homeserver,
+    "",
+    "TO LOG BACK IN",
+    "  Open any article, choose “Suggest edit,” click “I already have an",
+    "  account,” and enter the Matrix ID and password above.",
+    "",
+    "You can change this password once you're signed in.",
+    "Anyone with this file can post as you — keep it private."
+  ].filter(Boolean).join("\n") + "\n";
+}
+function downloadRecoveryDoc(rec) {
+  const local = (String(rec.mxid || "").replace(/^@/, "").split(":")[0]) || "account";
+  const blob = new Blob([recoveryDocText(rec)], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "npj-login-" + local + ".txt";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+/* shown after a one-tap sign-up: surfaces the new credentials once and presses
+   the reader to save them, since the auto-minted password lives nowhere else. */
+function RecoveryBanner({ rec, onDismiss }) {
+  const [saved, setSaved] = useState(false);
+  return (
+    <div className="fade-in" style={{ border: "1.5px solid var(--ink)", background: "var(--yellow)", marginBottom: 14, boxShadow: "5px 5px 0 rgba(22,20,13,.14)" }}>
+      <div style={{ padding: "9px 12px", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span style={{ fontFamily: "var(--display)", fontSize: 15, display: "inline-flex", alignItems: "center", gap: 7 }}><I.key style={{ fontSize: 16 }} /> SAVE YOUR LOGIN</span>
+        <button onClick={onDismiss} title="Dismiss" style={{ background: "none", border: 0, fontSize: 14, cursor: "pointer" }}><I.x /></button>
+      </div>
+      <div style={{ padding: "11px 12px" }}>
+        <div style={{ fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.45, marginBottom: 9 }}>
+          Account created as <b>{rec.mxid}</b>. This password is shown <i>only once</i> — download the file to sign back in later.
+        </div>
+        <div className="np-mono" style={{ fontSize: 11.5, background: "var(--paper)", border: "1px solid var(--ink)", padding: "8px 9px", lineHeight: 1.6, marginBottom: 10, wordBreak: "break-all" }}>
+          <div>{rec.mxid}</div>
+          <div>{rec.password}</div>
+        </div>
+        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+          <button className="btn btn-sm btn-primary" onClick={() => { downloadRecoveryDoc(rec); setSaved(true); }}
+            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <I.download style={{ fontSize: 14 }} /> {saved ? "Download again" : "Download login"}
+          </button>
+          {saved && <button className="btn btn-sm" onClick={onDismiss}>Done</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* compose a new suggestion or comment, pinned to the selected span. Anyone can
    propose: if the reader has no account yet, posting first mints one on the
    site's homeserver (a quick, one-tap hyphae.social sign-up) and signs them in,
-   then deposits the suggestion as them. */
-function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
+   then deposits the suggestion as them. A reader who already has a Matrix account
+   can sign in here instead, in place, without minting a new one. */
+function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp, onSignIn }) {
   const quote = draft.quote || "";
   const [kind, setKind] = useState(draft.kind || "suggestion");
   const [proposed, setProposed] = useState(quote);
@@ -188,20 +265,31 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
   const [acctName, setAcctName] = useState("");
   const [acctBusy, setAcctBusy] = useState(false);
   const [acctErr, setAcctErr] = useState(null);
+  // not signed in → mint a new account ("new") or sign in to an existing one
+  // ("existing", which takes a Matrix ID + password)
+  const [authMode, setAuthMode] = useState("new");
+  const [loginMxid, setLoginMxid] = useState("");
+  const [loginPw, setLoginPw] = useState("");
   const isSugg = kind === "suggestion";
-  const valid = isSugg
+  const contentValid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
     : rationale.trim().length >= 2;
+  // signing in to an existing account needs both fields; the new-account path
+  // needs nothing extra (the display name is optional)
+  const authValid = signedIn || authMode === "new" || (loginMxid.trim().length > 0 && loginPw.length > 0);
+  const valid = contentValid && authValid;
   const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
-  // signed in → deposit straight away; otherwise mint + sign in, then deposit
+  // signed in → deposit straight away; otherwise sign in (existing) or mint a new
+  // account (new), then deposit as that account
   const submit = async () => {
-    if (signedIn || !onSignUp) { deposit(); return; }
+    if (signedIn || (!onSignUp && !onSignIn)) { deposit(); return; }
     setAcctBusy(true); setAcctErr(null);
     try {
-      await onSignUp({ displayName: acctName.trim() || undefined });
+      if (authMode === "existing") await onSignIn({ mxid: loginMxid.trim(), password: loginPw });
+      else await onSignUp({ displayName: acctName.trim() || undefined });
       deposit();
     } catch (e) {
-      setAcctErr(signupErrorText(e));
+      setAcctErr(authMode === "existing" ? signinErrorText(e) : signupErrorText(e));
     } finally {
       setAcctBusy(false);
     }
@@ -237,7 +325,7 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
           style={{ width: "100%", marginTop: 4, fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4,
             padding: "8px 9px", border: "1.5px solid var(--ink)", background: "var(--paper)", resize: "vertical", boxSizing: "border-box" }} />
 
-        {!valid && (
+        {!contentValid && (
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 6, lineHeight: 1.4 }}>
             {isSugg && proposed.trim() === quote.trim() ? "Edit the proposed text so it differs from the original." : "Add a short reason to deposit."}
           </div>
@@ -245,13 +333,31 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
 
         {!signedIn && (
           <div style={{ marginTop: 12, border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "10px 11px" }}>
-            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Post as a new account</div>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "5px 0 8px" }}>
-              You're not signed in. Posting creates a free account on <b>hyphae.social</b> — that's how an editor can credit you and reply. It takes one tap; you can set a password later.
+            <div style={{ display: "flex", gap: 0, marginBottom: 9, border: "1px solid var(--rule-strong)" }}>
+              {[["new", "New account"], ["existing", "I have an account"]].map(([k, l]) => (
+                <button key={k} onClick={() => { setAuthMode(k); setAcctErr(null); }} className="np-cond" style={{ flex: 1, padding: "5px 4px", border: 0, cursor: "pointer",
+                  borderRight: k === "new" ? "1px solid var(--rule-strong)" : 0, fontWeight: 600, fontSize: 12,
+                  background: authMode === k ? "var(--ink)" : "transparent", color: authMode === k ? "var(--yellow)" : "var(--ink)" }}>{l}</button>
+              ))}
             </div>
-            <input value={acctName} onChange={e => setAcctName(e.target.value)} placeholder="Display name (optional)"
-              onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
-              style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
+            {authMode === "new" ? (<React.Fragment>
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "0 0 8px" }}>
+                Posting creates a free account on <b>hyphae.social</b> — that's how an editor can credit you and reply. One tap; we'll hand you a login file to keep.
+              </div>
+              <input value={acctName} onChange={e => setAcctName(e.target.value)} placeholder="Display name (optional)"
+                onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
+                style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
+            </React.Fragment>) : (<React.Fragment>
+              <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "0 0 8px" }}>
+                Sign in with your Matrix ID and password — for example, from a login file you saved earlier.
+              </div>
+              <input value={loginMxid} onChange={e => setLoginMxid(e.target.value)} placeholder="@you:hyphae.social"
+                autoCapitalize="off" autoCorrect="off" spellCheck={false}
+                style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--mono)", fontSize: 12.5, padding: "6px 8px", boxSizing: "border-box", outline: "none", marginBottom: 7 }} />
+              <input value={loginPw} onChange={e => setLoginPw(e.target.value)} type="password" placeholder="Password"
+                onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
+                style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
+            </React.Fragment>)}
             {acctErr && (
               <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", border: "1px solid var(--reject)", padding: "6px 8px", marginTop: 8, lineHeight: 1.45 }}>{acctErr}</div>
             )}
@@ -260,14 +366,16 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
 
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", marginTop: 11, gap: 8 }}>
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", flex: "1 1 130px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {signedIn ? "as " + me : "new hyphae.social account"}
+            {signedIn ? "as " + me : authMode === "existing" ? "sign in to post" : "new hyphae.social account"}
           </span>
           <div style={{ display: "flex", gap: 7, flexShrink: 0, marginLeft: "auto" }}>
             <button className="btn btn-sm" onClick={onCancel} disabled={acctBusy}>Cancel</button>
             <button className="btn btn-sm btn-primary" disabled={!valid || acctBusy} style={{ opacity: (valid && !acctBusy) ? 1 : .45, cursor: (valid && !acctBusy) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}
               onClick={submit}>
               {acctBusy && <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
-              {acctBusy ? "Creating account…" : signedIn ? (isSugg ? "Propose edit" : "Post comment") : "Create account & post"}
+              {acctBusy ? (authMode === "existing" ? "Signing in…" : "Creating account…")
+                : signedIn ? (isSugg ? "Propose edit" : "Post comment")
+                : authMode === "existing" ? "Sign in & post" : "Create account & post"}
             </button>
           </div>
         </div>
@@ -280,7 +388,8 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
 }
 
 function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, canReview,
-                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me, signedIn, onSignUp }) {
+                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me, signedIn, onSignUp, onSignIn,
+                         signupRecovery, onDismissRecovery }) {
   const TRUST_RANK = { editor: 3, preferred: 2, open: 1 };
   const filtered = list.filter(s => {
     if (filter === "editor") return s.trust === "editor";
@@ -316,7 +425,9 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
       </div>
 
       <div style={{ padding: "14px 16px 40px", flex: 1 }}>
-        {composeDraft && <Compose draft={composeDraft} me={me} signedIn={signedIn} onSignUp={onSignUp} onSubmit={onSubmit} onCancel={onCancelCompose} />}
+        {signupRecovery && <RecoveryBanner rec={signupRecovery} onDismiss={onDismissRecovery} />}
+
+        {composeDraft && <Compose draft={composeDraft} me={me} signedIn={signedIn} onSignUp={onSignUp} onSignIn={onSignIn} onSubmit={onSubmit} onCancel={onCancelCompose} />}
 
         {!composeDraft && (
           <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "12px 13px", marginBottom: 16, display: "flex", gap: 11, alignItems: "center" }}>

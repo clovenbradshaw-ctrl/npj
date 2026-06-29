@@ -583,7 +583,7 @@ function EmbedFigure({ url, caption, height, reload, previews = true }) {
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions = [], onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
-          signedIn, onSignUp,
+          signedIn, onSignUp, onSignIn, signupRecovery, onDismissRecovery,
           me, onHome, onNewsroom, onEdited,
           // Preview mode: render a draft EXACTLY as the public reader will, from a
           // prebuilt article object (the editor's live content folded through the
@@ -1479,7 +1479,8 @@ function ArticleRead(props) {
       <SuggestionRail open={showSugg} onClose={() => { setShowSugg(false); setCompose(null); }}
         list={suggestions} claimById={claimById} filter={filter} setFilter={setFilter}
         canReview={canEditArticle} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onShow={showInText}
-        composeDraft={compose} signedIn={signedIn} onSignUp={onSignUp}
+        composeDraft={compose} signedIn={signedIn} onSignUp={onSignUp} onSignIn={onSignIn}
+        signupRecovery={signupRecovery} onDismissRecovery={onDismissRecovery}
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
         onCancelCompose={() => setCompose(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
