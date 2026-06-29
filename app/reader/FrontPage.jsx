@@ -410,6 +410,16 @@ function FrontCard({ item, template, variant, onOpen }) {
       {lead && item.updated && item.updated !== item.published ? " · updated " + shortDate(item.updated) : ""}
     </div>
   ) : null;
+  // The opening of the story, pulled through into the cover's text column to fill
+  // the space beside a tall photo. It's deliberately generous — the column clips
+  // it to the photo's height with a fade, so only as much as fits is ever shown.
+  const ExcerptEl = () => (lead && item.excerpt) ? (
+    <div style={{ margin: "18px 0 0" }}>
+      {String(item.excerpt).split(/\n\n+/).map((para, i) => (
+        <p key={i} style={{ fontSize: 17, lineHeight: 1.6, margin: i === 0 ? 0 : "12px 0 0", color: "var(--ink)" }}>{para}</p>
+      ))}
+    </div>
+  ) : null;
   const TagsEl = () => (lead && (item.tags || []).length > 0) ? <div style={{ marginTop: 12 }}><TagRow tags={item.tags} /></div> : null;
   const hasByline = ((item.authors || []).length || (item.editors || []).length || (item.byline || "").trim());
   const BylineEl = () => (hasByline && window.Byline) ? (
@@ -514,7 +524,7 @@ function FrontCard({ item, template, variant, onOpen }) {
             photo column, and overflow:hidden clips the text to exactly that. */}
         <div style={{ position: "relative", minWidth: 0 }}>
           <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-            <KickerEl /><BylineEl /><TitleEl /><DekEl /><MetaEl /><TagsEl />
+            <KickerEl /><BylineEl /><MetaEl /><TitleEl /><DekEl /><ExcerptEl /><TagsEl />
             <div aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 64,
               background: "linear-gradient(to top, var(--paper) 14%, rgba(246,241,228,0))", pointerEvents: "none" }} />
           </div>
@@ -524,14 +534,16 @@ function FrontCard({ item, template, variant, onOpen }) {
     );
   }
 
-  // "below" (title + subtitle, then photo, then meta) and "none" (text only).
+  // "below" (title + subtitle, then photo, then meta) and "none" (text only). The
+  // cover keeps its date up with the rest of the header text, above the photo;
+  // secondary cards keep the date in the footer under the photo.
   return (
     <div>
-      <KickerEl /><BylineEl /><TitleEl /><DekEl />
+      <KickerEl /><BylineEl />{lead ? <MetaEl /> : null}<TitleEl /><DekEl />
       {place === "below" && (hasPhoto
         ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /><PhotoCaption /></div>
         : (lead ? <div style={{ margin: "0 0 18px", maxWidth: 640 }}><Placeholder label="hero image" h={300} /></div> : null))}
-      <MetaEl /><TagsEl />
+      {lead ? null : <MetaEl />}<TagsEl />
     </div>
   );
 }
