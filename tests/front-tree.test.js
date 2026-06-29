@@ -39,20 +39,27 @@ test("a full GitHub log folds to the current article + its versions", () => {
   assert.ok(article.base_sha && article.base_sha !== "0000000", "carries a version id");
 });
 
-// Stub a GitHub repo: one git-tree listing + a raw body per document.
-function stubGitHub(bodies) {
-  const tree = { tree: Object.keys(bodies).map((slug, i) => ({
-    type: "blob", path: "articles/" + slug + ".jsonl", sha: "sha" + i
-  })) };
+// Stub a GitHub repo: one git-tree listing + a raw body per document. Each entry
+// maps a repo PATH to its raw body; the git-tree lists exactly those paths, so a
+// path under articles/<slug>/ models a folder-only document (no flat anchor).
+function stubGitHubPaths(byPath) {
+  const tree = { tree: Object.keys(byPath).map((path, i) => ({ type: "blob", path, sha: "sha" + i })) };
   const prev = globalThis.fetch;
   globalThis.fetch = async (url) => {
     if (/git\/trees\/main/.test(url)) return { ok: true, status: 200, json: async () => tree };
-    const m = /articles\/([^/?]+)\.jsonl/.exec(url);
-    const slug = m && decodeURIComponent(m[1]);
-    if (slug && bodies[slug] != null) return { ok: true, status: 200, text: async () => bodies[slug] };
+    const m = /(articles\/.+?\.jsonl)(?:\?|$)/.exec(String(url));
+    const path = m && decodeURIComponent(m[1]);
+    if (path && byPath[path] != null) return { ok: true, status: 200, text: async () => byPath[path] };
     return { ok: false, status: 404, text: async () => "" };
   };
   return () => { if (prev === undefined) delete globalThis.fetch; else globalThis.fetch = prev; };
+}
+
+// The common case: one flat anchor (articles/<slug>.jsonl) per document.
+function stubGitHub(bodies) {
+  const byPath = {};
+  Object.keys(bodies).forEach(slug => { byPath["articles/" + slug + ".jsonl"] = bodies[slug]; });
+  return stubGitHubPaths(byPath);
 }
 
 test("listArticles folds the git-tree + raw bodies into sorted front-page metas", async () => {
@@ -68,6 +75,41 @@ test("listArticles folds the git-tree + raw bodies into sorted front-page metas"
     assert.equal(metas[0].status, "published");
     assert.equal(metas[0].storage, "github");
     assert.match(metas[0].logPath, /github\.com\/.*\/blob\/main\/articles\/newer-piece\.jsonl$/);
+  } finally { restore(); }
+});
+
+test("a guid folder with no flat anchor renders — its INS event file IS the genesis", async () => {
+  // Every article now lives in its own folder named by its guid; the publish
+  // lands inside the folder, with no sibling articles/<guid>.jsonl anchor. The
+  // folder alone must define a complete, listable document.
+  const guid = "4bfd31c9-3e4b-4e77-9d39-ef757bac5cf7";
+  const ins = A.genesisLine({
+    slug: guid, headline: "Folder-only piece", dek: "lives in its own guid folder",
+    column: "Latest", authors: ["@a:h"], byline: "Jane Doe", published: "2026-06-29",
+    body: [{ type: "p", tokens: ["The folder is the document."] }]
+  }, "@a:h");
+  const restore = stubGitHubPaths({
+    ["articles/" + guid + "/20260629T194400702Z-ins-4f0bc8e.jsonl"]: ins + "\n"
+  });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 1, "the folder-only document is listed");
+    assert.equal(metas[0].slug, guid, "keyed by its guid");
+    assert.equal(metas[0].headline, "Folder-only piece");
+    assert.equal(metas[0].byline, "Jane Doe", "the typed display name rides through");
+    assert.match(metas[0].logPath, /\/tree\/main\/articles\/4bfd31c9-[\da-f-]+$/, "log link opens the folder, not a missing file");
+  } finally { restore(); }
+});
+
+test("a folder of only edits (no INS) is an orphan and is skipped", async () => {
+  const guid = "00000000-0000-4000-8000-000000000000";
+  const rec = A.editLine(guid, { dek: "edit without a publish" }, "@a:h", "stray edit");
+  const restore = stubGitHubPaths({
+    ["articles/" + guid + "/20260629T194400702Z-rec-deadbee.jsonl"]: rec + "\n"
+  });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 0, "no INS → no genesis → not a document");
   } finally { restore(); }
 });
 
