@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NPJ Front Page — Render Spec Preview</title>
+
+<!-- Standalone preview of the front-page render spec (article + image mechanics
+     only). This file is deliberately self-contained: it loads no app code and
+     no served images, so it renders the exact DOM contract anywhere — including
+     offline. Images are inline data URIs (the spec's "base64 only in the
+     standalone preview" rule); in production `src` is the served R2/CDN URL.
+
+     The CSS below implements ONLY the selectors the spec is allowed to touch
+     (see §6) plus the minimal page shell needed to present them. It is NOT the
+     production stylesheet; it is the visual reference that pairs with the spec.
+     The class names + markup structure are the contract — match them exactly. -->
+
+<!-- Same font stack the app loads, via <link> (keeps it captureable / offline-friendly). -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Barlow+Condensed:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=Spline+Sans+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+
+<style>
+/* ============================================================
+   Design tokens — mirrored from app/styles.css :root.
+   (Out of spec scope; included only so the preview is on-brand.)
+   ============================================================ */
+:root {
+  --yellow: #ffec01;
+  --ink: #16140d;
+  --ink-soft: #3a362b;
+  --paper: #f6f1e4;
+  --paper-2: #efe9d8;
+  --card: #fffdf6;
+  --rule: rgba(22,20,13,0.16);
+  --rule-strong: rgba(22,20,13,0.4);
+  --reject: #b4322a;
+  --display: 'Anton', 'Arial Narrow', sans-serif;
+  --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
+  --serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --mono: 'Spline Sans Mono', ui-monospace, monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--paper); color: var(--ink); }
+body { font-family: var(--serif); -webkit-font-smoothing: antialiased; }
+img { max-width: 100%; }
+
+/* Page shell — not part of the spec contract, just centers the column so the
+   preview reads like the real front page. */
+main {
+  width: min(92vw, 1180px);
+  margin: 0 auto;
+  padding: 34px 0 64px;
+}
+
+/* ============================================================
+   §6 — SELECTORS THIS SPEC GOVERNS. Everything below this line
+   is the contract. Nothing outside §6 is restyled here.
+   ============================================================ */
+
+/* ---- static page furniture ---- */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+  border-bottom: 2.5px solid var(--ink);
+}
+.eyebrow::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+.feed-label {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 4px;
+  padding-top: 8px;
+}
+
+/* ---- LEAD record (§2) ---- */
+article.lead {
+  display: grid;
+  grid-template-columns: 1.55fr 1fr;   /* figure = the 1.55fr track */
+  gap: 34px;
+  align-items: start;
+  padding-bottom: 40px;
+  border-bottom: 2.5px solid var(--ink);
+}
+
+/* §4 — fixed-ratio frame owns the dimensions; the image just fills it. */
+.lead-figure {
+  aspect-ratio: 4 / 3;
+  overflow: hidden;
+  background: var(--paper-2);        /* gray placeholder when empty (§4.4) */
+  border: 1.5px solid var(--ink);
+}
+.lead-figure img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.lead-body { min-width: 0; }
+
+.kicker {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--reject);
+  margin-bottom: 12px;
+}
+.lead h1 {
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: clamp(34px, 4.4vw, 56px);
+  line-height: .94;
+  letter-spacing: .005em;
+  text-transform: uppercase;
+  margin: 0 0 16px;
+}
+.dek {
+  font-family: var(--serif);
+  font-size: 21px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0 0 22px;
+  max-width: 60ch;
+}
+
+/* byline: "by {av}{handle} · edited by {av}{name}" — one running line */
+.byline {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink-soft);
+  line-height: 1.9;
+  margin-bottom: 18px;
+}
+.byline b { color: var(--ink); font-weight: 600; }
+.byline .sep { margin: 0 6px; color: var(--rule-strong); }
+.av {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  margin-right: 6px;
+  font-family: var(--cond);
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--yellow);
+  border: 1.5px solid var(--ink);
+  vertical-align: middle;
+  text-transform: uppercase;
+}
+
+/* source-count badge — the front-page surfacing of the archived-source promise */
+.sources {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: var(--ink);
+  text-decoration: none;
+  background: var(--card);
+  border: 1.5px solid var(--ink);
+  padding: 7px 12px;
+  margin-bottom: 18px;
+}
+.sources:hover { background: var(--yellow); }
+.sources svg {
+  width: 15px; height: 15px;
+  flex-shrink: 0;
+}
+.sources span {
+  font-weight: 400;
+  color: var(--ink-soft);
+  letter-spacing: .04em;
+}
+.lead .date {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* ---- FEED records (§3) ---- */
+.feed { margin-top: 4px; }
+
+article.card {
+  display: grid;
+  grid-template-columns: 300px 1fr;    /* fixed 300px figure track */
+  gap: 22px;
+  align-items: stretch;
+  padding: 22px 0;
+  border-top: 1px solid var(--rule);
+}
+.card:first-of-type { border-top: none; }
+
+.card-fig {
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  background: var(--paper-2);        /* gray placeholder when empty (§4.4) */
+  border: 1.5px solid var(--ink);
+  align-self: start;
+}
+.card-fig img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-body {
+  height: 100%;                       /* so .cfoot can margin-top:auto to bottom */
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.card h2 {
+  font-family: var(--cond);
+  font-weight: 700;
+  font-size: 27px;
+  line-height: 1.05;
+  text-transform: uppercase;
+  margin: 8px 0 10px;
+}
+.card h2 a { color: inherit; text-decoration: none; }
+.card h2 a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cdek {
+  font-family: var(--serif);
+  font-size: 16.5px;
+  line-height: 1.45;
+  color: var(--ink);
+  margin: 0 0 16px;
+}
+
+/* card footer: a single horizontal row — author · sources · date */
+.cfoot {
+  margin-top: auto;                   /* stick to the bottom of .card-body */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.cby { display: inline-flex; align-items: center; color: var(--ink); }
+.av.sm {
+  width: 18px; height: 18px;
+  font-size: 10px;
+  margin-right: 6px;
+}
+.cfoot .dot { color: var(--rule-strong); }
+.src-mini { display: inline-flex; align-items: center; gap: 5px; }
+.src-mini svg { width: 13px; height: 13px; flex-shrink: 0; }
+
+/* ============================================================
+   §4 — Responsive image behavior. Cards stay two-column at
+   every breakpoint (no stacking rule, intentionally).
+   ============================================================ */
+@media (max-width: 900px) {
+  article.lead {
+    grid-template-columns: 1fr;        /* figure full width, above the body */
+    gap: 22px;
+  }
+  .lead-figure {
+    aspect-ratio: auto;                /* capped height so it doesn't tower */
+    height: 300px;
+  }
+  article.card { grid-template-columns: 200px 1fr; }  /* stays beside text */
+}
+@media (max-width: 600px) {
+  main { width: 90vw; }
+  .lead-figure { height: 300px; }
+  article.card { grid-template-columns: 120px 1fr; }  /* stays beside text */
+  .card h2 { font-size: 22px; }
+}
+</style>
+</head>
+<body>
+
+<main>
+
+  <!-- static label + publish date of the front page itself -->
+  <div class="eyebrow">Nashville Peoples' Journal · Front page · June 29, 2026</div>
+
+  <!-- ============ LEAD (§2) ============ -->
+  <article class="lead">
+    <div class="lead-figure">
+      <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='800'%20height='600'%3E%3Crect%20width='800'%20height='600'%20fill='%23c9c2ad'/%3E%3Crect%20y='430'%20width='800'%20height='170'%20fill='%23b1a98f'/%3E%3Crect%20x='90'%20y='360'%20width='120'%20height='70'%20fill='%239a9176'/%3E%3Crect%20x='330'%20y='360'%20width='120'%20height='70'%20fill='%239a9176'/%3E%3Crect%20x='570'%20y='360'%20width='120'%20height='70'%20fill='%239a9176'/%3E%3Crect%20width='800'%20height='600'%20fill='none'%20stroke='%2316140d'%20stroke-width='3'/%3E%3C/svg%3E"
+           alt="Empty concrete footings where a row of public benches once stood along Deaderick Street.">
+    </div>
+    <div class="lead-body">
+      <span class="kicker">City Hall</span>
+      <h1>Metro Quietly Removed 30 Downtown Benches Before Any Public Notice</h1>
+      <p class="dek">Public Works records show the benches were pulled in March — weeks before the city said a word — under a maintenance contract that never reached the council floor.</p>
+      <div class="byline">
+        by <span class="av">T</span><b>@truthseeker</b>
+        <span class="sep">·</span> edited by <span class="av">D</span><b>Dana Reyes</b>
+      </div>
+      <a class="sources" href="/sources?record=downtown-benches-2026">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/><path d="M8 13h8M8 16h8"/></svg>
+        14 sources archived <span>· verified via Archive.org</span>
+      </a>
+      <div class="date">June 28, 2026</div>
+    </div>
+  </article>
+
+  <!-- ============ FEED (§3) ============ -->
+  <div class="feed-label">More from the newsroom</div>
+  <div class="feed">
+
+    <article class="card">
+      <div class="card-fig">
+        <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='600'%20height='400'%3E%3Crect%20width='600'%20height='400'%20fill='%237c93a6'/%3E%3Crect%20y='250'%20width='600'%20height='150'%20fill='%23586f82'/%3E%3Crect%20x='40'%20y='180'%20width='520'%20height='70'%20rx='10'%20fill='%23e8453c'/%3E%3Crect%20width='600'%20height='400'%20fill='none'%20stroke='%2316140d'%20stroke-width='3'/%3E%3C/svg%3E"
+             alt="A red WeGo bus idling in the new dedicated lane on Charlotte Avenue.">
+      </div>
+      <div class="card-body">
+        <span class="kicker">Transit</span>
+        <h2><a href="/wego-bus-lane">WeGo's New Bus Lane Added 11 Minutes for Some Riders, Data Shows</a></h2>
+        <p class="cdek">An analysis of six months of GPS pings finds the lane sped up two routes and slowed three — the slowest by nearly a quarter.</p>
+        <div class="cfoot">
+          <span class="cby"><span class="av sm">R</span>@railfan</span>
+          <span class="dot">·</span>
+          <span class="src-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/></svg>9 sources</span>
+          <span class="dot">·</span> June 27, 2026
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-fig">
+        <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='600'%20height='400'%3E%3Crect%20width='600'%20height='400'%20fill='%23a8b58c'/%3E%3Crect%20x='120'%20y='90'%20width='360'%20height='280'%20fill='%23c9d3ab'/%3E%3Crect%20x='120'%20y='90'%20width='360'%20height='60'%20fill='%238a7d5a'/%3E%3Crect%20x='270'%20y='230'%20width='60'%20height='140'%20fill='%238a7d5a'/%3E%3Crect%20width='600'%20height='400'%20fill='none'%20stroke='%2316140d'%20stroke-width='3'/%3E%3C/svg%3E"
+             alt="An East Nashville duplex with a city repair-order notice taped to the front door.">
+      </div>
+      <div class="card-body">
+        <span class="kicker">Housing</span>
+        <h2><a href="/east-nashville-repairs">East Nashville Tenants Win Repairs After 200 City Complaints</a></h2>
+        <p class="cdek">Residents of three buildings spent eight months logging code violations. This week the landlord agreed to a court-supervised fix-it schedule.</p>
+        <div class="cfoot">
+          <span class="cby"><span class="av sm">D</span>@doorknock</span>
+          <span class="dot">·</span>
+          <span class="src-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/></svg>6 sources</span>
+          <span class="dot">·</span> June 26, 2026
+        </div>
+      </div>
+    </article>
+
+    <!-- §4.4 — a record with no image: the frame still renders (empty .card-fig,
+         gray placeholder), never a broken <img>. -->
+    <article class="card">
+      <div class="card-fig"></div>
+      <div class="card-body">
+        <span class="kicker">Schools</span>
+        <h2><a href="/mnps-budget-vote">MNPS Board Delays Budget Vote as Bus-Driver Shortage Deepens</a></h2>
+        <p class="cdek">A third of routes ran late last month. The board postponed its vote to demand a staffing plan from the district by July.</p>
+        <div class="cfoot">
+          <span class="cby"><span class="av sm">C</span>@classroomwatch</span>
+          <span class="dot">·</span>
+          <span class="src-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/></svg>4 sources</span>
+          <span class="dot">·</span> June 25, 2026
+        </div>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-fig">
+        <img src="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='600'%20height='400'%3E%3Crect%20width='600'%20height='400'%20fill='%235e7d6a'/%3E%3Cpath%20d='M0%20250%20Q150%20210%20300%20250%20T600%20250%20V400%20H0%20Z'%20fill='%233f5a4a'/%3E%3Crect%20x='420'%20y='70'%20width='150'%20height='180'%20fill='%236b5d4a'/%3E%3Crect%20width='600'%20height='400'%20fill='none'%20stroke='%2316140d'%20stroke-width='3'/%3E%3C/svg%3E"
+             alt="A technician lowering a sampling probe into the Cumberland River beside an old rail yard.">
+      </div>
+      <div class="card-body">
+        <span class="kicker">Environment</span>
+        <h2><a href="/cumberland-lead-sampling">Cumberland River Sampling Finds Elevated Lead Near Old Rail Yard</a></h2>
+        <p class="cdek">Independent samples at four sites came back above the state's recreational threshold — highest at the inlet by the abandoned switching yard.</p>
+        <div class="cfoot">
+          <span class="cby"><span class="av sm">R</span>@riverkeeper</span>
+          <span class="dot">·</span>
+          <span class="src-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h11l5 5v11H4z"/><path d="M15 4v5h5"/></svg>22 sources</span>
+          <span class="dot">·</span> June 24, 2026
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+</main>
+
+</body>
+</html>
