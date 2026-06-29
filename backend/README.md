@@ -213,6 +213,7 @@ branches move bytes to archive.org instead.
 | Webhook path | Branch | What it does |
 |---|---|---|
 | `site/publish-npj` | `Publish Webhook → … → GH Update / GH Create → Mirror? → Publish OK` | commit an article/layout/profile to GitHub, then mirror a snapshot to archive.org |
+| `site/suggest-npj` | `Suggest Webhook → Whoami → Validate → Allowed? → GH Create → Suggest OK` | **open reader feedback** — any verified Matrix user CREATES one `*-eva-*.jsonl` in an article's folder (separate workflow, `npj-suggest.n8n.json`) |
 | `site/media-npj` | `Media Webhook → … → Media OK` | draft-time image upload → Matrix media store, returns `{ ok, mxc }` |
 | `site/media-archive-npj` | `MArc Webhook → … → MArc OK` | publish-time migration: pull one image from Matrix by `mxc`, PUT to archive.org, return `{ ok, url }` |
 | `site/source-npj` | `Source Webhook → … → Source OK` | redaction-gated source-document upload → archive.org |
@@ -260,21 +261,44 @@ articles/<slug>/20260619T2105Z-eva-9bd1.jsonl   ← a 👍 / reply / resolution 
   survives a refresh and the whole flow is demonstrable before the webhook rule
   below is live.
 
-### Webhook rule to add (publish workflow)
+### Open feedback rides its OWN write-only webhook (`npj-suggest.n8n.json`)
 
-The commit path is the same `POST …/webhook/site/publish-npj`. Two new things
-for the `Authorize` + `Build Content` nodes:
+Rather than relax the gated publish workflow, open submissions go through a
+**separate, deliberately tiny webhook** — `POST …/webhook/site/suggest-npj` —
+whose entire capability is: *create one suggestion file in an article's folder.*
 
 | File written | Who | Notes |
 |---|---|---|
-| `articles/<slug>/<stamp>-eva-<tail>.jsonl` | **any whoami-verified Matrix user** | proposing/commenting/voting is open — an EVA can't change article state, so it doesn't need editor or assignee rights |
-| the merge `…-rec-….jsonl` | **admin / assignee** (unchanged) | merging is an ordinary edit; the existing REC rule already gates it |
+| `articles/<slug>/<stamp>-eva-<tail>.jsonl` | **any whoami-verified Matrix user** (no role/assignee) | proposing / commenting / voting / replying is open — an EVA can't change article state |
+| anything else (genesis, `*-rec-*`, `*-ins-*`, any path off `articles/<slug>/`) | **nobody, via this webhook** | rejected `422`; the merge of a suggestion is still a `REC` on the gated `publish-npj` |
 
-So: relax the existing rule to let a *verified* user create an `*-eva-*.jsonl`
-inside `articles/<slug>/` (no role/assignee check), while every `*-rec-*` and
-`*-ins-*` write keeps its current admin/editor+assignee gate. Anonymous (no
-Matrix account) feedback can ride the separate **Suggestion API**
-(`npj-api.n8n.json`, `propose` op) instead — same lifecycle, Data-Table storage.
+Why a second webhook instead of a flag on `publish-npj`: the open endpoint has
+**no code path** that can overwrite a published word. It:
+
+1. `Whoami`-verifies the bearer token (so a deposit is always attributable — no
+   true anonymous writes; spam is tied to a real homeserver account).
+2. `Validate` enforces the path regex
+   `^articles/<slug>/<stamp>-eva-<hash>.jsonl$`, requires the body be exactly one
+   `op:"EVA"` line, and **re-stamps `actor` + `operand.author` from the verified
+   token** — so you can only ever post as yourself, never forge another handle.
+3. `GH Create` (create, never edit — no `sha`) drops the file into
+   `clovenbradshaw-ctrl/npj` (main). Because it creates, it can't mutate an
+   existing event either. Stays on GitHub only (no archive.org mirror — accepted
+   changes reach the permanent record when an editor **merges**, a `REC`).
+
+**Deploy:** import `npj-suggest.n8n.json`, bind the same **GitHub account**
+OAuth credential the publish workflow uses, and **activate**. The browser routes
+EVA writes here automatically (`app/record/articles.js` → `suggestEndpoint()`,
+default `…/webhook/site/suggest-npj`, overridable via the `suggestEndpoint` key
+of `npj_publish_cfg_v1`). Until it's deployed, suggestions still appear locally
+(the `localStorage` mirror) and merge as before — they just won't reach GitHub
+for the author to see across devices.
+
+> The older idea of relaxing `publish-npj`'s `Authorize`/`Build Content` nodes is
+> superseded by this dedicated webhook; the publish workflow keeps its strict
+> admin/editor + assignee gate untouched. A no-account reader can still mint a
+> hyphae.social account in one tap from the reader's **Suggest** mode
+> (`MatrixAuth.signUp`), which signs them in and posts the deposit as them.
 
 ## Contributor profiles — the byline (name + "About me")
 

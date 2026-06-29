@@ -48,6 +48,11 @@
   const FRONT_CACHE_KEY = "npj_front_gh1";       // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
+  // Open reader feedback rides a SEPARATE, write-only webhook: it can only CREATE
+  // an *-eva-*.jsonl file in an article's folder, so any verified Matrix user can
+  // submit a suggestion without the role/assignee gate the publish webhook keeps.
+  // A merge is still a REC through publish-npj. See backend/npj-suggest.n8n.json.
+  const DEFAULT_SUGGEST_ENDPOINT = "https://n8n.intelechia.com/webhook/site/suggest-npj";
   const COMMIT_MS = 120000; // a stalled publish webhook is aborted after this, never left hanging
 
   /* ---------------- GitHub is the home of the record ----------------
@@ -68,6 +73,12 @@
   function publishEndpoint() {
     try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.endpoint) return c.endpoint; } catch (e) {}
     return DEFAULT_ENDPOINT;
+  }
+  // The open-feedback (suggest) webhook. Overridable beside the publish endpoint;
+  // defaults next to it on the same n8n host.
+  function suggestEndpoint() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.suggestEndpoint) return c.suggestEndpoint; } catch (e) {}
+    return DEFAULT_SUGGEST_ENDPOINT;
   }
   // one append-only log per document
   const filenameFor = (slug) => DIR + "/" + slug + ".jsonl";
@@ -1379,10 +1390,10 @@
      from a transient gateway blip (retry). NOTE on concurrency: two writers
      appending to one slug in the same instant can race; publishing/editing are
      single-author/admin actions, so this is rare and a lost line is re-sent. */
-  function postCommit(bodyObj, token) {
+  function postCommit(bodyObj, token, endpoint) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), COMMIT_MS);
-    return fetch(publishEndpoint(), {
+    return fetch(endpoint || publishEndpoint(), {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify(bodyObj),
@@ -1393,12 +1404,12 @@
   // not yet exist — the genesis on first publish, a fresh per-event file after —
   // so this is always a clean GitHub create: we NEVER read-modify-append an
   // existing file. mirror:false keeps it on GitHub.
-  function commitFile({ filename, line, token, message }) {
+  function commitFile({ filename, line, token, message, endpoint }) {
     return postCommit({
       filename, mode: "overwrite",
       contentRaw: String(line).replace(/\n+$/, "") + "\n",
       message: message || ("update: " + filename), mirror: false
-    }, token);
+    }, token, endpoint);
   }
   // First publish writes the genesis anchor articles/<slug>.jsonl (a create). A
   // REPUBLISH of an already-anchored slug is itself a NEW event file (a fresh INS
@@ -1460,7 +1471,10 @@
     if (note) head.note = note;
     const line = JSON.stringify(Object.assign(head, extra || {}));
     const filename = eventPath(slug, op, line);
-    const res = await commitFile({ filename, line, token, message: message || (String(op).toLowerCase() + ": " + slug) });
+    // EVA deposits (open reader feedback) ride the write-only suggest webhook so
+    // any verified user can post; everything else stays on the gated publish path.
+    const endpoint = String(op).toUpperCase() === "EVA" ? suggestEndpoint() : undefined;
+    const res = await commitFile({ filename, line, token, endpoint, message: message || (String(op).toLowerCase() + ": " + slug) });
     return { res, line, sha: lineSha(line), filename };
   }
 
@@ -1516,7 +1530,7 @@
   }
 
   root.NpjArticles = {
-    SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, filenameFor, publishEndpoint,
+    SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, filenameFor, publishEndpoint, suggestEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,

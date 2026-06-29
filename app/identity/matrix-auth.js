@@ -487,7 +487,7 @@
     if (all.has("m.login.email.identity") || all.has("m.login.msisdn")) return "This homeserver requires email/phone verification to register.";
     return "This homeserver doesn't allow creating accounts from the browser.";
   }
-  async function register({ domain, username, password, registrationToken, deviceName, seed } = {}) {
+  async function register({ domain, username, password, registrationToken, deviceName, seed, inhibitLogin = true } = {}) {
     // accept a bare domain ("hyphae.social") or a full mxid (":server" is split off)
     const raw = String(domain || "").trim();
     const dom = (raw.indexOf(":") >= 0 ? raw.split(":").pop() : raw).replace(/^https?:\/\//, "").replace(/\/.*$/, "").trim();
@@ -499,7 +499,7 @@
     // One full UIA registration attempt for a given localpart. Resolves to the new
     // account, or throws (M_USER_IN_USE included) so the caller can decide to retry.
     async function attempt(localpart) {
-      const base_body = { username: localpart, password: pw, inhibit_login: true, initial_device_display_name: deviceName || "People's Journalism (web)" };
+      const base_body = { username: localpart, password: pw, inhibit_login: inhibitLogin, initial_device_display_name: deviceName || "People's Journalism (web)" };
       let uiaSession = null;   // the homeserver's UIA session id, echoed back each stage
       let flows = null;        // the auth flows the server last advertised
       let serverDone = [];     // stages the server says are already cleared this session
@@ -524,7 +524,9 @@
           });
         } catch (e) { const err = new Error("network/cors error reaching the homeserver"); err.code = "network"; throw err; }
         try { data = await res.json(); } catch (e) { data = {}; }
-        if (res.ok) return { mxid: "@" + localpart + ":" + dom, localpart, domain: dom, password: pw, base_url: base, user_id: data.user_id || ("@" + localpart + ":" + dom) };
+        // When inhibit_login is off the homeserver mints a token + device here,
+        // so a self-service sign-up lands signed in without a second round trip.
+        if (res.ok) return { mxid: "@" + localpart + ":" + dom, localpart, domain: dom, password: pw, base_url: base, user_id: data.user_id || ("@" + localpart + ":" + dom), access_token: data.access_token || null, device_id: data.device_id || null };
         if (res.status === 401 && data && Array.isArray(data.flows)) {
           flows = data.flows; uiaSession = data.session; serverDone = data.completed || [];
           if (!pickRegisterFlow(flows, !!registrationToken)) { const e = new Error(registerFlowMessage(flows)); e.code = "uia"; e.flows = flows; throw e; }
@@ -553,6 +555,35 @@
       }
     }
     throw lastErr;
+  }
+
+  /* ---- self-service sign-up (anyone online) ----
+     A reader with no Matrix account creates one on the site's homeserver and is
+     signed in immediately, so they can post a span suggestion without leaving the
+     story. Unlike register() (the inviter flow, inhibit_login on), this mints the
+     newcomer's OWN token: register with inhibit_login off → adopt the token the
+     homeserver returns (whoami confirms who it belongs to), or fall back to a
+     fresh login if the server withheld one. The handle auto-mints from a seed
+     (e.g. a chosen display name) when none is given. Throws the same coded errors
+     register() does — a closed homeserver / CAPTCHA / token-gated server surfaces
+     a plain-language reason the caller can show. */
+  const SEED_DOMAIN = (ADMIN_MXID.split(":").pop() || "").trim();
+  async function signUp({ domain, username, password, displayName, seed, registrationToken } = {}) {
+    const dom = String(domain || SEED_DOMAIN || "").trim();
+    const pw = password || randomPassword();
+    const acct = await register({ domain: dom, username, password: pw, seed: seed || username || displayName, registrationToken, inhibitLogin: false });
+    if (acct.access_token) {
+      // whoami is still the source of truth for the id the token belongs to
+      const who = await api(acct.base_url, "/_matrix/client/v3/account/whoami", { token: acct.access_token });
+      const user_id = who.user_id || acct.user_id;
+      session = { user_id, access_token: acct.access_token, base_url: acct.base_url, device_id: acct.device_id || who.device_id || null, verified: true, admin: user_id === ADMIN_MXID };
+      persist(); emit();
+    } else {
+      // a homeserver that ignored inhibit_login:false — log in with the temp password
+      await login(acct.mxid, pw);
+    }
+    if (displayName && String(displayName).trim()) { try { await setDisplayName(String(displayName).trim()); } catch (e) {} }
+    return current();
   }
 
   async function setDisplayName(name) {

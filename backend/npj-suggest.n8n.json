@@ -1,0 +1,279 @@
+{
+  "name": "NPJ Suggest (open reader feedback → article folder)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "site/suggest-npj",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a0000000-0000-4000-8000-000000000001",
+      "name": "Suggest Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "site-suggest",
+      "notes": "OPEN READER FEEDBACK (write-only → GitHub)\nPOST /webhook/site/suggest-npj\nAuthorization: Bearer <matrix token>  (ANY whoami-verified user — no role needed)\nBody: { filename:'articles/<slug>/<stamp>-eva-<hash>.jsonl', contentRaw, message? }\ncontentRaw is exactly one EVA event line. The webhook re-stamps actor/author\nfrom the verified token, then CREATES the file in clovenbradshaw-ctrl/npj (main).\nIt can only ever create *-eva-*.jsonl inside articles/<slug>/ — never the\ngenesis, a REC/INS, or any other path — so it cannot change a published word.\nMerging a suggestion stays on the gated publish webhook (it commits a REC)."
+    },
+    {
+      "parameters": {
+        "url": "https://hyphae.social/_matrix/client/v3/account/whoami",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{ ($json.headers && ($json.headers.authorization || $json.headers.Authorization)) || '' }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a0000000-0000-4000-8000-000000000002",
+      "name": "Whoami",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        220,
+        0
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const hook = $('Suggest Webhook').first().json;\nconst body = hook.body && typeof hook.body === 'object' ? hook.body : hook;\nconst who = $('Whoami').first().json || {};\nconst userId = who.user_id ? String(who.user_id).trim() : null;\nconst filename = body && body.filename ? String(body.filename) : '';\nconst contentRaw = body && body.contentRaw != null ? String(body.contentRaw) : '';\nconst message = (body && body.message ? String(body.message) : ('suggest: ' + filename)).slice(0, 200);\n// This endpoint can ONLY create a reader-feedback deposit:\n//   articles/<slug>/<stamp>-eva-<hash>.jsonl\n// Any other path is refused (422), so it can never write the genesis, a REC/INS,\n// or anything outside an article's folder. It CREATES files (never overwrites),\n// so it cannot mutate an existing event either. That is the whole capability of\n// this webhook: drop one suggestion file into a story's folder.\nconst EVA_RE = /^articles\\/[A-Za-z0-9][A-Za-z0-9-]*\\/[0-9A-Za-z]+-eva-[0-9A-Za-z]+\\.jsonl$/;\nlet reason = null, code = 200, line = '';\nif (!userId) { reason = 'unverified — a valid Matrix access token is required'; code = 401; }\nelse if (!EVA_RE.test(filename)) { reason = 'forbidden path — this endpoint only writes articles/<slug>/<stamp>-eva-<hash>.jsonl'; code = 422; }\nif (!reason) {\n  const lines = contentRaw.split('\\n').map(s => s.trim()).filter(Boolean);\n  if (lines.length !== 1) { reason = 'one EVA event per deposit'; code = 422; }\n  else {\n    try {\n      const ev = JSON.parse(lines[0]);\n      if (!ev || ev.op !== 'EVA') { reason = 'not an EVA event'; code = 422; }\n      else {\n        // Stamp attribution from the verified token: you can only ever post as\n        // yourself, never forge another contributor's handle into the record.\n        ev.actor = userId;\n        if (ev.operand && typeof ev.operand === 'object') ev.operand.author = userId;\n        line = JSON.stringify(ev);\n      }\n    } catch (e) { reason = 'content is not a single JSON line'; code = 422; }\n  }\n}\nconst ok = !reason;\nconst contentBase64 = ok ? Buffer.from(line + '\\n', 'utf8').toString('base64') : '';\nreturn [{ json: { ok, reason, code, user_id: userId, filename, message, contentBase64 } }];"
+      },
+      "id": "a0000000-0000-4000-8000-000000000003",
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c-ok",
+              "leftValue": "={{ String($json.ok === true) }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a0000000-0000-4000-8000-000000000004",
+      "name": "Allowed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "file",
+        "owner": "clovenbradshaw-ctrl",
+        "repository": {
+          "__rl": true,
+          "value": "npj",
+          "mode": ""
+        },
+        "filePath": "={{ $json.filename }}",
+        "fileContent": "={{ $json.contentBase64 }}",
+        "commitMessage": "={{ $json.message }}",
+        "additionalParameters": {
+          "branch": {
+            "branch": "main"
+          }
+        }
+      },
+      "id": "a0000000-0000-4000-8000-000000000005",
+      "name": "GH Create",
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        880,
+        -96
+      ],
+      "webhookId": "gh-create-suggest",
+      "credentials": {
+        "githubOAuth2Api": {
+          "id": "818QKPlLgc22aSHm",
+          "name": "GitHub account"
+        }
+      },
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const gh = $input.first().json || {};\nconst v = $('Validate').first().json || {};\nconst errObj = gh.error;\nconst errMsg = (typeof errObj === 'string' ? errObj : (errObj && (errObj.message || errObj.description))) || gh.message || null;\nconst ctx = (errObj && (errObj.context || errObj.cause)) || {};\nconst ghStatus = Number(gh.status || gh.statusCode || gh.httpCode || (errObj && (errObj.httpCode || errObj.status || errObj.statusCode)) || ctx.httpCode || ctx.statusCode || 0) || null;\nconst commitSha = (gh.commit && gh.commit.sha) || (gh.content && gh.content.sha) || null;\nconst hasError = !!errObj || (ghStatus && ghStatus >= 400) || (!commitSha && !!errMsg);\nreturn [{ json: {\n  ok: !hasError,\n  statusCode: hasError ? (ghStatus || 502) : 200,\n  filename: v.filename, user: v.user_id, commit_sha: commitSha,\n  gh_status: ghStatus, error: hasError ? (errMsg || 'github commit failed') : null\n} }];"
+      },
+      "id": "a0000000-0000-4000-8000-000000000006",
+      "name": "Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": "={{ $json.statusCode }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a0000000-0000-4000-8000-000000000007",
+      "name": "Suggest OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1320,
+        -96
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ ok: false, error: $json.reason || 'rejected', user: $json.user_id || null, filename: $json.filename || null }) }}",
+        "options": {
+          "responseCode": "={{ $json.code || 422 }}",
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a0000000-0000-4000-8000-000000000008",
+      "name": "Respond Rejected",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        880,
+        120
+      ]
+    }
+  ],
+  "connections": {
+    "Suggest Webhook": {
+      "main": [
+        [
+          {
+            "node": "Whoami",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Whoami": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Allowed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Allowed?": {
+      "main": [
+        [
+          {
+            "node": "GH Create",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "GH Create": {
+      "main": [
+        [
+          {
+            "node": "Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Result": {
+      "main": [
+        [
+          {
+            "node": "Suggest OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "tags": []
+}
