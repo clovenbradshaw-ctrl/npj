@@ -356,7 +356,7 @@ function groundingDetail(tok) {
   const standLine = {
     shown: "Shown — the absence is there to point to.",
     located: "Located — the gap is named, or placed out of reach.",
-    inferred: "Inferred — nothing to point to; the absence stands on reasoning."
+    inferred: "This is the assertion of the author."
   }[reader];
   return {
     isAbsence,
