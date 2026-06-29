@@ -450,7 +450,12 @@
       case "h2": return (b.text || "").trim() ? "<h2>" + esc(b.text.trim()) + "</h2>" : "";
       case "h3": return (b.text || "").trim() ? "<h3>" + esc(b.text.trim()) + "</h3>" : "";
       case "pull": {
-        let q = "<blockquote><p>" + esc(String(b.text || "").trim()) + tokensToHtml(b.marks || [], ctx) + "</p>";
+        // Substack has no distinct pull-quote on paste, so both flavours land as a
+        // blockquote; a pull quote (or any justified quote) carries its alignment
+        // as inline text-align, which Substack's importer preserves.
+        const align = b.align || (b.kind === "pull" ? "center" : "");
+        const sty = (align && align !== "left") ? ' style="text-align:' + align + '"' : "";
+        let q = "<blockquote" + sty + "><p>" + esc(String(b.text || "").trim()) + tokensToHtml(b.marks || [], ctx) + "</p>";
         if (b.attribution) q += "<p>— " + esc(b.attribution) + "</p>";
         return q + "</blockquote>";
       }

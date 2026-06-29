@@ -215,3 +215,22 @@ test("a marker stranded in a <p> below a blockquote folds onto the quote, leavin
   assert.ok(!para.tokens.some((t) => t && t.t === "sup"), "the paragraph below is not footnoted with the quote's note");
   assert.ok(!blocks.some((b) => b.type === "p" && b.tokens.length && b.tokens.every((t) => t && t.t === "sup")), "no lone-marker paragraph survives");
 });
+
+test("a plain <blockquote> folds to a BLOCK quote (kind:block, no align)", () => {
+  const pull = foldBlocks([enode("blockquote", {}, [tnode("A quoted passage.")])]).find((b) => b.type === "pull");
+  assert.equal(pull.kind, "block", "a bare blockquote is the bordered block-quote flavour");
+  assert.equal(pull.align, undefined, "no explicit justification");
+});
+
+test("a <blockquote class=np-pull align=center> folds to a centred PULL quote", () => {
+  const pull = foldBlocks([enode("blockquote", { class: "np-pull", align: "center" }, [tnode("A display callout.")])]).find((b) => b.type === "pull");
+  assert.equal(pull.kind, "pull", "np-pull marks the large display flavour");
+  assert.equal(pull.align, "center", "the justification rides on `align`");
+});
+
+test("kind + align round-trip through blocksToHtml", () => {
+  const html = A.blocksToHtml([{ type: "pull", text: "A display callout.", kind: "pull", align: "right" }]);
+  assert.match(html, /<blockquote class="np-pull" style="text-align:right">A display callout\.<\/blockquote>/, "the flavour and justification re-emit, editable");
+  const plain = A.blocksToHtml([{ type: "pull", text: "Passage.", kind: "block" }]);
+  assert.match(plain, /^<blockquote>Passage\.<\/blockquote>$/, "a block quote stays a bare blockquote");
+});
