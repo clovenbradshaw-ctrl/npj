@@ -1406,14 +1406,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     }
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
     // Credit the piece EXACTLY as the publish gate will, so the preview's byline
-    // matches the public page: the actor is the recorded author, the typed name
-    // becomes an override only when it differs from the contributor's resolved
-    // name, and the editors field is parsed the same way (names or mxids, split
-    // on commas/newlines). Without this the preview showed only the author and
-    // silently dropped the "Edited by" line that ships on publish.
+    // matches the public page: the actor is the recorded author, the SHOWN name is
+    // always the manual entry — whatever the author typed (falling back to their
+    // committed profile name only when the field is blank) is carried as the byline
+    // override verbatim, never resolved live from the Matrix id. The editors field
+    // is parsed the same way (names or mxids, split on commas/newlines). Without
+    // this the preview showed only the author and silently dropped the "Edited by"
+    // line that ships on publish.
     const profileName = (actor && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[actor] && window.NPJ.PEOPLE[actor].name) || "";
     const typedName = (byline && byline.trim()) || profileName;
-    const bylineOverride = typedName && typedName !== profileName ? typedName : "";
+    const bylineOverride = typedName || "";
     const previewEditors = String(editorsField || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
     try {
       const gen = window.NpjArticles.genesisFromContent(
@@ -3742,12 +3744,12 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const bylineEditors = parseEditors(editorsInput);
   // the userid stored on the backend record — you, the signed-in publisher
   const bylineAuthors = meMx ? [meMx] : [];
-  // Publishing under your own name keeps the rich contributor chip — but ONLY
-  // when that name is the one your COMMITTED profile resolves to, so the byline
-  // can resolve live from your id. Otherwise whatever you type is stored as an
-  // explicit byline override, so readers never see the raw Matrix localpart.
+  // The byline is always the MANUAL entry: whatever name you type is stored as an
+  // explicit byline override and shown verbatim, so readers see exactly that and
+  // never the raw Matrix localpart resolved live from your id. Your account id
+  // (meMx) still rides the record in `authors`, so attribution is preserved.
   const typedName = nameInput.trim();
-  const bylineOverride = typedName && typedName !== profileName ? typedName : "";
+  const bylineOverride = typedName || "";
 
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {
