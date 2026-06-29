@@ -3470,8 +3470,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
         customSlug={fileSlug} onSlug={setFileSlug}
         getContent={() => ({ html: ed.current ? ed.current.innerHTML : "", title, tags, column, definitions, sources })} />}
-      {previewDoc && window.NpjPreview && (
-        <window.NpjPreview article={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
+      {previewDoc && window.ArticleRead && (
+        <window.ArticleRead preview previewArticle={previewDoc} onClose={() => setPreviewDoc(null)} onRefresh={openPreview} me={session && session.user_id} />
       )}
     </div>
   );

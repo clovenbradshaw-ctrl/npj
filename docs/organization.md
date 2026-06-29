@@ -90,7 +90,7 @@ is a candidate holon: one directory, one `index.js`, one global surface.
 | **`redaction/`** | `NpjPII` | `pii.js`, `CiteyRedact.jsx`, `PdfRedactView.jsx` | `NUL` hold · `DEF`→void |
 | **`media/`** | `NpjMedia`, `NpjEmbed` | `media-store.js`, `image-slot.js`*, `photo-editor.js`, `PdfView.jsx`, `embed.js` | — (carriers) |
 | **`identity/`** | `MatrixAuth`, `NpjProfiles`, `NpjDrafts`, `PasskeyVault` | `matrix-auth.js`, `profiles.js`, `passkey-vault.js`, `drafts.js` | — (provenance) |
-| **`editor/`** | (mounts core/record/grounding) | `Newsroom.jsx`*, `GroundingWorkspace.jsx`*, `PreviewScreen.jsx` (standalone publish-preview; draws media from Matrix), `PostStructure.jsx`, `SourcePicker/Viewer/Adapter/Explorer.jsx`, `InterviewSource.jsx`, `DefinitionsRail.jsx` | writes `INS`/`REC`/`CON` |
+| **`editor/`** | (mounts core/record/grounding) | `Newsroom.jsx`*, `GroundingWorkspace.jsx`*, `PostStructure.jsx`, `SourcePicker/Viewer/Adapter/Explorer.jsx`, `InterviewSource.jsx`, `DefinitionsRail.jsx` | writes `INS`/`REC`/`CON` |
 | **`reader/`** | `SourceViewer` etc. | `ArticleRead.jsx`*, `FrontPage.jsx`, `Contributors.jsx`, `Standards.jsx`, `ArticleEdit.jsx` | projects the log |
 | **`feedback/`** | `NpjFeedback` | `feedback.js`, `SuggestionRail.jsx` | **`EVA` evaluate** · `REC` merge |
 | **`admin/`** | `LayoutCtx` | `AdminEditor.jsx`, `layout.jsx`, `Documents.jsx`, `Data.jsx`, `Entities.jsx`, `Submit.jsx`, `Invite.jsx` | layout `REC` |

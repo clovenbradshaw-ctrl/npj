@@ -1,8 +1,8 @@
 /* preview-fold.test.js — the "preview stays in sync with the editor" invariants.
  *
- * The standalone Preview (app/editor/PreviewScreen.jsx) renders the SAME block
- * model the publish pipeline produces — htmlToBlocks(html, { preview }) — so any
- * drift between the editor and the preview is a fold bug, not a renderer bug.
+ * The editor's Preview (the reader's renderer in `preview` mode) draws the SAME
+ * block model the publish pipeline produces — htmlToBlocks(html, { preview }) — so
+ * any drift between the editor and the preview is a fold bug, not a renderer bug.
  * Two such drifts have bitten before; these guard them:
  *
  *   • A not-yet-uploaded photo lives only as a session data: URL on the live
