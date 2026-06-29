@@ -463,8 +463,8 @@
      event file changes the key and the slug refolds; an unchanged document is
      served from cache. A slug with event files but no genesis anchor is skipped
      (an orphan can't define a document). */
-  async function listDocs() {
-    const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" } });
+  async function listDocs(signal) {
+    const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" }, signal });
     if (!res.ok) throw new Error("github " + res.status);
     const tree = ((await res.json()) || {}).tree || [];
     const bySlug = {};
@@ -1384,9 +1384,38 @@
   // REPUBLISH of an already-anchored slug is itself a NEW event file (a fresh INS
   // that re-seeds state on fold) — so the genesis is written exactly once and
   // never edited.
-  function publishGenesis({ slug, line, token, message, republish }) {
-    const filename = republish ? eventPath(slug, "ins", line) : filenameFor(slug);
-    return commitFile({ filename, line, token, message: message || ((republish ? "republish: " : "publish: ") + slug) });
+  async function publishGenesis({ slug, line, token, message, republish }) {
+    // The genesis anchor articles/<slug>.jsonl is written EXACTLY ONCE — every
+    // later publish of the same slug must land as its OWN new event file, so the
+    // history is append-only and the original publish line is never overwritten.
+    // The caller's `republish` flag is derived from the in-memory front index,
+    // which can be cold/stale when the editor opens straight to a draft — so a
+    // republish could be misrouted back onto the genesis (a destructive
+    // overwrite, and no new file appears). Guard it against the LIVE git-tree:
+    // if the genesis already exists, force the event-file path regardless. We
+    // only ever upgrade first-publish → republish (never the reverse), and on any
+    // listing failure we trust the caller's flag — a true first publish still
+    // needs its genesis even when the tree can't be read.
+    let isRepublish = !!republish;
+    if (!isRepublish) {
+      // Bound the probe the same way the commit is: a stalled git-tree read must
+      // never hang the publish — it just times out and we trust the caller's flag.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), COMMIT_MS);
+      try {
+        const s = slugify(slug) || slug;
+        const docs = await listDocs(ctrl.signal);
+        if (docs.some(d => d.slug === s)) isRepublish = true;
+      } catch (e) { /* tree unreadable/aborted — fall back to the caller's flag */ }
+      finally { clearTimeout(timer); }
+    }
+    const filename = isRepublish ? eventPath(slug, "ins", line) : filenameFor(slug);
+    // keep the commit message honest about which it turned out to be (a caller's
+    // custom, non-default message is still respected)
+    const msg = (message && !/^(?:re)?publish: /.test(message))
+      ? message
+      : ((isRepublish ? "republish: " : "publish: ") + slug);
+    return commitFile({ filename, line, token, message: msg });
   }
   // One REC event → its OWN new file. The current status (published/unpublished)
   // is stamped into the event so each file self-records publication state, and a

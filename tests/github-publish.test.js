@@ -14,16 +14,21 @@ const A = require("../app/record/articles.js");
 
 // capture every POST the write path makes, and answer with the webhook's
 // success contract ({ gh_ok, commit_sha, bytes }).
+// publishGenesis confirms a first-publish against the live git-tree before it
+// writes the genesis (so a cold front index can't overwrite it on republish);
+// answer that read with an empty tree, and capture only the webhook COMMITS so
+// the assertions below count writes, not the existence probe.
 function captureFetch() {
-  const calls = [];
+  const all = [];
   const prev = globalThis.fetch;
   globalThis.fetch = async (url, opts) => {
+    if (/git\/trees\//.test(String(url))) return { ok: true, status: 200, json: async () => ({ tree: [] }) };
     const body = opts && opts.body ? JSON.parse(opts.body) : null;
-    calls.push({ url, headers: (opts && opts.headers) || {}, body, hadSignal: !!(opts && opts.signal) });
+    all.push({ url, headers: (opts && opts.headers) || {}, body, hadSignal: !!(opts && opts.signal) });
     return { ok: true, status: 200, json: async () => ({ gh_ok: true, commit_sha: "abc1234", bytes: (body && body.contentRaw || "").length }) };
   };
   globalThis.fetch.restore = () => { if (prev === undefined) delete globalThis.fetch; else globalThis.fetch = prev; };
-  return calls;
+  return all;
 }
 
 const PAYLOAD = { slug: "demo-article", line: '{"op":"INS","operand":{"slug":"demo-article"}}', token: "tok", message: "publish: demo-article" };
@@ -56,6 +61,26 @@ test("a republish writes a NEW event file, never the genesis", async () => {
     assert.notEqual(c.body.filename, "articles/demo-article.jsonl", "the genesis is never re-edited");
     assert.equal(c.body.mode, "overwrite", "a clean create");
   } finally { globalThis.fetch.restore(); }
+});
+
+test("a publish of an already-anchored slug appends a new event file even when not flagged republish", async () => {
+  // the front index was cold, so the caller passes no republish flag — but the
+  // genesis already exists in the live git-tree. publishGenesis must NOT overwrite
+  // articles/<slug>.jsonl; it appends a fresh INS event file, keeping the log append-only.
+  const commits = [];
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url, opts) => {
+    if (/git\/trees\//.test(String(url))) return { ok: true, status: 200, json: async () => ({ tree: [{ type: "blob", path: "articles/demo-article.jsonl", sha: "deadbeef" }] }) };
+    const body = opts && opts.body ? JSON.parse(opts.body) : null;
+    commits.push({ url, body });
+    return { ok: true, status: 200, json: async () => ({ gh_ok: true, commit_sha: "abc1234" }) };
+  };
+  try {
+    await A.publishGenesis(PAYLOAD); // no republish flag
+    assert.equal(commits.length, 1, "one commit");
+    assert.match(commits[0].body.filename, EVT, "the genesis already exists → a new event file, not the anchor");
+    assert.notEqual(commits[0].body.filename, "articles/demo-article.jsonl", "the genesis is never overwritten");
+  } finally { if (prev === undefined) delete globalThis.fetch; else globalThis.fetch = prev; }
 });
 
 test("appendEdit and setArticleStatus each write their own new event file", async () => {

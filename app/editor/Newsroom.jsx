@@ -3547,22 +3547,24 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const parseEditors = (s) => String(s || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
   const [unsigned, setUnsigned] = useState(false);
-  // Byline is a plain name now — type how you want to be credited. It defaults
-  // to your profile display name. Whatever name you show, your Matrix id (meMx)
-  // is recorded as the author on the committed record, so attribution survives.
+  // Byline is a plain name now — type how you want to be credited. The field is
+  // pre-filled ONLY from a committed contributor profile (window.NPJ.PEOPLE); with
+  // no profile it starts empty (a "Your name" placeholder) so the piece never
+  // silently adopts your Matrix handle. Whatever name you show, your Matrix id
+  // (meMx) is recorded as the author on the committed record, so attribution survives.
+  const profileName = (meMx && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[meMx] && window.NPJ.PEOPLE[meMx].name) || "";
+  // the name readers see if you type nothing: your profile name, else the Matrix
+  // localpart (the "matrix name"). Shown in the preview so the fallback is never hidden.
   const defaultName = meMx ? nameOfMx(meMx) : "";
-  const [nameInput, setNameInput] = useState(defaultName);
+  const [nameInput, setNameInput] = useState(profileName);
   const [editorsInput, setEditorsInput] = useState("");
   const bylineEditors = parseEditors(editorsInput);
   // the userid stored on the backend record — you, the signed-in publisher
   const bylineAuthors = meMx ? [meMx] : [];
   // Publishing under your own name keeps the rich contributor chip — but ONLY
-  // when that name is the one your COMMITTED profile (window.NPJ.PEOPLE) resolves
-  // to, so the byline can resolve live from your id. With no profile, defaultName
-  // is just your Matrix localpart (the "matrix name") — which readers must never
-  // see — so whatever you type is stored as an explicit byline override. Either
-  // way meMx stays the recorded author, so attribution survives.
-  const profileName = (meMx && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[meMx] && window.NPJ.PEOPLE[meMx].name) || "";
+  // when that name is the one your COMMITTED profile resolves to, so the byline
+  // can resolve live from your id. Otherwise whatever you type is stored as an
+  // explicit byline override, so readers never see the raw Matrix localpart.
   const typedName = nameInput.trim();
   const bylineOverride = typedName && typedName !== profileName ? typedName : "";
 
@@ -3882,7 +3884,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                   <React.Fragment>
                     <input value={nameInput} onChange={e => setNameInput(e.target.value)} placeholder="Your name"
                       style={{ width: "100%", boxSizing: "border-box", marginTop: 6, border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 13, fontFamily: "var(--cond)", outline: "none" }} />
-                    <div className="np-mono" style={{ fontSize: 9, color: NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>The name readers see. {meMx ? "Recorded on the record as " + meMx + "." : "Sign in so your account is recorded with the byline."}</div>
+                    <div className="np-mono" style={{ fontSize: 9, color: (!typedName && !profileName && meMx) ? NR.warn : NR.muted, margin: "3px 0 0", lineHeight: 1.5 }}>The name readers see. {meMx ? "Recorded on the record as " + meMx + "." : "Sign in so your account is recorded with the byline."}{(!typedName && !profileName && meMx) ? " Type a name, or readers will see your Matrix handle “" + defaultName + ".”" : ""}</div>
                   </React.Fragment>
                 )}
                 <input value={editorsInput} onChange={e => setEditorsInput(e.target.value)} placeholder="Editor name, or @editor:server  (optional)" className="np-mono" spellCheck={false}

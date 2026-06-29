@@ -23,11 +23,15 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   // It's a plain name now: seed it from the stored byline string, else the
   // resolved name of the first credited author. The author's userid stays in
   // A.authors and rides through every edit untouched (the backend keeps it).
+  // Seed from a stored byline string; failing that, ONLY from a committed
+  // contributor profile (window.NPJ.PEOPLE) for the first credited author. With no
+  // profile the field stays empty (a "Author name" placeholder) so an edit never
+  // silently re-credits the piece to the raw Matrix handle.
   const initialName = (() => {
     const bl = (A.byline || "").trim();
     if (bl && bl.toLowerCase() !== "unsigned") return bl;
     const first = (A.authors || []).filter(Boolean)[0];
-    if (first) return window.npjPerson ? window.npjPerson(first).name : String(first).replace(/^@/, "").split(":")[0];
+    if (first && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[first] && window.NPJ.PEOPLE[first].name) return window.NPJ.PEOPLE[first].name;
     return "";
   })();
   const [nameInput, setNameInput] = useState(initialName);
