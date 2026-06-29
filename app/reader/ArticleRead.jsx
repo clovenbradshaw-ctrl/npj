@@ -1206,7 +1206,12 @@ function ArticleRead(props) {
             : { ...base, fontSize: 20, lineHeight: 1.55, paddingLeft: 20, borderLeft: "3px solid var(--yellow-deep)" };
           return (
             <blockquote key={i} className={isPull ? "np-pullquote" : "np-blockquote"} style={style}>
-              {b.text}
+              {/* A grounded quote renders its tokens so the quoted passage carries
+                 its citation — the claim span, its source card on hover/tap, the
+                 lens tint, the footnote marker — instead of inert text. A plain
+                 quote renders its text. Either way trailing stranded footnote
+                 markers (folded onto `marks`) render after. */}
+              {(b.tokens && b.tokens.length) ? renderTokens(b.tokens) : b.text}
               {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
               {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400, letterSpacing: 0 }}>{b.attribution}</footer> : null}
             </blockquote>

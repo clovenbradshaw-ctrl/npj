@@ -126,9 +126,13 @@
     const attached = new Set();
     src.forEach(b => {
       if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
-      // a blockquote can't hold inline tokens, so its footnote rides on `marks` — a
-      // real reference all the same, so its key blocks a later stranded duplicate.
-      if (b && b.type === "pull") (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      // a quote's footnote rides on `marks` (a plain quote) or inline in `tokens` (a
+      // grounded quote) — either is a real reference, so its key blocks a later
+      // stranded duplicate.
+      if (b && b.type === "pull") {
+        (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+        (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      }
     });
     // keep a stranded marker only while its key is still fresh; claiming the key as
     // we go means two strays of one key fold just once, never twice.
@@ -235,8 +239,13 @@
       case "h2": if ((b.text || "").trim()) out.push("## " + b.text.trim(), ""); break;
       case "h3": if ((b.text || "").trim()) out.push("### " + b.text.trim(), ""); break;
       case "pull": {
-        // a footnote on the quote rides as a trailing reference on the last line
-        out.push("> " + String(b.text || "").trim().replace(/\n/g, "\n> ") + tokensToMd(b.marks || [], ctx));
+        // a grounded quote renders its tokens so the cited passage keeps its
+        // numbered source reference; a plain quote renders its text. A footnote on
+        // the quote rides as a trailing reference on the last line.
+        const inner = (b.tokens && b.tokens.length)
+          ? tokensToMd(b.tokens, ctx).trim() + tokensToMd(b.marks || [], ctx)
+          : String(b.text || "").trim().replace(/\n/g, "\n> ") + tokensToMd(b.marks || [], ctx);
+        out.push("> " + inner.replace(/\n/g, "\n> "));
         if (b.attribution) out.push(">", "> — " + b.attribution);
         out.push("");
         break;

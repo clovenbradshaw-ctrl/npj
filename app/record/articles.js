@@ -205,9 +205,13 @@
     const attached = new Set();
     src.forEach(b => {
       if (b && b.type === "p" && !onlyFnMarkers(b.tokens)) (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
-      // a blockquote can't hold inline tokens, so its footnote rides on `marks` — a
-      // real reference all the same, so its key blocks a later stranded duplicate.
-      if (b && b.type === "pull") (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      // a quote's footnote rides on `marks` (a plain quote) or inline in `tokens` (a
+      // grounded quote) — either is a real reference, so its key blocks a later
+      // stranded duplicate.
+      if (b && b.type === "pull") {
+        (b.marks || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+        (b.tokens || []).forEach(t => { if (isFnMarker(t) && t.key) attached.add(t.key); });
+      }
     });
     // keep a stranded marker only while its key is still fresh; claiming the key as
     // we go means two strays of one key fold just once, never twice.
@@ -923,7 +927,23 @@
         if (qt) {
           const pull = { type: "pull", text: qt, attribution: "", kind: isPull ? "pull" : "block" };
           if (align && align !== "left") pull.align = align;
-          if (marks.length) pull.marks = marks;
+          // A quote can be GROUNDED: the author wrapped it (or part of it) in a
+          // claim-src / eo-claim span carrying a source + pinned passage, or
+          // declared it an owned assertion (a stance / a documented void). The
+          // plain `text` above keeps excerpts and exports simple, but we ALSO keep
+          // the inline tokens so the reader renders the quote as a live citation —
+          // the hover/tap source card, the lens tint, the footnote marker — instead
+          // of inert prose (the bug: "no popup or citation even though it's in the
+          // code"). inlineTokens already folds a trailing <sup class="md-cite"> onto
+          // the claim (a footnote becomes a {t:sup} token; a cite marker merges its
+          // key/quote), so when tokens carry the grounding we don't also set `marks`
+          // — that would double the footnote. A PLAIN quote keeps the lean
+          // text + marks path, byte-for-byte as before.
+          const toks = inlineTokens(node);
+          const grounded = toks.some(t => t && typeof t === "object" &&
+            (t.stance || (Array.isArray(t.src) && t.src.length)));
+          if (grounded) pull.tokens = toks;
+          else if (marks.length) pull.marks = marks;
           blocks.push(pull);
         }
         return;
@@ -1164,7 +1184,12 @@
       if (b.type === "pull") {
         const cls = b.kind === "pull" ? ' class="np-pull"' : "";
         const sty = (b.align && b.align !== "left") ? ' style="text-align:' + b.align + '"' : "";
-        return "<blockquote" + cls + sty + ">" + esc(b.text) + tokensToHtml(b.marks || []) + "</blockquote>";
+        // A grounded quote round-trips its inline tokens (the claim-src spans + cite
+        // markers) so re-editing keeps the citation; a plain quote stays text + marks.
+        const inner = (b.tokens && b.tokens.length)
+          ? tokensToHtml(b.tokens) + tokensToHtml(b.marks || [])
+          : esc(b.text) + tokensToHtml(b.marks || []);
+        return "<blockquote" + cls + sty + ">" + inner + "</blockquote>";
       }
       if (b.type === "ul" || b.type === "ol") return "<" + b.type + ">" + (b.items || []).map(it => "<li>" + tokensToHtml(it) + "</li>").join("") + "</" + b.type + ">";
       if (b.type === "hr") return "<hr/>";
