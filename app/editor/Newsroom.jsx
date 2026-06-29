@@ -278,6 +278,29 @@ function nrNormalizeEmbeds(root) {
 // to leave filenames like "…-and-the-people-.md"
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
+// A published piece is anchored by a permanent GUID, not its headline: the
+// share URL is #article;read=<guid> and the file is articles/<guid>.jsonl, so
+// the link never changes when the title is later edited. A v4 UUID is lowercase
+// hex + single hyphens, so it survives slugify() untouched (the read path
+// slugifies every slug it resolves). genGuid prefers crypto.randomUUID, falls
+// back to getRandomValues, and finally to a plain template — same shape either way.
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+function genGuid() {
+  try { if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID(); } catch (e) {}
+  try {
+    if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+      const b = crypto.getRandomValues(new Uint8Array(16));
+      b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80; // version 4, RFC4122 variant
+      const h = Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+      return h.slice(0, 8) + "-" + h.slice(8, 12) + "-" + h.slice(12, 16) + "-" + h.slice(16, 20) + "-" + h.slice(20);
+    }
+  } catch (e) {}
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = Math.floor(Math.random() * 16);
+    return (c === "x" ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
 // Show an image that may still live on the Matrix media store. A bare <img>
 // can't load such a URL on an authenticated-media homeserver (Matrix 1.11+):
 // the unauthenticated GET is refused, so a freshly dropped/uploaded photo that
@@ -2823,8 +2846,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <span style={{ fontFamily: "var(--display)", fontSize: 20, color: NR.text }}>NEWSROOM</span>
           </button>
           {/* clipped so a long headline can't widen the bar and shove the controls */}
-          <span className="np-mono npj-hide-sm" title={fileSlug ? "custom document name — set at the publish gate" : "document name follows the headline — rename it at the publish gate"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fileSlug || slugify(title) || "untitled"}</span>/
+          <span className="np-mono npj-hide-sm" title={fileSlug ? ("permanent id: " + fileSlug + " — the published link never changes when you edit the headline") : "this piece gets a permanent id at the publish gate, so its link never changes when you edit the headline"} style={{ fontSize: 11.5, color: NR.muted, display: "inline-flex", alignItems: "center", maxWidth: 180, flex: "0 1 auto", minWidth: 0 }}>
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{slugify(title) || "untitled"}</span>/
           </span>
         </div>
         </div>{/* end LEFT zone */}
@@ -3660,13 +3683,14 @@ function Spinner() { return <span style={{ width: 11, height: 11, border: "2px s
    step reports what actually happened, and a failed step stops the run — no
    checkmark is ever painted on something that didn't succeed. */
 function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug, draftId, initialByline, initialEditors }) {
-  // the filename is the author's call — it follows the headline until they
-  // rename it at the gate, and a custom name sticks with the draft
-  const auto = slugify(title) || "untitled";
-  const [slugVal, setSlugVal] = useState(customSlug || auto);
-  const slug = slugify(slugVal) || "untitled";
+  // The published stub is a permanent GUID, minted once and frozen — the share
+  // URL is #article;read=<guid>, so the link never changes when the headline is
+  // edited later. Reuse the draft's already-assigned GUID; mint one the first
+  // time a piece reaches the gate and persist it onto the draft (via onSlug) so
+  // it survives reopening the gate and a reload.
+  const [slug] = useState(() => (GUID_RE.test(customSlug || "") ? customSlug : genGuid()));
+  useEffect(() => { if (onSlug && slug !== customSlug) onSlug(slug); }, [slug]);
   const articleUrl = window.npjArticleUrl(slug);
-  const editSlug = (v) => { setSlugVal(v); if (onSlug) { const s = slugify(v); onSlug(!s || s === auto ? "" : s); } };
 
   // Already in the committed record? Then this gate is a REPUBLISH, not a first
   // publish — the copy + step labels + confirm button adapt so it never claims
@@ -4002,10 +4026,8 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             }</div>
             <Row k="Item">
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
-                <input value={slugVal} onChange={e => editSlug(e.target.value)} placeholder={auto} title="Name the document anything — it doesn't have to match the headline" className="np-mono" spellCheck={false}
-                  style={{ width: "min(300px, 56vw)", border: "1px solid " + NR.line, background: NR.field, color: NR.text, padding: "5px 7px", fontSize: 12, outline: "none" }} />
-                <span className="np-mono" style={{ fontSize: 11 }}>/</span>
-                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ GitHub · articles/{slug}.jsonl{slugVal !== slug ? " · saved as " + slug : ""} — each publish &amp; edit appends one line to its append-only log</span>
+                <span className="np-mono" style={{ fontSize: 12, color: NR.text }}>articles/{slug}.jsonl</span>
+                <span className="np-mono" style={{ fontSize: 10, color: NR.muted }}>→ GitHub · a permanent id, so the link never changes when the headline is edited — each publish &amp; edit appends one line to its append-only log</span>
               </span>
             </Row>
             <Row k="Live at">{articleUrl}</Row>
