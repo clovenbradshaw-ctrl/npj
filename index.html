@@ -372,6 +372,21 @@ function App() {
   // commits a real REC through the authorized edit path (admin + assignees).
   const [suggestions, setSuggestions] = useState([]);
   const fbToken = () => (window.MatrixAuth && window.MatrixAuth.token && window.MatrixAuth.token()) || null;
+  // the live signed-in id (post-signup it's fresh even before `me` re-derives),
+  // so a just-created reader is credited correctly on their own deposit
+  const liveMe = () => (window.MatrixAuth && window.MatrixAuth.current && (window.MatrixAuth.current() || {}).user_id) || me;
+  // Anyone online can post a suggestion: if they have no account yet, mint one on
+  // the site's homeserver and sign them in IN PLACE (no navigation away from the
+  // story), so the queued deposit posts as them through the open suggest webhook.
+  const onSignUp = useCallback(async ({ username, displayName } = {}) => {
+    const sess = await window.MatrixAuth.signUp({ username, displayName });
+    setSession(sess);
+    if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
+      const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(sess.user_id) : "#b23a26";
+      window.NPJ.PEOPLE[sess.user_id] = { name: (displayName && displayName.trim()) || sess.user_id.replace(/^@/, "").split(":")[0], role: "Reader", trust: "open", color: col };
+    }
+    return sess;
+  }, [me]);
   const reloadFeedback = useCallback(() => {
     const A = window.NPJ.ARTICLE; if (!A || !A.slug) { setSuggestions([]); return Promise.resolve(); }
     return window.NpjFeedback.load(A.slug, { base_sha: A.base_sha }).then(setSuggestions).catch(() => {});
@@ -384,19 +399,19 @@ function App() {
   const onVote = (id) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
     setSuggestions(list => list.map(s => s.id === id ? { ...s, voted: !s.voted, votes: s.votes + (s.voted ? -1 : 1) } : s));
-    window.NpjFeedback.vote({ slug: A.slug, ref: id, author: me, token: fbToken() });
+    window.NpjFeedback.vote({ slug: A.slug, ref: id, author: liveMe(), token: fbToken() });
   };
   const onResolve = (id, outcome) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.resolve({ slug: A.slug, ref: id, outcome, author: me, token: fbToken() }).then(reloadFeedback);
+    window.NpjFeedback.resolve({ slug: A.slug, ref: id, outcome, author: liveMe(), token: fbToken() }).then(reloadFeedback);
   };
   const onReply = (id, text) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.reply({ slug: A.slug, ref: id, text, author: me, token: fbToken() }).then(reloadFeedback);
+    window.NpjFeedback.reply({ slug: A.slug, ref: id, text, author: liveMe(), token: fbToken() }).then(reloadFeedback);
   };
   const onAddSuggestion = (draft) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: me, base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
+    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: liveMe(), base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
   };
   // Merge a suggestion: apply its words to the body + commit a REC, then fold the
   // updated article in place (same path as the Edit overlay). Returns the merge
@@ -563,6 +578,7 @@ function App() {
           audit={audit} setAudit={setAudit}
           showSugg={showSugg} setShowSugg={setShowSugg}
           suggestions={suggestions} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onAddSuggestion={onAddSuggestion}
+          signedIn={!!session} onSignUp={onSignUp}
           filter={filter} setFilter={setFilter}
           entityData={entityData} entityOpen={entityOpen} setEntityOpen={setEntityOpen}
           activeEntity={activeEntity} setActiveEntity={setActiveEntity}

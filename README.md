@@ -120,10 +120,13 @@ chrome.
 
 ## Reader feedback, considered for merge (the PR idea, not the PR UX)
 
-The record stays open to public suggestion — span by span. In the reader, select
-**any words** in a story and a small bubble offers **Suggest edit** (propose the
-exact replacement words) or **Comment** (pin a note to the span). Each lands as
-an **EVA deposit** in the article's own folder (`app/feedback/feedback.js`,
+The record stays open to public suggestion — span by span, **open to anyone
+online**. A **Suggest** toggle sits in the reader's control bar: switch it on and
+selecting **any words** in a story floats a small bubble offering **Suggest edit**
+(propose the exact replacement words) or **Comment** (pin a note to the span). No
+account? Posting mints a free **hyphae.social** account in one tap
+(`MatrixAuth.signUp` → register + sign-in, no page to leave) and deposits as you.
+Each lands as an **EVA deposit** in the article's own folder (`app/feedback/feedback.js`,
 `articles/<slug>/…-eva-….jsonl`) and folds as a no-op for the article itself — so
 a proposal never changes a published word. Open suggestions are painted right
 into the prose (a soft dashed underline, the way a Google-Docs suggestion shows
@@ -137,10 +140,19 @@ and committed as an ordinary **REC** edit — attributed, with the reader's
 rationale as the edit note — then the suggestion is marked *merged*. A suggestion
 whose words are gone (the base moved) shows a clean **conflict**, never a silent
 wrong edit. Proposing is open to anyone; merging stays gated to the people who
-can already edit the piece. Everything is mirrored to `localStorage` so it
-survives a refresh, and rides the same auditable GitHub commit machinery as the
-article (see [`backend/README.md`](backend/README.md) for the EVA model + the one
-webhook rule that opens proposing to any verified reader).
+can already edit the piece. The author also sees the open suggestions **inside
+the edit-after-publish editor** (`app/reader/ArticleEdit.jsx`): each one can be
+**applied** straight into the draft (a claim-anchored suggestion swaps the words
+inside its bound span, so the citation survives) and then committed like any
+other edit. Everything is mirrored to `localStorage` so it survives a refresh.
+
+Open submissions ride a **separate, write-only webhook** — `site/suggest-npj`
+(`backend/npj-suggest.n8n.json`) — whose only power is to *create* one
+`*-eva-*.jsonl` in an article's folder: it verifies the caller's Matrix token,
+re-stamps the author from it (you can't post as someone else), and can never
+touch a published word. The merge is still a gated `REC` on `publish-npj`. (Only
+suggestion text lives in GitHub; archive.org stays the media host — see
+[`backend/README.md`](backend/README.md) for the EVA model + the webhook.)
 
 That public rail is for the record — proposals anyone can read. The *working*
 conversation between the people building a piece is a separate, **private** layer.

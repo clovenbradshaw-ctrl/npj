@@ -166,17 +166,46 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
   );
 }
 
-/* compose a new suggestion or comment, pinned to the selected span */
-function Compose({ draft, onSubmit, onCancel, me }) {
+/* friendly text for a sign-up failure — register()/signUp() throw coded errors
+   (closed homeserver, CAPTCHA/email/token-gated, network) with a plain message */
+function signupErrorText(e) {
+  if (!e) return "Couldn't create the account — please try again.";
+  if (e.code === "network") return "Couldn't reach the homeserver. Check your connection and try again.";
+  if (e.message) return e.message;
+  return "Couldn't create the account — please try again.";
+}
+
+/* compose a new suggestion or comment, pinned to the selected span. Anyone can
+   propose: if the reader has no account yet, posting first mints one on the
+   site's homeserver (a quick, one-tap hyphae.social sign-up) and signs them in,
+   then deposits the suggestion as them. */
+function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
   const quote = draft.quote || "";
   const [kind, setKind] = useState(draft.kind || "suggestion");
   const [proposed, setProposed] = useState(quote);
   const [rationale, setRationale] = useState("");
+  // anonymous reader → quick account: an optional display name (handle auto-mints)
+  const [acctName, setAcctName] = useState("");
+  const [acctBusy, setAcctBusy] = useState(false);
+  const [acctErr, setAcctErr] = useState(null);
   const isSugg = kind === "suggestion";
   const valid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
     : rationale.trim().length >= 2;
-  const submit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  // signed in → deposit straight away; otherwise mint + sign in, then deposit
+  const submit = async () => {
+    if (signedIn || !onSignUp) { deposit(); return; }
+    setAcctBusy(true); setAcctErr(null);
+    try {
+      await onSignUp({ displayName: acctName.trim() || undefined });
+      deposit();
+    } catch (e) {
+      setAcctErr(signupErrorText(e));
+    } finally {
+      setAcctBusy(false);
+    }
+  };
   return (
     <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", marginBottom: 14, boxShadow: "5px 5px 0 rgba(22,20,13,.14)" }}>
       <div style={{ background: "var(--yellow)", borderBottom: "1.5px solid var(--ink)", padding: "8px 11px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -213,12 +242,33 @@ function Compose({ draft, onSubmit, onCancel, me }) {
             {isSugg && proposed.trim() === quote.trim() ? "Edit the proposed text so it differs from the original." : "Add a short reason to deposit."}
           </div>
         )}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
-          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>as {me}</span>
-          <div style={{ display: "flex", gap: 7 }}>
-            <button className="btn btn-sm" onClick={onCancel}>Cancel</button>
-            <button className="btn btn-sm btn-primary" disabled={!valid} style={{ opacity: valid ? 1 : .45, cursor: valid ? "pointer" : "not-allowed" }}
-              onClick={submit}>{isSugg ? "Propose edit" : "Post comment"}</button>
+
+        {!signedIn && (
+          <div style={{ marginTop: 12, border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "10px 11px" }}>
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Post as a new account</div>
+            <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "5px 0 8px" }}>
+              You're not signed in. Posting creates a free account on <b>hyphae.social</b> — that's how an editor can credit you and reply. It takes one tap; you can set a password later.
+            </div>
+            <input value={acctName} onChange={e => setAcctName(e.target.value)} placeholder="Display name (optional)"
+              onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
+              style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
+            {acctErr && (
+              <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", border: "1px solid var(--reject)", padding: "6px 8px", marginTop: 8, lineHeight: 1.45 }}>{acctErr}</div>
+            )}
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11, gap: 8 }}>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {signedIn ? "as " + me : "new hyphae.social account"}
+          </span>
+          <div style={{ display: "flex", gap: 7, flexShrink: 0 }}>
+            <button className="btn btn-sm" onClick={onCancel} disabled={acctBusy}>Cancel</button>
+            <button className="btn btn-sm btn-primary" disabled={!valid || acctBusy} style={{ opacity: (valid && !acctBusy) ? 1 : .45, cursor: (valid && !acctBusy) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}
+              onClick={submit}>
+              {acctBusy && <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
+              {acctBusy ? "Creating account…" : signedIn ? (isSugg ? "Propose edit" : "Post comment") : "Create account & post"}
+            </button>
           </div>
         </div>
         <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.4 }}>
@@ -230,7 +280,7 @@ function Compose({ draft, onSubmit, onCancel, me }) {
 }
 
 function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, canReview,
-                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me }) {
+                         onVote, onReply, onResolve, onMerge, onShow, composeDraft, onSubmit, onCancelCompose, me, signedIn, onSignUp }) {
   const TRUST_RANK = { editor: 3, preferred: 2, open: 1 };
   const filtered = list.filter(s => {
     if (filter === "editor") return s.trust === "editor";
@@ -266,7 +316,7 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
       </div>
 
       <div style={{ padding: "14px 16px 40px", flex: 1 }}>
-        {composeDraft && <Compose draft={composeDraft} me={me} onSubmit={onSubmit} onCancel={onCancelCompose} />}
+        {composeDraft && <Compose draft={composeDraft} me={me} signedIn={signedIn} onSignUp={onSignUp} onSubmit={onSubmit} onCancel={onCancelCompose} />}
 
         {!composeDraft && (
           <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "12px 13px", marginBottom: 16, display: "flex", gap: 11, alignItems: "center" }}>
@@ -306,4 +356,4 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
   );
 }
 
-Object.assign(window, { SuggestionRail, StatusChip, STATUS_META });
+Object.assign(window, { SuggestionRail, StatusChip, STATUS_META, DiffText });

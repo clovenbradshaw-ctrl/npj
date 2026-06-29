@@ -51,6 +51,64 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
   const seedHtml = useMemo(() => window.NpjArticles.blocksToHtml(A.body), [A]);
   const signedIn = !!(window.MatrixAuth && window.MatrixAuth.token && window.MatrixAuth.token());
 
+  // Reader feedback on the published piece, surfaced right here in the editor:
+  // open SUGGESTIONS (the exact words a reader would change) and COMMENTS (a note
+  // pinned to a span). A suggestion's words can be applied straight into the draft
+  // above with one tap; a comment is context the author reads and addresses by
+  // hand. `applied`/`gone` are local UI state — the deposit isn't resolved until
+  // the author commits and (optionally) marks it merged from the Suggestions rail.
+  const [reader, setReader] = useState([]);
+  const [applied, setApplied] = useState({}); // id → "applied" | "conflict"
+  useEffect(() => {
+    if (!A || !A.slug || !window.NpjFeedback) return;
+    let alive = true;
+    window.NpjFeedback.load(A.slug, { base_sha: A.base_sha })
+      .then(list => { if (alive) setReader((list || []).filter(s => s.status === "proposed" || s.status === "review")); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [A]);
+  // Apply a suggestion's proposed words into the contenteditable draft. Claim-
+  // anchored suggestions replace the text INSIDE the bound span (data-id), so the
+  // citation survives; otherwise the located span is swapped. The author reviews
+  // the result and commits one REC like any other edit.
+  const applySuggestion = (s) => {
+    const root = bodyRef.current;
+    if (!root || !window.NpjFeedback || s.kind !== "suggestion") return;
+    const quote = (s.anchor && s.anchor.quote) || "";
+    const proposed = s.proposed || "";
+    const doc = root.ownerDocument || document;
+    if (quote) {
+      const claimId = s.anchor && s.anchor.claimId;
+      if (claimId) {
+        const span = root.querySelector('.eo-claim[data-id="' + (window.CSS && CSS.escape ? CSS.escape(claimId) : claimId) + '"]');
+        if (span && (span.textContent || "").indexOf(quote) >= 0) {
+          span.textContent = (span.textContent || "").replace(quote, proposed);
+          setApplied(m => ({ ...m, [s.id]: "applied" })); return;
+        }
+      }
+      const range = window.NpjFeedback.locate(root, s.anchor);
+      if (range) {
+        try { range.deleteContents(); range.insertNode(doc.createTextNode(proposed)); setApplied(m => ({ ...m, [s.id]: "applied" })); return; }
+        catch (e) {}
+      }
+    }
+    setApplied(m => ({ ...m, [s.id]: "conflict" })); // base moved — apply by hand
+  };
+  // Scroll the editor body to a span and flash it.
+  const jumpToSpan = (s) => {
+    const root = bodyRef.current;
+    if (!root || !window.NpjFeedback || !s.anchor) return;
+    const range = window.NpjFeedback.locate(root, s.anchor);
+    if (!range) return;
+    try {
+      const rect = range.getBoundingClientRect();
+      const host = root.getBoundingClientRect();
+      if (rect && host) root.scrollTo({ top: root.scrollTop + (rect.top - host.top) - 40, behavior: "smooth" });
+      const sel = (root.ownerDocument || document).getSelection();
+      if (sel) { sel.removeAllRanges(); sel.addRange(range); }
+    } catch (e) {}
+  };
+
   const cmd = (c, v) => { document.execCommand(c, false, v || null); if (bodyRef.current) bodyRef.current.focus(); };
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
   // A block quote (a bordered passage) and a pull quote (a large display callout,
@@ -306,6 +364,56 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             dangerouslySetInnerHTML={{ __html: seedHtml }}
             style={{ minHeight: 320, maxHeight: "46vh", overflowY: "auto", border: "1.5px solid var(--ink)", background: "var(--card)",
               padding: "16px 18px", fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.6, outline: "none" }} />
+
+          {/* Reader suggestions & comments on the published piece — apply or read */}
+          {reader.length > 0 && (
+            <div style={{ marginTop: 16, border: "1.5px solid var(--ink)", background: "var(--paper-2)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 11px", borderBottom: "1px solid var(--rule)" }}>
+                <span style={{ fontFamily: "var(--display)", fontSize: 15 }}>READER SUGGESTIONS</span>
+                <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{reader.length} open</span>
+                <span style={{ flex: 1 }} />
+                <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>apply into the draft above, then commit</span>
+              </div>
+              <div style={{ padding: "4px 11px 10px" }}>
+                {reader.map(s => {
+                  const isSugg = s.kind === "suggestion";
+                  const state = applied[s.id];
+                  const before = (s.anchor && s.anchor.quote) || "";
+                  return (
+                    <div key={s.id} style={{ borderBottom: "1px solid var(--rule)", padding: "9px 0" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 5, flexWrap: "wrap" }}>
+                        <span className="chip" style={{ background: isSugg ? "var(--yellow)" : "var(--paper)", borderColor: "var(--ink)", fontSize: 11 }}>{isSugg ? "✎ Suggestion" : "💬 Comment"}</span>
+                        {window.Handle ? <window.Handle mxid={s.author} showName /> : <span className="np-mono" style={{ fontSize: 10.5 }}>{s.author}</span>}
+                        {s.stale && <span className="chip chip-stale" style={{ fontSize: 10 }}>⚠ stale</span>}
+                        <span style={{ flex: 1 }} />
+                        {s.votes ? <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>▲ {s.votes}</span> : null}
+                      </div>
+                      {before && (
+                        <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, color: "var(--ink-soft)", borderLeft: "3px solid var(--yellow-deep)", padding: "2px 8px", marginBottom: 5 }}>
+                          “{before.slice(0, 120)}{before.length > 120 ? "…" : ""}”
+                        </div>
+                      )}
+                      {isSugg && window.DiffText ? <window.DiffText before={before} after={s.proposed} /> : (isSugg && <div style={{ fontFamily: "var(--serif)", fontSize: 13 }}>→ {s.proposed}</div>)}
+                      {s.rationale && <div style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: "var(--ink)", marginTop: 4 }}>{s.rationale}</div>}
+                      <div style={{ display: "flex", gap: 7, marginTop: 7, flexWrap: "wrap" }}>
+                        {isSugg && (
+                          <button className="btn btn-sm" onClick={() => applySuggestion(s)} disabled={state === "applied"}
+                            style={{ background: state === "applied" ? "var(--verified)" : "var(--ink)", color: state === "applied" ? "#fff" : "var(--paper)", borderColor: "var(--ink)", opacity: state === "applied" ? .85 : 1 }}>
+                            {state === "applied" ? "✓ Applied — review & commit" : state === "conflict" ? "Re-apply" : "Apply to draft"}
+                          </button>
+                        )}
+                        <button className="btn btn-sm" onClick={() => jumpToSpan(s)}>Jump to span</button>
+                        {state === "conflict" && <span className="np-mono" style={{ fontSize: 10, color: "var(--reject)", alignSelf: "center" }}>those exact words aren't in the draft — apply by hand</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+                <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.45 }}>
+                  Applying inserts the proposed wording above — nothing is committed until you save. To formally mark a suggestion <b>merged</b> (crediting the reader), use Merge in the reader's Suggestions rail.
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Byline — the name readers see. Editable by anyone who can edit.
               The userid (recordedId) stays on the record; only the name changes. */}

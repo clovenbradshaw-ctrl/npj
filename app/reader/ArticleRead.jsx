@@ -583,6 +583,7 @@ function EmbedFigure({ url, caption, height, reload, previews = true }) {
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions = [], onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
+          signedIn, onSignUp,
           me, onHome, onNewsroom, onEdited,
           // Preview mode: render a draft EXACTLY as the public reader will, from a
           // prebuilt article object (the editor's live content folded through the
@@ -1182,10 +1183,12 @@ function ArticleRead(props) {
   };
 
   const Body = (
-    // Select-to-suggest is OFF on the external read view for now — no bubble on
-    // text selection. The feedback machinery (refreshBubble / compose / rail) is
-    // left intact so it can be switched back on by re-wiring these handlers.
-    <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}>
+    // Select-to-suggest is gated on the public SUGGEST toggle (showSugg): with the
+    // mode on, selecting any words floats the bubble (Suggest edit / Comment); with
+    // it off the read view is untouched — a plain article, no selection chrome.
+    <article ref={bodyRef} className={[transparency ? "ground-lens" : "", previews ? "previews-on" : ""].filter(Boolean).join(" ") || undefined} style={{ fontFamily: "var(--serif)" }}
+      onMouseUp={(showSugg && !preview) ? refreshBubble : undefined}
+      onTouchEnd={(showSugg && !preview) ? refreshBubble : undefined}>
       {A.body.map((b, i) => {
         if (b.type === "h2" || b.type === "h3") {
           const Tag = b.type;
@@ -1419,7 +1422,9 @@ function ArticleRead(props) {
   return (
     <div className="fade-in">
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
-      <ControlBar transLevel={transLevel} setTransLevel={setTransLevel} />
+      <ControlBar transLevel={transLevel} setTransLevel={setTransLevel}
+        suggesting={showSugg} onToggleSuggest={() => { setShowSugg(v => !v); setCompose(null); }}
+        openCount={suggestions.filter(s => s.status === "proposed" || s.status === "review").length} />
 
       {/* When a docked citation/note/grounding panel is up on a wide window, cede
          a right gutter for it so the column slides left and the two sit centered
@@ -1474,7 +1479,7 @@ function ArticleRead(props) {
       <SuggestionRail open={showSugg} onClose={() => { setShowSugg(false); setCompose(null); }}
         list={suggestions} claimById={claimById} filter={filter} setFilter={setFilter}
         canReview={canEditArticle} onVote={onVote} onResolve={onResolve} onReply={onReply} onMerge={onMerge} onShow={showInText}
-        composeDraft={compose}
+        composeDraft={compose} signedIn={signedIn} onSignUp={onSignUp}
         onSubmit={(d) => { onAddSuggestion(d); setCompose(null); }}
         onCancelCompose={() => setCompose(null)} me={me} />
       {showVersions && <window.VersionHistory versions={artVersions} onClose={() => setShowVersions(false)}
@@ -1623,12 +1628,25 @@ function TransparencyControl({ level, setLevel, isPhone }) {
    Suggestions rails. The single thing a reader steers is NPJ's transparency
    layer (how much of the grounding to surface), so that's the only control here.
    The hover side panel that opens off a claim is on by default (Standard), since
-   `previews` is true at every level but Clean. */
-function ControlBar({ transLevel, setTransLevel }) {
+   `previews` is true at every level but Clean.
+
+   The record stays open to public suggestion, so the bar also carries a SUGGEST
+   toggle: switch it on and anyone reading can select any sentence to propose an
+   edit or leave a comment (the Suggestions rail opens; open suggestions paint
+   into the prose). Posting prompts a one-tap hyphae.social sign-up if needed. */
+function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "flex-end" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "space-between" }}>
+        <button onClick={onToggleSuggest} className="np-cond" aria-pressed={!!suggesting}
+          title="Suggest edits or leave comments on any sentence — open to everyone"
+          style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+            border: "1.5px solid var(--ink)", background: suggesting ? "var(--ink)" : "transparent",
+            color: suggesting ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 9px" : "6px 12px",
+            fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
+          <span style={{ fontFamily: "var(--mono)" }}>⊨</span> {suggesting ? "Suggesting" : "Suggest"}{openCount ? " · " + openCount : ""}
+        </button>
         <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
       </div>
     </div>
