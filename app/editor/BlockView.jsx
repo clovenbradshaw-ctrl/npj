@@ -116,6 +116,10 @@
     var seeded = useRef(false);
     var chipState = useState([]);
     var chips = chipState[0], setChips = chipState[1];
+    // The card is only draggable while the grip handle is held — otherwise a
+    // text selection inside the contentEditable body would start a drag.
+    var grabState = useState(false);
+    var grabbable = grabState[0], setGrabbable = grabState[1];
 
     // recompute the citation chips for this block from its live DOM
     var refreshChips = useCallback(function () {
@@ -217,14 +221,29 @@
       try { chip.node.scrollIntoView({ block: "nearest" }); } catch (x) {}
     };
 
-    var card = { background: NR.field, border: "1px solid " + NR.line, borderRadius: 8, marginBottom: 12, position: "relative" };
+    var dragging = props.dragId === b.id;
+    var hint = props.dropHint;                 // { id, edge } where a drop would land
+    var showBefore = hint && hint.id === b.id && hint.edge === "before";
+    var showAfter = hint && hint.id === b.id && hint.edge === "after";
+    var dropLine = { height: 0, borderTop: "2px solid var(--yellow)", margin: "0 0 10px", borderRadius: 2 };
+    var card = { background: NR.field, border: "1px solid " + NR.line, borderRadius: 8, marginBottom: 12, position: "relative", opacity: dragging ? 0.4 : 1 };
     var head = { display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderBottom: "1px solid " + NR.line, flexWrap: "wrap" };
     var iconBtn = { background: "transparent", border: 0, color: NR.muted, cursor: "pointer", padding: "3px 5px", fontSize: 14, lineHeight: 1, display: "inline-flex", alignItems: "center" };
 
     return (
-      <div className="nr-blk-card" style={card}>
+      <div>
+      {showBefore && <div style={dropLine} />}
+      <div className="nr-blk-card" style={card}
+        draggable={grabbable}
+        onDragStart={function (e) { props.onDragStart(e, b.id); }}
+        onDragEnd={function (e) { setGrabbable(false); props.onDragEnd(); }}
+        onDragOver={function (e) { props.onDragOver(e, b.id); }}
+        onDrop={function (e) { setGrabbable(false); props.onDrop(e, b.id); }}>
         <div style={head}>
-          <span style={{ cursor: "grab", color: NR.muted, fontSize: 14, padding: "0 2px" }} title="Block">⠿</span>
+          <span
+            onMouseDown={function () { setGrabbable(true); }}
+            onMouseUp={function () { setGrabbable(false); }}
+            style={{ cursor: "grab", color: NR.muted, fontSize: 14, padding: "0 2px", touchAction: "none", userSelect: "none" }} title="Drag to reorder">⠿</span>
           {b.kind === "media"
             ? <span className="np-mono" style={{ fontSize: 11, color: NR.text, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 5 }}><i className={"ph ph-" + (b.icon || "square")} aria-hidden="true" /> {b.label}</span>
             : b.kind === "list"
@@ -282,6 +301,8 @@
           <i className="ph ph-plus ph-bold" aria-hidden="true" /> <span>Add block</span>
         </button>
       </div>
+      {showAfter && <div style={{ height: 0, borderTop: "2px solid var(--yellow)", margin: "-2px 0 10px", borderRadius: 2 }} />}
+      </div>
     );
   }
 
@@ -334,6 +355,38 @@
       var next = blocks.slice(); next.splice(i - 1, 2, newPrev); commit(next);
     };
 
+    // ---- drag-and-drop reorder (grip handle on each card) ----
+    var dragRef = useRef(null);                       // id of the block being dragged
+    var dragState = useState(null); var dragId = dragState[0], setDragId = dragState[1];
+    var hintState = useState(null); var dropHint = hintState[0], setDropHint = hintState[1];
+
+    var onDragStart = function (e, id) {
+      dragRef.current = id; setDragId(id);
+      try { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", id); } catch (x) {}
+    };
+    var onDragEnd = function () { dragRef.current = null; setDragId(null); setDropHint(null); };
+    var onDragOver = function (e, id) {
+      if (!dragRef.current || dragRef.current === id) { if (dropHint) setDropHint(null); return; }
+      e.preventDefault();
+      try { e.dataTransfer.dropEffect = "move"; } catch (x) {}
+      // drop above or below the hovered card, decided by the pointer's half
+      var r = e.currentTarget.getBoundingClientRect();
+      var edge = (e.clientY - r.top) < r.height / 2 ? "before" : "after";
+      if (!dropHint || dropHint.id !== id || dropHint.edge !== edge) setDropHint({ id: id, edge: edge });
+    };
+    var onDrop = function (e, id) {
+      e.preventDefault();
+      var from = dragRef.current; var hint = dropHint;
+      onDragEnd();
+      if (!from || from === id) return;
+      var fromI = idx(from); if (fromI < 0) return;
+      var next = blocks.slice(); var moved = next.splice(fromI, 1)[0];
+      var toI = next.findIndex(function (b) { return b.id === id; });
+      if (toI < 0) return;
+      if (hint && hint.edge === "after") toI += 1;
+      next.splice(toI, 0, moved); commit(next);
+    };
+
     var apply = function () { props.onApply(assemble(modelRef.current, htmls.current)); };
 
     var bar = { padding: props.isMobile ? "10px 12px" : "12px 18px", borderBottom: "1px solid " + NR.line, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", flexShrink: 0 };
@@ -366,7 +419,8 @@
             )}
             {blocks.map(function (b, i) {
               return <BlockCard key={b.id} block={b} NR={NR} htmls={htmls} first={i === 0} last={i === blocks.length - 1}
-                onMove={onMove} onDelete={onDelete} onType={onType} onAddBelow={onAddBelow} onSplit={onSplit} onMergeUp={onMergeUp} flash={flash} />;
+                onMove={onMove} onDelete={onDelete} onType={onType} onAddBelow={onAddBelow} onSplit={onSplit} onMergeUp={onMergeUp} flash={flash}
+                dragId={dragId} dropHint={dropHint} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragOver={onDragOver} onDrop={onDrop} />;
             })}
             {modelRef.current.tail.length > 0 && (
               <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, border: "1px dashed " + NR.line, borderRadius: 8, padding: "9px 12px", marginTop: 4, lineHeight: 1.5 }}>
