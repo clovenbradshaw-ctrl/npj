@@ -360,8 +360,11 @@
       this._gen = 0;
       this._triedAuth = null;
       this._triedAlt = null;
+      this._triedProxy = null;
       this._fbDone = false;
-      this._loadFailed = null;   // the src that exhausted every fallback (so _render shows the affordance, not a dead box)
+      this._loadFailed = null;   // the canonical url that exhausted every fallback (so _render shows the affordance, not a dead box)
+      this._primaryUrl = null;   // the canonical url the current <img> is serving (directly or via a swapped-in fallback)
+      this._showingFor = null;   // which canonical url the live <img> src belongs to — re-renders don't restart the fallback cascade for the same one
       this._view = { s: 1, x: 0, y: 0 };
       this._subFn = () => this._render();
       // Shadow-DOM listeners live with the shadow DOM — bound once here so
@@ -422,21 +425,16 @@
         }
         if (media && media.isStoreUrl && media.isStoreUrl(cur) && this._triedAuth !== cur) {
           this._triedAuth = cur;
-          media.resolveDisplay(cur).then((u) => { if (u && u !== cur) { this._img.src = u; this._ghost.src = u; } }).catch(() => {});
+          // resolveDisplay hands back the SAME url when it can't help (signed
+          // out, CORS, or the media is gone). Don't get stuck on the broken
+          // <img> in that case — fall through to the proxy / placeholder.
+          media.resolveDisplay(cur).then((u) => {
+            if (u && u !== cur) { this._img.src = u; this._ghost.src = u; }
+            else this._fallbackProxyOrGiveUp();
+          }).catch(() => this._fallbackProxyOrGiveUp());
           return;
         }
-        this._fbDone = true;
-        // Every source failed. Never leave a silent, blank, un-fixable box: drop
-        // back to the placeholder affordance so the author can drop a new image
-        // (or paste an archive.org link), and say why. The `src` ATTRIBUTE stays
-        // in the light DOM, so the slot still persists and self-heals if the URL
-        // becomes reachable on a later load (a fresh element retries from zero).
-        // Editable slots only — a read-only/published view keeps its prior look.
-        if (cur && this._loadFailed !== cur && this.hasAttribute('data-editable')) {
-          this._loadFailed = cur;
-          this._render();
-          this._setError("That image couldn't be loaded — drop a new one or paste an archive.org link.");
-        }
+        this._fallbackProxyOrGiveUp();
       });
       // Gated on editable + fit=cover so share links and contain/fill slots
       // stay static.
@@ -645,7 +643,7 @@
       this.setAttribute('data-cdn', '');
       // a freshly-set src has no archive fallback yet (publish/save mints it)
       this.removeAttribute('data-alt');
-      this._triedAlt = this._triedAuth = null; this._fbDone = false;
+      this._triedAlt = this._triedAuth = this._triedProxy = null; this._fbDone = false;
       this.setAttribute('src', url); // attributeChangedCallback re-renders
       this._announce(url);
     }
@@ -850,6 +848,40 @@
       } catch (e) {
         if (gen !== this._gen) return;
         this._setError('Could not save the edited image.');
+      }
+    }
+
+    // Last legs of the load-error chain. A direct archive.org GET can fail on a
+    // network that blocks archive.org (a VPN, a captive portal) even though the
+    // bytes are really there — the reader sidesteps this by loading through the
+    // same-host image proxy (see imageCandidates in shared.jsx). Mirror that here
+    // as a final try before giving up, so an editor behind such a network still
+    // renders its images. If even that's exhausted (or the src was never an
+    // archive.org URL — e.g. a media-store copy that's gone), reveal the
+    // placeholder affordance instead of leaving a silent, broken <img>.
+    _fallbackProxyOrGiveUp() {
+      if (this._fbDone) return;
+      const cur = this._img.getAttribute('src') || '';
+      const cdn = window.NpjArchiveCDN;
+      if (cdn && cdn.isMediaUrl && cdn.isMediaUrl(cur) && cdn.proxied && this._triedProxy !== cur) {
+        const p = cdn.proxied(cur);
+        if (p && p !== cur) { this._triedProxy = cur; this._img.src = p; this._ghost.src = p; return; }
+      }
+      // Every source failed. Never leave a silent, blank, un-fixable box: drop
+      // back to the placeholder affordance so the author can drop a new image
+      // (or paste an archive.org link), and say why. The `src` ATTRIBUTE stays
+      // in the light DOM, so the slot still persists and self-heals if the URL
+      // becomes reachable on a later load (a fresh element retries from zero).
+      // Keyed on the CANONICAL url (_primaryUrl), not the current fallback src,
+      // so _render's showable check actually flips to the placeholder rather
+      // than re-pointing at the primary and looping. Editable slots only — a
+      // read-only/published view keeps its prior look.
+      this._fbDone = true;
+      const key = this._primaryUrl || cur;
+      if (key && this._loadFailed !== key && this.hasAttribute('data-editable')) {
+        this._loadFailed = key;
+        this._render();
+        this._setError("That image couldn't be loaded — drop a new one or paste an archive.org link.");
       }
     }
 
@@ -1069,8 +1101,14 @@
       // Toggle via style.display — the [hidden] attribute alone loses to
       // the display:flex / display:block rules in the stylesheet above.
       if (showable) {
-        if (this._img.getAttribute('src') !== url) {
-          this._triedAlt = this._triedAuth = null; this._fbDone = false;
+        this._primaryUrl = url;
+        // Gate on _showingFor (the canonical url the live <img> belongs to), NOT
+        // the raw src — once a fallback (data-alt / auth blob / proxy) has been
+        // swapped in for this url, a benign re-render (ResizeObserver, a store
+        // tick) must not re-point at `url` and restart the whole cascade.
+        if (this._showingFor !== url) {
+          this._triedAlt = this._triedAuth = this._triedProxy = null; this._fbDone = false;
+          this._showingFor = url;
           this._img.src = url;
           this._ghost.src = url;
         }
@@ -1083,6 +1121,7 @@
         this._img.style.display = 'none';
         this._img.removeAttribute('src');
         this._ghost.removeAttribute('src');
+        this._showingFor = null;
         this._empty.style.display = 'flex';
         this.removeAttribute('data-filled');
       }
