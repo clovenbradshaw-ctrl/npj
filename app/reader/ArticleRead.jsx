@@ -1355,6 +1355,17 @@ function ArticleRead(props) {
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>The event log is still public in GitHub.{isAdmin ? " Only admins can open this page." : ""}</span>
         </div>
       )}
+      {/* a scheduled piece: committed but held off the front page until its release.
+          Re-decided against the wall-clock so it clears itself once the time passes. */}
+      {A.status !== "unpublished" && (window.NpjArticles && window.NpjArticles.scheduledFuture
+        ? window.NpjArticles.scheduledFuture(A.releaseAt)
+        : !!(A.releaseAt && Date.parse(A.releaseAt) > Date.now())) && (
+        <div style={{ border: "1.5px solid var(--yellow, #b8860b)", background: "color-mix(in srgb, var(--yellow, #b8860b) 12%, var(--card))", padding: "10px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 15, color: "var(--yellow, #b8860b)" }}>⧖</span>
+          <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5 }}>Scheduled — releases {new Date(A.releaseAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}.</span>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>Off the front page until then; it goes live on its own.{isAdmin ? " You're seeing the admin preview." : ""}</span>
+        </div>
+      )}
       {statusErr && (
         <div className="np-mono" style={{ fontSize: 11, color: "var(--reject)", border: "1px solid var(--reject)", padding: "9px 10px", marginBottom: 16, lineHeight: 1.5 }}>{statusErr}</div>
       )}

@@ -231,7 +231,17 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   // front page for EVERYONE, admins included — nothing is deleted, and it's
   // listed + republishable from Documents. (Admins still reach it by direct
   // link / from Documents, where the reader shows the Unpublished banner.)
-  const published = all.filter(a => a.status !== "unpublished");
+  //
+  // A SCHEDULED piece is gated until its release instant: held off the front
+  // page for readers until `releaseAt` passes, then it surfaces on its own (the
+  // gate is re-decided against the wall-clock here on every paint, so a piece
+  // goes live with no re-commit). Admins still see it — flagged with a Scheduled
+  // badge — so they can preview and manage the lineup before it drops.
+  const isScheduled = (a) => window.NpjArticles && window.NpjArticles.scheduledFuture
+    ? window.NpjArticles.scheduledFuture(a.releaseAt)
+    : !!(a.releaseAt && Date.parse(a.releaseAt) > Date.now());
+  const published = all.filter(a => a.status !== "unpublished" && (isAdmin || !isScheduled(a)))
+    .map(a => isScheduled(a) ? { ...a, _scheduled: true } : a);
   // …and never run the same story twice. A republish that forks the slug (e.g. a
   // fresh auto-generated slug committed alongside the original human-readable
   // one) leaves two documents for one article — both would otherwise render, as
@@ -391,6 +401,18 @@ function UnpubBadge({ small }) {
   return <span className="np-mono" style={{ fontSize: small ? 9 : 10, fontWeight: 600, letterSpacing: ".06em", color: "var(--reject)", border: "1px solid var(--reject)", padding: small ? "1px 5px" : "2px 7px", textTransform: "uppercase" }}>⊘ Unpublished</span>;
 }
 
+/* Admin-only marker on a piece whose release is still ahead — it's committed to
+   the record but held off the public front page until `releaseAt`. Shows the
+   release moment so the admin knows when it drops. */
+function SchedBadge({ small, when }) {
+  const label = (() => {
+    const d = new Date(when);
+    if (isNaN(d.getTime())) return "Scheduled";
+    return "⧖ " + d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  })();
+  return <span className="np-mono" title={"Scheduled to publish " + when} style={{ fontSize: small ? 9 : 10, fontWeight: 600, letterSpacing: ".06em", color: "var(--yellow, #b8860b)", border: "1px solid currentColor", padding: small ? "1px 5px" : "2px 7px", textTransform: "uppercase" }}>{label}</span>;
+}
+
 function TagRow({ tags, small }) {
   return (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
@@ -418,6 +440,7 @@ function FrontCard({ item, template, variant, onOpen }) {
       color: light ? "rgba(255,255,255,.92)" : (lead ? "var(--reject)" : "var(--ink-soft)"), marginBottom: lead ? 14 : 12, display: "flex", alignItems: "center", gap: 8 }}>
       {kicker}
       {item.status === "unpublished" && <UnpubBadge small={!lead} />}
+      {item._scheduled && <SchedBadge small={!lead} when={item.releaseAt} />}
     </div>
   );
   const TitleEl = ({ light }) => (
@@ -612,7 +635,12 @@ function FrontLineup({ items, onOpen }) {
   // Admin curation: an explicit slug order (the hotswap) wins; otherwise the
   // newest-first order the record came in with.
   const ordered = window.orderFrontItems(items, front);
-  const lead = ordered.find(a => a.status !== "unpublished") || ordered[0];
+  // A scheduled piece is future-dated, so it sorts to the front — but it isn't
+  // live yet, so it shouldn't claim the cover. Prefer a released piece for the
+  // lead; fall back to a scheduled one only when there's nothing else (the admin
+  // preview). An explicit hotswap order in orderFrontItems still wins.
+  const lead = ordered.find(a => a.status !== "unpublished" && !a._scheduled)
+    || ordered.find(a => a.status !== "unpublished") || ordered[0];
   const rest = ordered.filter(a => a !== lead);
   const row2 = rest.slice(0, 3);   // the 3-across row
   const feed = rest.slice(3);      // everything else — a vertical feed
