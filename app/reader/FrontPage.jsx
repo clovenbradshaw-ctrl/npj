@@ -369,11 +369,17 @@ function FrontCard({ item, template, variant, onOpen }) {
     </div>
   ) : null;
   const TagsEl = () => (lead && (item.tags || []).length > 0) ? <div style={{ marginTop: 12 }}><TagRow tags={item.tags} /></div> : null;
+  const hasByline = ((item.authors || []).length || (item.editors || []).length || (item.byline || "").trim());
+  const BylineEl = () => (hasByline && window.Byline) ? (
+    <div style={{ margin: lead ? "0 0 16px" : "0 0 12px" }}>
+      <window.Byline authors={item.authors} editors={item.editors} byline={item.byline} />
+    </div>
+  ) : null;
 
   const photoHeight = place === "below" ? (lead ? null : 220)
-    : place === "top" ? (lead ? 420 : 270)
-    : place === "behind" ? (lead ? 460 : 300)
-    : (lead ? 300 : 160); // left / right
+    : place === "top" ? (lead ? 320 : 270)
+    : place === "behind" ? (lead ? 360 : 300)
+    : (lead ? 260 : 160); // left / right
   const Photo = ({ h, dark }) => {
     if (!hasPhoto) return h ? <Placeholder label="photo" h={h} dark={dark} /> : null;
     return (
@@ -398,14 +404,14 @@ function FrontCard({ item, template, variant, onOpen }) {
             <DekEl light />
           </div>
         </div>
-        <div style={{ marginTop: 12 }}><MetaEl /><TagsEl /></div>
+        <div style={{ marginTop: 12 }}><BylineEl /><MetaEl /><TagsEl /></div>
       </div>
     );
   }
 
   const Text = (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <KickerEl /><TitleEl /><DekEl /><MetaEl /><TagsEl />
+      <KickerEl /><BylineEl /><TitleEl /><DekEl /><MetaEl /><TagsEl />
     </div>
   );
 
@@ -434,10 +440,10 @@ function FrontCard({ item, template, variant, onOpen }) {
   // "below" (title + subtitle, then photo, then meta) and "none" (text only).
   return (
     <div>
-      <KickerEl /><TitleEl /><DekEl />
+      <KickerEl /><BylineEl /><TitleEl /><DekEl />
       {place === "below" && (hasPhoto
-        ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px" }}><Photo h={lead ? null : 220} /></div>
-        : (lead ? <div style={{ margin: "0 0 18px" }}><Placeholder label="hero image" h={420} /></div> : null))}
+        ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /></div>
+        : (lead ? <div style={{ margin: "0 0 18px", maxWidth: 640 }}><Placeholder label="hero image" h={300} /></div> : null))}
       <MetaEl /><TagsEl />
     </div>
   );
