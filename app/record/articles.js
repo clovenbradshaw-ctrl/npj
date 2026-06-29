@@ -28,7 +28,7 @@
  *
  * body[] uses the exact block shapes ArticleRead renders:
  *   {type:'p', tokens:[ "text" | {c,src[],id} | {t:'strong'|'em'|'s'|'code'|'a'|'sup'|'br', text, href?} ]}
- *   {type:'h2'|'h3', text} · {type:'pull', text, attribution?, marks?:[{t:'sup',key,num}]} · {type:'hr'}
+ *   {type:'h2'|'h3', text} · {type:'pull', text, kind?:'block'|'pull', align?:'center'|'right', attribution?, marks?:[{t:'sup',key,num}]} · {type:'hr'}
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
  *   {type:'gallery', images:[{src, store?, caption?, credit?, description?, fit?, crop?}], caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
@@ -871,7 +871,23 @@
           return s;
         };
         const qt = quoteText(node).trim();
-        if (qt) { const pull = { type: "pull", text: qt, attribution: "" }; if (marks.length) pull.marks = marks; blocks.push(pull); }
+        // Two quote flavours share the <blockquote> tag: a bordered BLOCK quote
+        // (the default, for quoting a passage) and a large display PULL quote
+        // (class np-pull, Substack-style). Either can carry a justification —
+        // execCommand writes it as inline text-align, on the blockquote itself or
+        // on a child block — which we lift onto `align` so the reader honours it.
+        const isPull = !!(node.classList && node.classList.contains("np-pull"));
+        let align = (node.style && node.style.textAlign) || node.getAttribute("align") || "";
+        if (!/^(?:center|right|left)$/.test(align)) {
+          const c = node.querySelector("div,p"); const cta = c && c.style && c.style.textAlign;
+          align = /^(?:center|right|left)$/.test(cta || "") ? cta : "";
+        }
+        if (qt) {
+          const pull = { type: "pull", text: qt, attribution: "", kind: isPull ? "pull" : "block" };
+          if (align && align !== "left") pull.align = align;
+          if (marks.length) pull.marks = marks;
+          blocks.push(pull);
+        }
         return;
       }
       if (tag === "ul" || tag === "ol") {
@@ -1107,7 +1123,11 @@
     return (body || []).map((b, bi) => {
       if (b.type === "p") return "<p>" + (tokensToHtml(b.tokens) || "<br/>") + "</p>";
       if (b.type === "h2" || b.type === "h3") return "<" + b.type + ">" + esc(b.text) + "</" + b.type + ">";
-      if (b.type === "pull") return "<blockquote>" + esc(b.text) + tokensToHtml(b.marks || []) + "</blockquote>";
+      if (b.type === "pull") {
+        const cls = b.kind === "pull" ? ' class="np-pull"' : "";
+        const sty = (b.align && b.align !== "left") ? ' style="text-align:' + b.align + '"' : "";
+        return "<blockquote" + cls + sty + ">" + esc(b.text) + tokensToHtml(b.marks || []) + "</blockquote>";
+      }
       if (b.type === "ul" || b.type === "ol") return "<" + b.type + ">" + (b.items || []).map(it => "<li>" + tokensToHtml(it) + "</li>").join("") + "</" + b.type + ">";
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";

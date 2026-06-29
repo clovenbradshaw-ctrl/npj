@@ -1191,14 +1191,24 @@ function ArticleRead(props) {
           const Tag = b.type;
           return <Tag key={i} id={artSlug(b.text)} style={{ fontFamily: "var(--display)", fontSize: b.type === "h2" ? 34 : 25, lineHeight: 1.04, margin: "32px 0 12px", scrollMarginTop: 90 }}>{b.text}</Tag>;
         }
-        if (b.type === "pull") return (
-          <blockquote key={i} style={{ margin: "30px 0", paddingLeft: 22, borderLeft: "3px solid var(--yellow-deep)",
-            fontFamily: "var(--quote)", fontWeight: 300, fontSize: 28, lineHeight: 1.42, letterSpacing: "-.01em" }}>
-            {b.text}
-            {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
-            {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400 }}>{b.attribution}</footer> : null}
-          </blockquote>
-        );
+        if (b.type === "pull") {
+          // Two flavours: a BLOCK quote (a quoted passage — a slim accent bar, text
+          // close to body size) and a PULL quote (a large display callout framed by
+          // hairline rules, centred by default). Either honours an explicit `align`.
+          const isPull = b.kind === "pull";
+          const align = b.align || (isPull ? "center" : "left");
+          const base = { margin: isPull ? "40px 0" : "26px 0", textAlign: align, fontFamily: "var(--quote)", fontWeight: 300, letterSpacing: "-.01em" };
+          const style = isPull
+            ? { ...base, fontSize: 30, lineHeight: 1.26, padding: "16px 0", borderTop: "1.5px solid var(--yellow-deep)", borderBottom: "1.5px solid var(--yellow-deep)" }
+            : { ...base, fontSize: 20, lineHeight: 1.55, paddingLeft: 20, borderLeft: "3px solid var(--yellow-deep)" };
+          return (
+            <blockquote key={i} className={isPull ? "np-pullquote" : "np-blockquote"} style={style}>
+              {b.text}
+              {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
+              {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400, letterSpacing: 0 }}>{b.attribution}</footer> : null}
+            </blockquote>
+          );
+        }
         if (b.type === "img") {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (

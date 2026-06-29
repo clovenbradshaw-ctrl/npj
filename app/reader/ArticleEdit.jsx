@@ -53,6 +53,19 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
   const cmd = (c, v) => { document.execCommand(c, false, v || null); if (bodyRef.current) bodyRef.current.focus(); };
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
+  // A block quote (a bordered passage) and a pull quote (a large display callout,
+  // class np-pull) share the <blockquote> tag; justification rides as inline
+  // text-align. Both round-trip through htmlToBlocks. See app/record/articles.js.
+  const quoteAs = (kind) => {
+    const root = bodyRef.current; if (!root) return;
+    root.focus(); document.execCommand("formatBlock", false, "blockquote");
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    root.querySelectorAll("blockquote").forEach(bq => {
+      if (range && range.intersectsNode && !range.intersectsNode(bq)) return;
+      if (kind === "pull") bq.classList.add("np-pull"); else bq.classList.remove("np-pull");
+    });
+  };
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
   // caption + credit + description are editable lines under the (non-editable)
@@ -246,7 +259,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
         .eo-edit-body image-slot { max-width: 100%; }
         .eo-edit-body figcaption { font-family: var(--mono); font-size: 11px; color: var(--ink-soft); }
         .eo-edit-body h2, .eo-edit-body h3 { font-family: var(--display); line-height: 1.05; }
-        .eo-edit-body blockquote { border-left: 4px solid var(--yellow-deep); margin: 16px 0; padding-left: 14px; font-family: var(--cond); font-size: 20px; }
+        .eo-edit-body blockquote { border-left: 4px solid var(--yellow-deep); margin: 16px 0; padding-left: 14px; font-family: var(--quote); font-weight: 300; font-size: 19px; line-height: 1.5; }
+        .eo-edit-body blockquote.np-pull { border-left: 0; padding: 10px 0; border-top: 2px solid var(--yellow-deep); border-bottom: 2px solid var(--yellow-deep); font-size: 25px; line-height: 1.28; text-align: center; }
       `}</style>
       <div className="np-scroll" style={{ width: "min(880px, 97vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -274,8 +288,12 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("italic")}><em>I</em></button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "h2")}>H2</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "h3")}>H3</button>
-            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "blockquote")}>“ Quote</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => quoteAs("block")}>“ Quote</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => quoteAs("pull")} title="Pull quote — a large display callout">“ Pull</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "p")}>¶</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyLeft")} title="Align left">⬱</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyCenter")} title="Center">≡</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyRight")} title="Align right">⬲</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addLink}>Link</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={insertImage}>▣ Image</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={addBanner}>▤ Banner</button>

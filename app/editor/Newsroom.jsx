@@ -1017,6 +1017,24 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // block, so the new block always lands in the prose flow rather than splitting a
   // heading or vanishing into the non-editable banner figure.
   const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); upgradeCustomEls(); scanHeadings(); scheduleSave(); };
+  // Quotes come in two flavours that share the <blockquote> tag: a bordered BLOCK
+  // quote (default) and a large display PULL quote (class np-pull, Substack-style).
+  // formatBlock makes the blockquote; we then tag every blockquote the selection
+  // touches with the right class. The justification is the standard align command,
+  // which writes text-align inline — both round-trip through htmlToBlocks.
+  const setQuoteKind = (kind) => {
+    const root = ed.current; if (!root) return;
+    root.focus(); restore();
+    document.execCommand("formatBlock", false, "<blockquote>");
+    const sel = window.getSelection();
+    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    root.querySelectorAll("blockquote").forEach(bq => {
+      const touched = range ? (range.intersectsNode ? range.intersectsNode(bq) : true) : true;
+      if (!touched) return;
+      if (kind === "pull") bq.classList.add("np-pull"); else bq.classList.remove("np-pull");
+    });
+    setFmtMenu(null); scanHeadings(); scheduleSave();
+  };
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
@@ -2853,7 +2871,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           )}
         </div>
         <Sep />
-        <TB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote"><I.quote /></TB>
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <TB onClick={() => setFmtMenu(fmtMenu === "quote" ? null : "quote")} title="Quote"><I.quote /> <I.caretDown style={{ fontSize: 9 }} /></TB>
+          {fmtMenu === "quote" && (
+            <div style={{ ...popStyle, width: 192 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Quote style</div>
+              <button onMouseDown={e => e.preventDefault()} onClick={() => setQuoteKind("block")} style={popItem}>
+                <I.quote style={{ fontSize: 14 }} /> <span><b>Block quote</b><br/><span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>a quoted passage</span></span>
+              </button>
+              <button onMouseDown={e => e.preventDefault()} onClick={() => setQuoteKind("pull")} style={popItem}>
+                <I.quote style={{ fontSize: 18 }} /> <span><b>Pull quote</b><br/><span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>a large display callout</span></span>
+              </button>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "8px 0 5px" }}>Justify</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[["justifyLeft", I.alignLeft, "Left"], ["justifyCenter", I.alignCenter, "Center"], ["justifyRight", I.alignRight, "Right"]].map(([cmd, Ico, label]) => (
+                  <button key={cmd} onMouseDown={e => e.preventDefault()} onClick={() => { exec(cmd); setFmtMenu(null); }} title={label} aria-label={label}
+                    style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 4, background: "transparent", border: "1px solid var(--rule)", padding: "6px 4px", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 11.5, cursor: "pointer" }}><Ico style={{ fontSize: 13 }} /></button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <TB onClick={() => exec("insertUnorderedList")} title="Bulleted list"><I.listBullets /></TB>
         <TB onClick={() => exec("insertOrderedList")} title="Numbered list"><I.listNumbers /></TB>
         <div style={{ position: "relative", display: "inline-block" }}>
