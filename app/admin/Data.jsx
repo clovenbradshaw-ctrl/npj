@@ -184,6 +184,41 @@ function DatasetCard({ d, onCite, onArchive, compact }) {
   );
 }
 
+/* ============ opening a published source ============ */
+// Can the app render this source's content right here (an uploaded image/PDF we
+// hold the bytes for, or extracted text we kept), vs. only link out to a snapshot
+// or live page? A published upload that was archived to a media store — or whose
+// text rode along in the committed record — is readable in-app, not a dead "no
+// snapshot". Web sources keep their external Open/Snapshot link (they have a url).
+function sourceRenderable(rec) {
+  var SV = window.NpjSourceView;
+  if (!SV || !rec) return false;
+  if (String(rec.text || "").trim()) return true;       // words we already hold
+  var k = SV.kindOf(rec);
+  if (k === "image" || k === "pdf" || k === "text") return SV.hasFile(rec);
+  return false;
+}
+
+// The single action a source row offers, in priority order: open the canonical
+// archive.org snapshot; read an uploaded file / its extracted text in-app; open a
+// live page that has no stored copy; or — only when we truly hold nothing —
+// say so. This is what turns the "no snapshot" rows the archive used to dead-end
+// on into a real "View" for every source the app actually has content for.
+function SourceAction({ rec, kind, onView, style }) {
+  rec = rec || {};
+  var k = kind || {};
+  var base = { flex: "0 0 auto", ...(style || {}) };
+  if (k.archived && rec.archive_url)
+    return <a href={rec.archive_url} target="_blank" rel="noopener" className="chip chip-accepted" style={{ ...base, textDecoration: "none" }}><I.archive style={{ fontSize: 12 }} /> Archived</a>;
+  if (sourceRenderable(rec) && !rec.original_url)
+    return <button className="btn btn-sm btn-primary" onClick={() => onView && onView(rec)} style={{ ...base, display: "inline-flex", alignItems: "center", gap: 5 }}><I.expand style={{ fontSize: 12 }} /> View</button>;
+  if (rec.archive_url || rec.original_url)
+    return <a href={rec.archive_url || rec.original_url} target="_blank" rel="noopener" className="btn btn-sm" style={{ ...base, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 5 }}><I.ext style={{ fontSize: 12 }} /> Open</a>;
+  if (sourceRenderable(rec))
+    return <button className="btn btn-sm btn-primary" onClick={() => onView && onView(rec)} style={{ ...base, display: "inline-flex", alignItems: "center", gap: 5 }}><I.expand style={{ fontSize: 12 }} /> View</button>;
+  return <span className="np-mono" style={{ ...base, fontSize: 10, color: "var(--ink-soft)" }}>no snapshot</span>;
+}
+
 /* ============ published sources: the archive behind released stories ============ */
 // The Data tab's spine: every source cited by a PUBLISHED article, folded out of
 // the committed record (NpjSources.buildPublishedIndex), deduped by content
@@ -204,10 +239,9 @@ function usePublishedSources() {
 
 // One source, with the trail back to the articles that cite it (the inverse of
 // "read the source" — trace who relied on it).
-function PublishedSourceCard({ g, onOpenArticle }) {
+function PublishedSourceCard({ g, onOpenArticle, onView }) {
   const [open, setOpen] = useState(false);
   const k = g.kind || {};
-  const url = g.rec && (g.rec.archive_url || g.rec.original_url);
   const pubArticles = g.carriers.filter(c => c.kind === "published");
   const n = pubArticles.length;
   return (
@@ -222,9 +256,7 @@ function PublishedSourceCard({ g, onOpenArticle }) {
             {g.duplicated && <span title="Identical content uploaded more than once — linked, not duplicated" style={{ color: "var(--review)" }}>×{g.uploads} uploads linked</span>}
           </div>
         </div>
-        {url
-          ? <a href={url} target="_blank" rel="noopener" className={k.archived ? "chip chip-accepted" : "btn btn-sm"} style={{ flex: "0 0 auto", textDecoration: "none" }}><I.archive style={{ fontSize: 12 }} /> {k.archived ? "Archived" : "Open"}</a>
-          : <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)" }}>no snapshot</span>}
+        <SourceAction rec={g.rec} kind={k} onView={onView} />
         <button className="btn btn-sm btn-ghost" onClick={() => setOpen(o => !o)} style={{ flex: "0 0 auto" }}>{open ? "Hide trail" : "Trace ↩"}</button>
       </div>
       {open && (
@@ -266,7 +298,7 @@ function articlePivot(groups) {
 
 // One article, with the deduped sources its claims are pinned to — each linked to
 // its archived snapshot. The inverse view of PublishedSourceCard.
-function ArticleSourcesCard({ a, onOpenArticle }) {
+function ArticleSourcesCard({ a, onOpenArticle, onView }) {
   const open = () => onOpenArticle && a.slug && onOpenArticle(a.slug);
   const n = a.sources.length;
   return (
@@ -283,7 +315,6 @@ function ArticleSourcesCard({ a, onOpenArticle }) {
         <div style={{ padding: "2px 14px 8px" }}>
           {a.sources.map(({ g, quotes }) => {
             const k = g.kind || {};
-            const url = g.rec && (g.rec.archive_url || g.rec.original_url);
             return (
               <div key={g.signature} style={{ display: "flex", gap: 10, alignItems: "baseline", padding: "8px 0", borderTop: "1px solid var(--rule)", flexWrap: "wrap" }}>
                 <I.archive style={{ fontSize: 14, color: k.archived ? "var(--verified)" : "var(--data)", flex: "0 0 auto", alignSelf: "flex-start", marginTop: 2 }} />
@@ -294,9 +325,7 @@ function ArticleSourcesCard({ a, onOpenArticle }) {
                     <div key={i} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: "var(--ink-soft)", marginTop: 2 }}>“{qt.length > 140 ? qt.slice(0, 140) + "…" : qt}”</div>
                   ))}
                 </div>
-                {url
-                  ? <a href={url} target="_blank" rel="noopener" className={k.archived ? "chip chip-accepted" : "btn btn-sm"} style={{ flex: "0 0 auto", textDecoration: "none", alignSelf: "center" }}><I.archive style={{ fontSize: 12 }} /> {k.archived ? "Archived" : "Open"}</a>
-                  : <span className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", flex: "0 0 auto", alignSelf: "center" }}>no snapshot</span>}
+                <SourceAction rec={g.rec} kind={k} onView={onView} style={{ alignSelf: "center" }} />
               </div>
             );
           })}
@@ -343,6 +372,8 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
   const [q, setQ] = useState("");
   const [proj, setProj] = useState("All");
   const [archiveTarget, setArchiveTarget] = useState(null);
+  // a published source the reader opened to read full-size, right here in the app
+  const [viewRec, setViewRec] = useState(null);
   const ql = q.toLowerCase();
   const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(ql));
   const pubGroups = (pub.groups || []).filter(g =>
@@ -384,7 +415,7 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
               {pub.state === "ok" && <span style={{ color: "var(--verified)" }}>● folded from the committed articles — sources deduped + backtracked</span>}
               {pub.state === "error" && <span style={{ color: "var(--reject)" }}>couldn't read the published record</span>}
             </div>
-            {pubGroups.map(g => <PublishedSourceCard key={g.signature} g={g} onOpenArticle={onOpenArticle} />)}
+            {pubGroups.map(g => <PublishedSourceCard key={g.signature} g={g} onOpenArticle={onOpenArticle} onView={setViewRec} />)}
             {pubGroups.length === 0 && pub.state !== "loading" && (
               <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No source matches" : "No published sources yet"}</div>
@@ -399,7 +430,7 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
               {pub.state === "ok" && <span style={{ color: "var(--verified)" }}>● {articles.length} article{articles.length !== 1 ? "s" : ""} — each with the deduped sources it cites</span>}
               {pub.state === "error" && <span style={{ color: "var(--reject)" }}>couldn't read the published record</span>}
             </div>
-            {articles.map(a => <ArticleSourcesCard key={a.slug || a.title} a={a} onOpenArticle={onOpenArticle} />)}
+            {articles.map(a => <ArticleSourcesCard key={a.slug || a.title} a={a} onOpenArticle={onOpenArticle} onView={setViewRec} />)}
             {articles.length === 0 && pub.state !== "loading" && (
               <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
                 <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No article matches" : "No published articles yet"}</div>
@@ -434,6 +465,7 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
         )}
       </div>
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.id} items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}
+      {viewRec && window.SourceLightbox && <window.SourceLightbox rec={viewRec} onClose={() => setViewRec(null)} />}
     </div>
   );
 }

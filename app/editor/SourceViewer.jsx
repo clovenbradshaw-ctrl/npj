@@ -202,8 +202,9 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
 
   // no bytes on record (e.g. a web source with no upload, or a pre-upload
   // draft) — though a text source we already read words out of still renders
-  const textOnly = kind === "text" && String(rec.text || "").trim();
-  if (!SV || (!SV.hasFile(rec) && !textOnly)) {
+  const ownText = String(rec.text || "").trim();
+  const textOnly = kind === "text" && ownText;
+  if (!SV || (!SV.hasFile(rec) && !textOnly && !ownText)) {
     // A source that was hard-redacted before archiving deliberately carries no
     // original — its un-redacted bytes are withheld from the published record, on
     // purpose. Say so, rather than implying a file is merely missing.
@@ -223,6 +224,24 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
         <div className="np-mono" style={{ fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           No file stored for this source yet.<br />Upload the document and it'll show here for reading and citing.
         </div>
+      </div>
+    );
+  }
+
+  // Words but no file. The published record can ship a source's extracted text
+  // without its original bytes — a PDF we only kept the text of, or a scan whose
+  // OCR rode along but whose file was never frozen to a store. Show the words
+  // rather than a broken <img> or an endless PDF spinner: the cited passage is
+  // still fully readable. (Text sources fall through to their own branch below;
+  // web sources always carry a url, so they never reach here.)
+  if ((kind === "pdf" || kind === "image") && !SV.hasFile(rec) && ownText) {
+    return (
+      <div>
+        {redactedNote}
+        <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6, lineHeight: 1.4 }}>
+          <I.doc style={{ fontSize: 13, flex: "0 0 auto" }} /> Extracted text — the original {SV.kindLabel(rec).toLowerCase()} file isn't in the public record.
+        </div>
+        <div className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }}>{ownText}</div>
       </div>
     );
   }
