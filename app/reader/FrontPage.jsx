@@ -410,6 +410,16 @@ function FrontCard({ item, template, variant, onOpen }) {
       {lead && item.updated && item.updated !== item.published ? " · updated " + shortDate(item.updated) : ""}
     </div>
   ) : null;
+  // The opening of the story, pulled through into the cover's text column to fill
+  // the space beside a tall photo. It's deliberately generous — the column clips
+  // it to the photo's height with a fade, so only as much as fits is ever shown.
+  const ExcerptEl = () => (lead && item.excerpt) ? (
+    <div style={{ margin: "18px 0 0" }}>
+      {String(item.excerpt).split(/\n\n+/).map((para, i) => (
+        <p key={i} style={{ fontSize: 17, lineHeight: 1.6, margin: i === 0 ? 0 : "12px 0 0", color: "var(--ink)" }}>{para}</p>
+      ))}
+    </div>
+  ) : null;
   const TagsEl = () => (lead && (item.tags || []).length > 0) ? <div style={{ marginTop: 12 }}><TagRow tags={item.tags} /></div> : null;
   const hasByline = ((item.authors || []).length || (item.editors || []).length || (item.byline || "").trim());
   const BylineEl = () => (hasByline && window.Byline) ? (
@@ -430,6 +440,27 @@ function FrontCard({ item, template, variant, onOpen }) {
           fit={item.image.fit} crop={item.image.crop}
           style={{ width: "100%", height: h ? h : "auto", objectFit: h ? "cover" : undefined, display: "block", border: "1.5px solid var(--ink)" }} />
       </button>
+    );
+  };
+  // The headline photo's caption + credit, surfaced under the cover image (the
+  // same caption the author writes on the banner in the editor and that the
+  // article page shows). Only the cover story carries it — secondary thumbnails
+  // stay clean — and never under an overlay (place "behind"), where it'd land on
+  // the scrim. The credit is markdown ([outlet](url)), rendered safely.
+  const PhotoCaption = () => {
+    if (!lead || !hasPhoto) return null;
+    const cap = item.image.caption, cred = item.image.credit;
+    if (!cap && !cred) return null;
+    return (
+      <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.45 }}>
+        {cap ? <span>▢ {cap}</span> : null}
+        {cred ? (
+          <span style={{ display: cap ? "block" : "inline", marginTop: cap ? 2 : 0 }}>
+            <span className="np-eyebrow" style={{ fontSize: 9.5, letterSpacing: ".05em", marginRight: 5 }}>Credit</span>
+            {window.npjRichText ? window.npjRichText(cred) : cred}
+          </span>
+        ) : null}
+      </figcaption>
     );
   };
 
@@ -462,7 +493,7 @@ function FrontCard({ item, template, variant, onOpen }) {
     return (
       <div style={{ display: "flex", flexDirection: mobile ? "column" : (place === "right" ? "row-reverse" : "row"), gap: lead ? 28 : 18, alignItems: "flex-start" }}>
         <div style={{ flex: mobile ? "none" : ("0 0 " + (lead ? "44%" : "40%")), width: mobile ? "100%" : undefined, marginBottom: mobile ? 16 : 0 }}>
-          <Photo h={photoHeight} />
+          <Photo h={photoHeight} /><PhotoCaption />
         </div>
         {Text}
       </div>
@@ -473,20 +504,46 @@ function FrontCard({ item, template, variant, onOpen }) {
   if (place === "top") {
     return (
       <div>
-        <div style={{ marginBottom: lead ? 18 : 20 }}><Photo h={photoHeight} /></div>
+        <div style={{ marginBottom: lead ? 18 : 20 }}><Photo h={photoHeight} /><PhotoCaption /></div>
         {Text}
       </div>
     );
   }
 
-  // "below" (title + subtitle, then photo, then meta) and "none" (text only).
+  // The cover story, on desktop, reads as two columns: the title + subtitle text
+  // in one column and the photo beside it, the text column matched to the photo's
+  // height (the photo is the height authority; the text is clipped to it with a
+  // fade so an overlong standfirst reads as "continued", not cut off). On phones
+  // and in secondary cards the photo stays below the text as before.
+  const useTwoColCover = lead && place === "below" && hasPhoto && !mobile;
+  if (useTwoColCover) {
+    return (
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 36, alignItems: "stretch" }}>
+        {/* text column — carries no in-flow height of its own (its contents are
+            absolutely placed), so the grid row's height is set purely by the
+            photo column, and overflow:hidden clips the text to exactly that. */}
+        <div style={{ position: "relative", minWidth: 0 }}>
+          <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+            <KickerEl /><BylineEl /><MetaEl /><TitleEl /><DekEl /><ExcerptEl /><TagsEl />
+            <div aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 64,
+              background: "linear-gradient(to top, var(--paper) 14%, rgba(246,241,228,0))", pointerEvents: "none" }} />
+          </div>
+        </div>
+        <div style={{ minWidth: 0 }}><Photo h={null} /><PhotoCaption /></div>
+      </div>
+    );
+  }
+
+  // "below" (title + subtitle, then photo, then meta) and "none" (text only). The
+  // cover keeps its date up with the rest of the header text, above the photo;
+  // secondary cards keep the date in the footer under the photo.
   return (
     <div>
-      <KickerEl /><BylineEl /><TitleEl /><DekEl />
+      <KickerEl /><BylineEl />{lead ? <MetaEl /> : null}<TitleEl /><DekEl />
       {place === "below" && (hasPhoto
-        ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /></div>
+        ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /><PhotoCaption /></div>
         : (lead ? <div style={{ margin: "0 0 18px", maxWidth: 640 }}><Placeholder label="hero image" h={300} /></div> : null))}
-      <MetaEl /><TagsEl />
+      {lead ? null : <MetaEl />}<TagsEl />
     </div>
   );
 }

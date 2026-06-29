@@ -49,6 +49,28 @@ const FIG_CAPS =
   '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px"></figcaption>' +
   '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px"></figcaption>';
 
+// Every fillable image / banner figure must carry the three editable caption
+// lines (caption · credit · description). A figure can arrive WITHOUT them — a
+// draft saved before they shipped, a banner whose photo was set straight on the
+// slot, a figure pasted in or rebuilt through the HTML-source view — and then a
+// photo has no visible place to write a caption under it. Re-inject the lines
+// (idempotent) so the caption field is always there. Skips embeds (their own
+// hint line) and carousels (per-slide captions). Returns true if it changed
+// anything, so callers can persist the repair.
+function ensureFigCaptions(root) {
+  if (!root) return false;
+  let added = false;
+  root.querySelectorAll("figure").forEach(f => {
+    if (f.getAttribute("data-embed-url")) return;
+    if (f.classList.contains("cmp-carousel")) return;
+    if (!f.querySelector(":scope > image-slot")) return;
+    if (f.querySelector(":scope > .cmp-cap")) return;
+    f.insertAdjacentHTML("beforeend", FIG_CAPS);
+    added = true;
+  });
+  return added;
+}
+
 // One carousel slide: the SAME editable image-slot a single inline image uses
 // (so a drop still uploads to the media store and freezes to archive.org at
 // publish), plus the shared caption lines and a ✕ to drop the slide. The reader
@@ -503,6 +525,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           // likewise, stitch any word cut across a paragraph break (an old draft
           // saved mid-word) so the editor opens showing exactly what was written.
           healSplitBlocks();
+          // older drafts (or a banner whose photo was set straight on the slot)
+          // can open without the caption · credit · description lines — re-inject
+          // them so every image has a clear place to write a caption.
+          ensureFigCaptions(ed.current);
           // hydrate the explicit Subtitle field from the restored .nr-dek node
           const dekEl0 = ed.current.querySelector(".nr-dek");
           if (dekEl0) setDek((dekEl0.textContent || "").trim());
@@ -1684,6 +1710,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
     });
     if (window.NpjCitations) window.NpjCitations.migrateRoot(root);
+    ensureFigCaptions(root); // a hand-edited / pasted figure can lack the caption lines
     upgradeCustomEls();
     const h1b = root.querySelector("h1"); if (h1b) setTitle((h1b.textContent || "").trim());
     const dekEl = root.querySelector(".nr-dek"); if (dekEl) setDek((dekEl.textContent || "").trim());

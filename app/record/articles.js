@@ -150,6 +150,33 @@
     const words = (plainText(body).match(/\S+/g) || []).length;
     return Math.max(1, Math.round(words / 220));
   }
+  // The opening of the article's prose — the first few body paragraphs, joined
+  // (\n\n between them) and capped. Used by the front-page cover to "pull
+  // through" the start of the story into the text column beside the photo,
+  // filling the space when the headline + standfirst alone are shorter than the
+  // image. Only real paragraph prose is taken (no headings, captions, embeds),
+  // and the cap is generous on purpose — the cover clips it to the photo's
+  // height, so we just need enough to overflow.
+  function excerptOf(body, max) {
+    max = max || 520;
+    if (!Array.isArray(body)) return "";
+    const paras = [];
+    for (const b of body) {
+      if (b && b.type === "p") {
+        const t = (b.tokens || []).map(tokenText).join("").replace(/\s+/g, " ").trim();
+        if (t) paras.push(t);
+      }
+      if (paras.join(" ").length >= max) break;
+    }
+    let s = paras.join("\n\n");
+    if (s.length > max) {
+      s = s.slice(0, max);
+      const cut = s.lastIndexOf(" ");
+      if (cut > max * 0.6) s = s.slice(0, cut);
+      s = s.replace(/[\s,;:.–—-]+$/, "") + "…";
+    }
+    return s;
+  }
 
   /* ---------------- footnote hygiene: never strand a marker on its own line ----
      A footnote marker ({t:"sup"}) references a WORD, so a paragraph holding
@@ -541,7 +568,7 @@
         slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
         column: article.column, tags: article.tags, published: article.published, updated: article.updated,
         authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
-        status: article.status, image: article.image,
+        status: article.status, image: article.image, excerpt: excerptOf(article.body),
         storage: "github", logPath: blobUrl(d.slug)
       };
       live[d.slug] = { key: d.key, meta };
@@ -555,7 +582,7 @@
   // each piece's `status` so the front page + reader can hide an unpublished one.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null, excerpt: m.excerpt || "" });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
