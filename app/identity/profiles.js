@@ -40,6 +40,31 @@
     return PALETTE[h % PALETTE.length];
   }
 
+  // A stable, anonymous PSEUDONYM per account — the only name a reader's
+  // contributions are ever shown under. Deterministic from the mxid (so it needs
+  // no storage and reads the same on every device), random-looking (an adjective
+  // + a creature, drawn from a hash of the id), and decoupled from anything the
+  // reader typed — there is no chosen name to leak. Two 32-word lists give 1024
+  // distinct pseudonyms; the avatar colour still seeds off the full mxid, so two
+  // readers who happen to share a pseudonym keep different discs.
+  const ALIAS_ADJ = ["Quiet", "Amber", "Velvet", "Restless", "Marble", "Hidden", "Copper", "Drifting",
+    "Northern", "Patient", "Silver", "Wandering", "Crimson", "Gentle", "Distant", "Golden",
+    "Hollow", "Bright", "Wary", "Slate", "Tidal", "Emerald", "Lonesome", "Iron",
+    "Dusky", "Nimble", "Frosted", "Solemn", "Russet", "Vivid", "Cobalt", "Stray"];
+  const ALIAS_NOUN = ["Heron", "Lantern", "Cypress", "Otter", "Falcon", "Harbor", "Meadow", "Ember",
+    "Thistle", "Marten", "Beacon", "Sparrow", "Cedar", "Hawk", "Brook", "Willow",
+    "Raven", "Foxglove", "Plover", "Birch", "Kestrel", "Juniper", "Magpie", "Cove",
+    "Lynx", "Aspen", "Hollow", "Wren", "Bramble", "Osprey", "Reed", "Finch"];
+  function aliasFor(mxid) {
+    const s = String(mxid || "");
+    if (!s) return "Anonymous";
+    let h = 2166136261 >>> 0;             // FNV-1a → well-mixed bits for two picks
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+    const adj = ALIAS_ADJ[h % ALIAS_ADJ.length];
+    const noun = ALIAS_NOUN[Math.floor(h / ALIAS_ADJ.length) % ALIAS_NOUN.length];
+    return adj + " " + noun;
+  }
+
   /* ---------- bio rich text: safe inline links ----------
      The "About me" is plain text the contributor authors and we render to every
      visitor (public, world-readable), so links are PARSED but never TRUSTED.
@@ -223,7 +248,7 @@
 
   window.NpjProfiles = {
     BIO_MAX, NAME_MAX, BIO_RAW_MAX, ACCOUNT_DATA_TYPE,
-    colorFor, clamp,
+    colorFor, aliasFor, clamp,
     safeHref, linkTokens, hasLink, visibleLength, linkMarkdown,
     loadLocal, saveLocal, loadPublic,
     loadMine, saveMine, hydrateMine, intoLayout,

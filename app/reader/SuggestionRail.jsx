@@ -17,10 +17,15 @@ function StatusChip({ status, merged }) {
   return <span className={"chip " + m.cls}><span className="dot" style={{ background: m.dot }} /> {merged ? "Merged" : m.label}</span>;
 }
 
-/* The contributor's byline + avatar circle, driven by the name they TYPED on the
-   deposit — never the Matrix account name. Falls back to the mxid-resolved Handle
-   only when a deposit carries no typed name (older records). The avatar colour is
-   still seeded off the stable mxid so a contributor keeps one consistent disc. */
+/* Every contribution is shown under the account's anonymous PSEUDONYM and nothing
+   else — no typed byline, no Matrix handle. aliasFor() derives a stable, random
+   "Quiet Heron"-style name from the mxid (see profiles.js); the avatar colour is
+   seeded off the same mxid, so a contributor keeps one consistent name + disc
+   across every suggestion and reply without ever revealing who they are. */
+function aliasOf(mxid) {
+  if (window.NpjProfiles && window.NpjProfiles.aliasFor) return window.NpjProfiles.aliasFor(mxid);
+  return mxid ? String(mxid).replace(/^@/, "").split(":")[0] : "Anonymous";
+}
 function AuthorChip({ name, seed, size = 18 }) {
   const color = (window.NpjProfiles && window.NpjProfiles.colorFor)
     ? window.NpjProfiles.colorFor(seed || name || "@anon") : "#6b6b6b";
@@ -34,11 +39,63 @@ function AuthorChip({ name, seed, size = 18 }) {
     </span>
   );
 }
-// the contribution byline: the typed name when present, else the mxid handle
+// the contribution byline: always the account's anonymous pseudonym
 function ContribAuthor({ s, size }) {
-  return s && s.authorName
-    ? <AuthorChip name={s.authorName} seed={s.author} size={size} />
-    : <Handle mxid={s && s.author} size={size} showName />;
+  const mx = s && s.author;
+  return <AuthorChip name={aliasOf(mx)} seed={mx} size={size} />;
+}
+
+/* Save the reader's own credentials (random mxid + generated password) as a small
+   text file, so they can sign back in from any device and keep contributing under
+   the same pseudonym. Returns false when there's nothing to download (a session
+   with no stored password — e.g. an older account), so the caller can hide it. */
+function downloadCredentials() {
+  const A = window.MatrixAuth;
+  const c = A && A.credentials && A.credentials();
+  if (!c || !c.password) return false;
+  const body = [
+    "People's Journalism — your anonymous contributor credentials",
+    "Keep this file safe. It is the only way to post again as the same pseudonym.",
+    "",
+    "Matrix ID:   " + c.user_id,
+    "Password:    " + c.password,
+    "Homeserver:  " + (c.homeserver || ""),
+    "",
+    "To reuse: open the site, choose “Sign in”, and enter the Matrix ID and",
+    "password above. Your contributions stay anonymous — this name is random."
+  ].join("\n");
+  const url = URL.createObjectURL(new Blob([body], { type: "text/plain" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "npj-credentials-" + String(c.user_id || "anon").replace(/^@/, "").replace(/[^a-z0-9]+/gi, "-") + ".txt";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return true;
+}
+
+/* A persistent strip in the rail telling a signed-in reader the anonymous name
+   their contributions appear under, with a one-tap download of the credentials
+   they'd need to post again later from another device. */
+function AnonIdentityStrip({ me }) {
+  const [saved, setSaved] = useState(false);
+  const canSave = !!(window.MatrixAuth && window.MatrixAuth.credentials && (window.MatrixAuth.credentials() || {}).password);
+  return (
+    <div style={{ border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "9px 11px", marginBottom: 14,
+      display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <AuthorChip name={aliasOf(me)} seed={me} size={22} />
+      <div style={{ flex: 1, minWidth: 120 }}>
+        <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>You post anonymously as</div>
+        <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, lineHeight: 1.1 }}>{aliasOf(me)}</div>
+      </div>
+      {canSave && (
+        <button className="btn btn-sm" style={{ display: "inline-flex", alignItems: "center", gap: 5 }}
+          onClick={() => { if (downloadCredentials()) { setSaved(true); } }}
+          title="Download the credentials you need to post again later from any device">
+          <I.download style={{ fontSize: 13 }} /> {saved ? "Saved ✓" : "Download credentials"}
+        </button>
+      )}
+    </div>
+  );
 }
 
 /* word-level diff between current span text and the proposed text */
@@ -92,14 +149,14 @@ function Replies({ s, me, onReply }) {
           {(s.replies || []).map((r, i) => (
             <div key={i} style={{ marginBottom: 7 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <ContribAuthor s={{ author: r.author, authorName: r.authorName }} size={14} />
+                <ContribAuthor s={{ author: r.author }} size={14} />
                 <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{r.ts}</span>
               </div>
               <div style={{ fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.4, marginTop: 2 }}>{r.text}</div>
             </div>
           ))}
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-            <input value={text} onChange={e => setText(e.target.value)} placeholder={"Reply as " + me}
+            <input value={text} onChange={e => setText(e.target.value)} placeholder={"Reply as " + aliasOf(me)}
               onKeyDown={e => { if (e.key === "Enter" && text.trim()) { onReply(s.id, text.trim()); setText(""); } }}
               style={{ flex: 1, minWidth: 0, border: "1px solid var(--rule-strong)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 12.5, padding: "5px 7px", outline: "none" }} />
             <button className="btn btn-sm" disabled={!text.trim()} style={{ opacity: text.trim() ? 1 : .5 }}
@@ -153,7 +210,7 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
         {(s.resolution || s.merged) && (
           <div style={{ marginTop: 8, fontSize: 12, color: s.status === "rejected" ? "var(--reject)" : "var(--verified)", fontFamily: "var(--cond)", display: "inline-flex", alignItems: "center", gap: 5 }}>
             <span style={{ fontFamily: "var(--mono)" }}>{s.merged ? "⊛" : s.status === "rejected" ? "✕" : "✓"}</span>
-            {s.resolution || (s.merged ? "Merged into the record" : "")}{s.resolvedBy ? " · " + s.resolvedBy : ""}
+            {s.resolution || (s.merged ? "Merged into the record" : "")}{s.resolvedBy ? " · " + aliasOf(s.resolvedBy) : ""}
           </div>
         )}
 
@@ -199,34 +256,32 @@ function signupErrorText(e) {
   return "Couldn't create the account — please try again.";
 }
 
-/* compose a new suggestion or comment, pinned to the selected span. Anyone can
-   propose: if the reader has no account yet, posting first mints one on the
-   site's homeserver (a quick, one-tap hyphae.social sign-up) and signs them in,
-   then deposits the suggestion as them. */
+/* compose a new suggestion or comment, pinned to the selected span (a claim /
+   assertion in the author's text). Anyone can propose or comment: if the reader
+   has no account yet, posting first mints an ANONYMOUS account on the site's
+   homeserver (a random handle, no name to choose) and signs them in, then
+   deposits the contribution under their generated pseudonym. */
 function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
   const quote = draft.quote || "";
   const [kind, setKind] = useState(draft.kind || "suggestion");
   const [proposed, setProposed] = useState(quote);
   const [rationale, setRationale] = useState("");
-  // The byline the contributor signs with — the public credit on the deposit.
-  // Decoupled from the Matrix account name: signed out it starts blank (you type
-  // it, and it also seeds the auto-minted account); signed in it pre-fills from
-  // your current name but stays editable, so the name you type is what shows.
-  const [byName, setByName] = useState(() =>
-    signedIn && window.npjPerson ? (window.npjPerson(me).name || "") : "");
   const [acctBusy, setAcctBusy] = useState(false);
   const [acctErr, setAcctErr] = useState(null);
   const isSugg = kind === "suggestion";
   const valid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
     : rationale.trim().length >= 2;
-  const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim(), authorName: byName.trim() });
-  // signed in → deposit straight away; otherwise mint + sign in, then deposit
+  // No byline is ever sent: the deposit is credited to the account's anonymous
+  // pseudonym (derived from the mxid at display time), so nothing identifying is
+  // attached to a contribution.
+  const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  // signed in → deposit straight away; otherwise mint an anonymous account, then deposit
   const submit = async () => {
     if (signedIn || !onSignUp) { deposit(); return; }
     setAcctBusy(true); setAcctErr(null);
     try {
-      await onSignUp({ displayName: byName.trim() || undefined });
+      await onSignUp();
       deposit();
     } catch (e) {
       setAcctErr(signupErrorText(e));
@@ -272,22 +327,19 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
         )}
 
         {signedIn ? (
-          <div style={{ marginTop: 12 }}>
-            <label className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Sign this as</label>
-            <input value={byName} onChange={e => setByName(e.target.value)} placeholder="Your byline name"
-              onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
-              style={{ width: "100%", marginTop: 4, border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
-            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 5, lineHeight: 1.4 }}>The name readers see on this contribution — not your account name.</div>
+          <div style={{ marginTop: 12, border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "10px 11px", display: "flex", alignItems: "center", gap: 9 }}>
+            <AuthorChip name={aliasOf(me)} seed={me} size={22} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Posting anonymously as</div>
+              <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14, lineHeight: 1.15 }}>{aliasOf(me)}</div>
+            </div>
           </div>
         ) : (
           <div style={{ marginTop: 12, border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "10px 11px" }}>
-            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Post as a new account</div>
-            <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "5px 0 8px" }}>
-              You're not signed in. Posting creates a free account on <b>hyphae.social</b> — that's how an editor can credit you and reply. It takes one tap; you can set a password later.
+            <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Post anonymously</div>
+            <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "5px 0 0" }}>
+              You're not signed in. Posting creates a free, anonymous account on <b>hyphae.social</b> with a randomly generated name — no email, no username to pick. After you post you can download your credentials to contribute again later from any device.
             </div>
-            <input value={byName} onChange={e => setByName(e.target.value)} placeholder="Display name (optional)"
-              onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
-              style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
             {acctErr && (
               <div className="np-mono" style={{ fontSize: 10, color: "var(--reject)", border: "1px solid var(--reject)", padding: "6px 8px", marginTop: 8, lineHeight: 1.45 }}>{acctErr}</div>
             )}
@@ -296,14 +348,14 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
 
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", marginTop: 11, gap: 8 }}>
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", flex: "1 1 130px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {byName.trim() ? "as " + byName.trim() : (signedIn ? "as " + me : "new hyphae.social account")}
+            {signedIn ? "as " + aliasOf(me) : "new anonymous account"}
           </span>
           <div style={{ display: "flex", gap: 7, flexShrink: 0, marginLeft: "auto" }}>
             <button className="btn btn-sm" onClick={onCancel} disabled={acctBusy}>Cancel</button>
             <button className="btn btn-sm btn-primary" disabled={!valid || acctBusy} style={{ opacity: (valid && !acctBusy) ? 1 : .45, cursor: (valid && !acctBusy) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}
               onClick={submit}>
               {acctBusy && <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
-              {acctBusy ? "Creating account…" : signedIn ? (isSugg ? "Propose edit" : "Post comment") : "Create account & post"}
+              {acctBusy ? "Creating account…" : signedIn ? (isSugg ? "Propose edit" : "Post comment") : "Post anonymously"}
             </button>
           </div>
         </div>
@@ -353,6 +405,8 @@ function SuggestionRail({ open, onClose, list, claimById, filter, setFilter, can
 
       <div style={{ padding: "14px 16px 40px", flex: 1 }}>
         {composeDraft && <Compose draft={composeDraft} me={me} signedIn={signedIn} onSignUp={onSignUp} onSubmit={onSubmit} onCancel={onCancelCompose} />}
+
+        {!composeDraft && signedIn && <AnonIdentityStrip me={me} />}
 
         {!composeDraft && (
           <div style={{ border: "1.5px dashed var(--rule-strong)", padding: "12px 13px", marginBottom: 16, display: "flex", gap: 11, alignItems: "center" }}>

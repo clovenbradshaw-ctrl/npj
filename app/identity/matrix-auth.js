@@ -563,27 +563,45 @@
      story. Unlike register() (the inviter flow, inhibit_login on), this mints the
      newcomer's OWN token: register with inhibit_login off → adopt the token the
      homeserver returns (whoami confirms who it belongs to), or fall back to a
-     fresh login if the server withheld one. The handle auto-mints from a seed
-     (e.g. a chosen display name) when none is given. Throws the same coded errors
+     fresh login if the server withheld one.
+
+     ANONYMOUS BY DESIGN: a reader never chooses a username or a display name, so
+     nothing the homeserver stores can be traced back to a name they typed — the
+     localpart is fully random (guest-xxxxx) and the account carries no displayname.
+     The generated password is stashed on the session (and thus localStorage), so
+     the reader can DOWNLOAD their credentials and sign back in from any device to
+     keep contributing under the same pseudonym. Throws the same coded errors
      register() does — a closed homeserver / CAPTCHA / token-gated server surfaces
      a plain-language reason the caller can show. */
   const SEED_DOMAIN = (ADMIN_MXID.split(":").pop() || "").trim();
-  async function signUp({ domain, username, password, displayName, seed, registrationToken } = {}) {
+  async function signUp({ domain, password, registrationToken } = {}) {
     const dom = String(domain || SEED_DOMAIN || "").trim();
     const pw = password || randomPassword();
-    const acct = await register({ domain: dom, username, password: pw, seed: seed || username || displayName, registrationToken, inhibitLogin: false });
+    // no seed/username/displayName: the handle is random and unguessable
+    const acct = await register({ domain: dom, password: pw, registrationToken, inhibitLogin: false });
     if (acct.access_token) {
       // whoami is still the source of truth for the id the token belongs to
       const who = await api(acct.base_url, "/_matrix/client/v3/account/whoami", { token: acct.access_token });
       const user_id = who.user_id || acct.user_id;
-      session = { user_id, access_token: acct.access_token, base_url: acct.base_url, device_id: acct.device_id || who.device_id || null, verified: true, admin: user_id === ADMIN_MXID };
+      session = { user_id, access_token: acct.access_token, base_url: acct.base_url, device_id: acct.device_id || who.device_id || null, verified: true, admin: user_id === ADMIN_MXID, password: pw };
       persist(); emit();
     } else {
       // a homeserver that ignored inhibit_login:false — log in with the temp password
       await login(acct.mxid, pw);
+      if (session) { session.password = pw; persist(); } // keep it downloadable
     }
-    if (displayName && String(displayName).trim()) { try { await setDisplayName(String(displayName).trim()); } catch (e) {} }
     return current();
+  }
+
+  // The reader's own credentials, for the "download to post again later" affordance:
+  // the random mxid + the generated password kept on the local session. Returns
+  // null (or password:null for a pre-existing account) when there's nothing to hand
+  // back — the caller hides the download in that case.
+  function credentials() {
+    if (!session) return null;
+    const id = parseMxid(session.user_id);
+    return { user_id: session.user_id, password: session.password || null,
+      base_url: session.base_url, homeserver: id ? id.domain : null };
   }
 
   async function setDisplayName(name) {
@@ -713,7 +731,7 @@
     ADMIN_MXID, CONTROL_ALIAS, APP_ROOM_TYPE, parseMxid, discover, login, logout, restore, current, token,
     isSignedIn, isAdmin, resolveRoom, invite, joinRoom, tagRoom, ensureControlRoom, readPermissions, writePermissions, getProfile,
     // invite someone who has no account yet: mint it, name it, re-key it
-    register, signUp, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
+    register, signUp, credentials, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange,

@@ -378,15 +378,19 @@ function App() {
   // Anyone online can post a suggestion: if they have no account yet, mint one on
   // the site's homeserver and sign them in IN PLACE (no navigation away from the
   // story), so the queued deposit posts as them through the open suggest webhook.
-  const onSignUp = useCallback(async ({ username, displayName } = {}) => {
-    const sess = await window.MatrixAuth.signUp({ username, displayName });
+  const onSignUp = useCallback(async () => {
+    // Anonymous mint: no username, no display name. The account is credited under
+    // a random pseudonym (aliasFor) derived from its mxid, never a typed name.
+    const sess = await window.MatrixAuth.signUp();
     setSession(sess);
     if (sess && sess.user_id && !window.NPJ.PEOPLE[sess.user_id]) {
-      const col = (window.NpjProfiles && window.NpjProfiles.colorFor) ? window.NpjProfiles.colorFor(sess.user_id) : "#b23a26";
-      window.NPJ.PEOPLE[sess.user_id] = { name: (displayName && displayName.trim()) || sess.user_id.replace(/^@/, "").split(":")[0], role: "Reader", trust: "open", color: col };
+      const P = window.NpjProfiles || {};
+      const col = P.colorFor ? P.colorFor(sess.user_id) : "#b23a26";
+      const nm = P.aliasFor ? P.aliasFor(sess.user_id) : sess.user_id.replace(/^@/, "").split(":")[0];
+      window.NPJ.PEOPLE[sess.user_id] = { name: nm, role: "Reader", trust: "open", color: col };
     }
     return sess;
-  }, [me]);
+  }, []);
   const reloadFeedback = useCallback(() => {
     const A = window.NPJ.ARTICLE; if (!A || !A.slug) { setSuggestions([]); return Promise.resolve(); }
     return window.NpjFeedback.load(A.slug, { base_sha: A.base_sha }).then(setSuggestions).catch(() => {});
@@ -411,7 +415,7 @@ function App() {
   };
   const onAddSuggestion = (draft) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: liveMe(), authorName: (draft.authorName || "").trim(), base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
+    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: liveMe(), base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
   };
   // Merge a suggestion: apply its words to the body + commit a REC, then fold the
   // updated article in place (same path as the Edit overlay). Returns the merge
