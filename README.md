@@ -367,11 +367,13 @@ way; inside a code/verse block a Return is a literal newline instead.
 **Preview is the real thing, not a mock.** The editor's **Preview** button folds
 the live draft through the *same* builder that publishing uses
 (`NpjArticles.genesisFromContent`, with `{preview:true}` so not-yet-uploaded
-photos still show, badged) and renders that block model in a dedicated, standalone
-preview (`app/editor/PreviewScreen.jsx` → `window.NpjPreview`) — same Header, body
-blocks, byline and sources footer, on the paper page. Two guarantees the preview
-is built to hold: it shares **one fold** with publish (so it can never drift from
-the editor, and a citation marker's number never leaks into prose — the fold
+photos still show, badged) and renders that block model through the **reader's own
+renderer** (`app/reader/ArticleRead.jsx`, in `preview` mode) — same Header, body
+blocks, byline, sources footer **and the docked side panel** (the grounding/source
+hover cards), on the paper page. Reusing the reader means the author audits the
+draft's sourcing exactly as a reader will: hover a claim and its source card floats
+up beside the column. It shares **one fold** with publish (so it can never drift
+from the editor, and a citation marker's number never leaks into prose — the fold
 strips it; a number only ever paints as an explicit chip behind the Grounding
 toggle), and it **draws every photo straight from the Matrix media-store** (the
 shared `MediaImg`/`resolveDisplay` path auth-fetches the bytes to a `blob:` URL),
