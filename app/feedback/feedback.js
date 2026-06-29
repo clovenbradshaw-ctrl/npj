@@ -32,10 +32,30 @@
 (function (root) {
   'use strict';
 
-  var FB_SCHEMA = "npj/feedback-eo/1";
-  var LOCAL_PREFIX = "npj_fb_v1_";
-  var VOTES_KEY = "npj_fb_votes_v1";
+  // Feedback schema version. Bumping the trailing number RETIRES every comment,
+  // suggestion, vote and reply written under an older version: fold() drops any
+  // feedback event whose `v` names an earlier feedback-eo schema, and the local
+  // mirror keys carry the same version so stale pending deposits aren't read back
+  // either. The append-only log keeps the old lines in GitHub — they just stop
+  // folding into the live rail. (Article INS/REC events are unaffected; only
+  // feedback-eo deposits are versioned here.)
+  var FB_VERSION = 2;
+  var FB_SCHEMA_PREFIX = "npj/feedback-eo/";
+  var FB_SCHEMA = FB_SCHEMA_PREFIX + FB_VERSION;
+  var LOCAL_PREFIX = "npj_fb_v" + FB_VERSION + "_";
+  var VOTES_KEY = "npj_fb_votes_v" + FB_VERSION;
   var CTX = 36; // chars of context kept on each side of an anchored span
+
+  // The feedback-schema version a raw event was written under, or null when the
+  // event isn't a feedback-eo deposit at all (an article INS/REC, or a local
+  // pending deposit that hasn't been committed and so carries no `v`). Used by
+  // fold() to skip superseded feedback while leaving everything else alone.
+  function fbVersionOf(ev) {
+    var v = ev && ev.v;
+    if (typeof v !== "string" || v.indexOf(FB_SCHEMA_PREFIX) !== 0) return null;
+    var n = parseInt(v.slice(FB_SCHEMA_PREFIX.length), 10);
+    return isFinite(n) ? n : null;
+  }
 
   function nowIso() { return new Date().toISOString(); }
   function rnd() { return Math.floor(Math.random() * 1e9).toString(36); }
@@ -165,6 +185,11 @@
     opts = opts || {};
     var by = {}, order = [];
     (events || []).forEach(function (ev) {
+      // Drop feedback deposits written under a retired schema version, so a
+      // version bump cleanly excludes every old comment/suggestion/vote/reply
+      // (committed v.<n> lines still live in the log; they just stop folding).
+      var fv = fbVersionOf(ev);
+      if (fv !== null && fv < FB_VERSION) return;
       var o = ev && ev.operand;
       if (!o || !o.id) return;
       if (o.ref) {
@@ -320,6 +345,7 @@
 
   root.NpjFeedback = {
     SCHEMA: FB_SCHEMA,
+    VERSION: FB_VERSION,
     makeAnchor: makeAnchor, anchorFromClaim: anchorFromClaim, locate: locate,
     paintAnchors: paintAnchors, clearAnchors: clearAnchors, flash: flash, supportsHighlight: supportsHL,
     load: load, propose: propose, vote: vote, reply: reply, resolve: resolve,

@@ -227,8 +227,10 @@ Publish Webhook → Whoami → Fetch Roles → Authorize → Authorized? → GH 
 
 Reader feedback — a span-anchored **suggestion** (the exact words it would
 change) or a **comment** — is stored as one more EO event in the *same*
-per-document folder as the article, schema `npj/feedback-eo/1`
-(reader/writer: `app/feedback.js`):
+per-document folder as the article, schema `npj/feedback-eo/N` (the current
+version is `npj/feedback-eo/2`; bumping it retires every comment/suggestion
+written under an older version — the reader folds only the current schema, the
+old lines stay in the log) (reader/writer: `app/feedback.js`):
 
 ```
 articles/<slug>/20260619T2031Z-eva-7f3k.jsonl   ← a reader's suggestion (EVA)
@@ -236,10 +238,10 @@ articles/<slug>/20260619T2105Z-eva-9bd1.jsonl   ← a 👍 / reply / resolution 
 ```
 
 ```jsonl
-{"v":"npj/feedback-eo/1","op":"EVA","target":"article/<slug>","ts":"…","actor":"@reader:hs",
+{"v":"npj/feedback-eo/2","op":"EVA","target":"article/<slug>","ts":"…","actor":"@reader:hs",
  "operand":{"id":"fb-…","kind":"suggestion","anchor":{"quote":"…","prefix":"…","suffix":"…","claimId":null},
             "proposed":"…","rationale":"…","base_sha":"a3f9c1e"}}
-{"v":"npj/feedback-eo/1","op":"EVA","target":"article/<slug>","ts":"…","actor":"@editor:hs",
+{"v":"npj/feedback-eo/2","op":"EVA","target":"article/<slug>","ts":"…","actor":"@editor:hs",
  "operand":{"id":"fbr-…","ref":"fb-…","act":"resolve","outcome":"merged","commit_sha":"…"}}
 ```
 

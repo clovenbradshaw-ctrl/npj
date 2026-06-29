@@ -1609,7 +1609,7 @@
   /* A generic event writer — writes any EO op as its own new event file. Used by
      the feedback layer (app/feedback.js) to land reader EVA deposits alongside
      the article's own events. `schema` overrides the event's `v` so feedback
-     lines self-identify (npj/feedback-eo/1) while still folding harmlessly
+     lines self-identify (npj/feedback-eo/N) while still folding harmlessly
      through the article reader (EVA never touches state). */
   async function appendEvent({ slug, op, operand, actor, token, note, extra, message, schema, status }) {
     const opnd = status ? Object.assign({}, operand, { status }) : (operand || {});
