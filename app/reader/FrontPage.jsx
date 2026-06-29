@@ -372,12 +372,44 @@ function TagRow({ tags, small }) {
   );
 }
 
+/* ---- "Up next" teaser ----
+   A compact preview of the article that follows the cover story, shown in the
+   right column beside the cover photo (desktop only — see FrontCard's "below"
+   branch). Its host clips it to the photo's height, so this just renders the
+   teaser top-down and lets the column fade out whatever doesn't fit. */
+function NextPreview({ item, onOpen }) {
+  const open = () => onOpen && onOpen(item.slug);
+  const hasPhoto = !!(item.image && item.image.src && window.MediaImg);
+  return (
+    <button onClick={open} className="npj-next-preview" style={{ display: "block", width: "100%", textAlign: "left",
+      background: "none", border: 0, padding: 0, margin: 0, cursor: "pointer", color: "var(--ink)" }}>
+      <div className="np-mono" style={{ fontWeight: 600, fontSize: 12, letterSpacing: ".16em", textTransform: "uppercase",
+        color: "var(--ink-soft)", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+        <span aria-hidden="true" style={{ width: 7, height: 7, background: "var(--reject)", flexShrink: 0 }} /> Up next
+      </div>
+      {hasPhoto && (
+        <div style={{ marginBottom: 13 }}>
+          <window.MediaImg srcs={[item.image.store, item.image.src]} alt={item.image.description || item.image.caption || item.headline || ""}
+            fit={item.image.fit} crop={item.image.crop}
+            style={{ width: "100%", height: 148, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
+        </div>
+      )}
+      <h3 style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 26, lineHeight: 1.04, textTransform: "uppercase", margin: "0 0 11px" }}>
+        {item.headline}
+      </h3>
+      {item.dek && (
+        <p style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1.5, margin: 0, color: "var(--ink)" }}>{item.dek}</p>
+      )}
+    </button>
+  );
+}
+
 /* ---- One front-page card, arranged by its chosen template ----
    `variant` sets the type scale (lead = cover, card = secondary row); `template`
    is a FRONT_CARD_TEMPLATES key (image-top / image-left / overlay / …) that
    decides where the photo sits relative to the title + subtitle. The same card
    renders every placement, so the admin's pick and the public page never drift. */
-function FrontCard({ item, template, variant, onOpen }) {
+function FrontCard({ item, template, variant, onOpen, next }) {
   const mobile = window.useIsMobile();
   const lead = variant === "lead";
   const T = (window.FRONT_CARD_TEMPLATES && window.FRONT_CARD_TEMPLATES[template]) || { img: lead ? "below" : "top" };
@@ -432,6 +464,27 @@ function FrontCard({ item, template, variant, onOpen }) {
       </button>
     );
   };
+  // The headline photo's caption + credit, surfaced under the cover image (the
+  // same caption the author writes on the banner in the editor and that the
+  // article page shows). Only the cover story carries it — secondary thumbnails
+  // stay clean — and never under an overlay (place "behind"), where it'd land on
+  // the scrim. The credit is markdown ([outlet](url)), rendered safely.
+  const PhotoCaption = () => {
+    if (!lead || !hasPhoto) return null;
+    const cap = item.image.caption, cred = item.image.credit;
+    if (!cap && !cred) return null;
+    return (
+      <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 8, lineHeight: 1.45 }}>
+        {cap ? <span>▢ {cap}</span> : null}
+        {cred ? (
+          <span style={{ display: cap ? "block" : "inline", marginTop: cap ? 2 : 0 }}>
+            <span className="np-eyebrow" style={{ fontSize: 9.5, letterSpacing: ".05em", marginRight: 5 }}>Credit</span>
+            {window.npjRichText ? window.npjRichText(cred) : cred}
+          </span>
+        ) : null}
+      </figcaption>
+    );
+  };
 
   // Title over the photo (with a legibility scrim); meta + tags drop below it.
   if (place === "behind") {
@@ -462,7 +515,7 @@ function FrontCard({ item, template, variant, onOpen }) {
     return (
       <div style={{ display: "flex", flexDirection: mobile ? "column" : (place === "right" ? "row-reverse" : "row"), gap: lead ? 28 : 18, alignItems: "flex-start" }}>
         <div style={{ flex: mobile ? "none" : ("0 0 " + (lead ? "44%" : "40%")), width: mobile ? "100%" : undefined, marginBottom: mobile ? 16 : 0 }}>
-          <Photo h={photoHeight} />
+          <Photo h={photoHeight} /><PhotoCaption />
         </div>
         {Text}
       </div>
@@ -473,18 +526,38 @@ function FrontCard({ item, template, variant, onOpen }) {
   if (place === "top") {
     return (
       <div>
-        <div style={{ marginBottom: lead ? 18 : 20 }}><Photo h={photoHeight} /></div>
+        <div style={{ marginBottom: lead ? 18 : 20 }}><Photo h={photoHeight} /><PhotoCaption /></div>
         {Text}
       </div>
     );
   }
 
   // "below" (title + subtitle, then photo, then meta) and "none" (text only).
+  // When this is the cover story and an "Up next" teaser is supplied (desktop),
+  // the photo and the teaser sit in a two-column row: the photo keeps its natural
+  // height on the left, and the right column is clipped to exactly that height so
+  // the teaser previews the next piece without ever running taller than the photo.
+  const useSidePreview = lead && place === "below" && hasPhoto && next && !mobile;
   return (
     <div>
       <KickerEl /><BylineEl /><TitleEl /><DekEl />
       {place === "below" && (hasPhoto
-        ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /></div>
+        ? (useSidePreview
+            ? <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 34, alignItems: "stretch", margin: "0 0 18px" }}>
+                <div style={{ minWidth: 0 }}><Photo h={null} /><PhotoCaption /></div>
+                {/* the teaser column. It carries no in-flow height of its own (the
+                    teaser is absolutely placed), so the grid row's height is set
+                    purely by the photo — and overflow:hidden clips the teaser to it. */}
+                <div style={{ position: "relative", minWidth: 0 }}>
+                  <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderLeft: "1px solid var(--rule)", paddingLeft: 30 }}>
+                    <NextPreview item={next} onOpen={onOpen} />
+                    {/* fade the clipped edge so a long teaser reads as "continued", not cut off */}
+                    <div aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 72,
+                      background: "linear-gradient(to top, var(--paper) 12%, rgba(246,241,228,0))", pointerEvents: "none" }} />
+                  </div>
+                </div>
+              </div>
+            : <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /><PhotoCaption /></div>)
         : (lead ? <div style={{ margin: "0 0 18px", maxWidth: 640 }}><Placeholder label="hero image" h={300} /></div> : null))}
       <MetaEl /><TagsEl />
     </div>
@@ -494,15 +567,25 @@ function FrontCard({ item, template, variant, onOpen }) {
 /* ---- Front-page lineup ---- */
 function FrontLineup({ items, onOpen }) {
   const { layout } = React.useContext(window.LayoutCtx);
+  const mobile = window.useIsMobile();
   const front = layout.front || {};
   // Admin curation: an explicit slug order (the hotswap) wins; otherwise the
   // newest-first order the record came in with.
   const ordered = window.orderFrontItems(items, front);
   const lead = ordered.find(a => a.status !== "unpublished") || ordered[0];
   const rest = ordered.filter(a => a !== lead);
-  const row2 = rest.slice(0, 3);   // the 3-across row
-  const feed = rest.slice(3);      // everything else — a vertical feed
   const tpl = (slug, pos) => window.cardTemplateFor(layout, slug, pos);
+  // The cover story can preview the next piece beside its photo (desktop only,
+  // and only when the cover lays its photo out "below" the text — the layout
+  // that leaves the right half of the row empty). When it does, that next piece
+  // is the cover's teaser, so it comes OUT of the rows below to avoid showing
+  // twice. On phones / other cover layouts nothing is consumed.
+  const leadPlace = lead ? (window.FRONT_CARD_TEMPLATES[tpl(lead.slug, "lead")] || {}).img : null;
+  const leadHasPhoto = !!(lead && lead.image && lead.image.src && window.MediaImg);
+  const sidePreview = (!mobile && leadPlace === "below" && leadHasPhoto && rest[0]) ? rest[0] : null;
+  const restAfterLead = sidePreview ? rest.slice(1) : rest;
+  const row2 = restAfterLead.slice(0, 3);   // the 3-across row
+  const feed = restAfterLead.slice(3);      // everything else — a vertical feed
   // Feed rows read best as side-by-side (photo + text) cards; an explicit
   // per-article template override still wins.
   const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-left";
@@ -512,7 +595,7 @@ function FrontLineup({ items, onOpen }) {
       {/* Cover story — laid out by its template (admin-chosen or inherited) */}
       {lead && (
         <section className="npj-cover" style={{ paddingBottom: 44 }}>
-          <FrontCard item={lead} variant="lead" template={tpl(lead.slug, "lead")} onOpen={onOpen} />
+          <FrontCard item={lead} variant="lead" template={tpl(lead.slug, "lead")} onOpen={onOpen} next={sidePreview} />
         </section>
       )}
 
