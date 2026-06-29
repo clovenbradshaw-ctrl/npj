@@ -17,6 +17,30 @@ function StatusChip({ status, merged }) {
   return <span className={"chip " + m.cls}><span className="dot" style={{ background: m.dot }} /> {merged ? "Merged" : m.label}</span>;
 }
 
+/* The contributor's byline + avatar circle, driven by the name they TYPED on the
+   deposit — never the Matrix account name. Falls back to the mxid-resolved Handle
+   only when a deposit carries no typed name (older records). The avatar colour is
+   still seeded off the stable mxid so a contributor keeps one consistent disc. */
+function AuthorChip({ name, seed, size = 18 }) {
+  const color = (window.NpjProfiles && window.NpjProfiles.colorFor)
+    ? window.NpjProfiles.colorFor(seed || name || "@anon") : "#6b6b6b";
+  const initial = String(name || "?").replace(/^@/, "").charAt(0).toUpperCase();
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+      <span aria-hidden="true" style={{ width: size, height: size, borderRadius: "50%", background: color, color: "#fff",
+        fontFamily: "var(--cond)", fontWeight: 700, fontSize: size * 0.56, display: "inline-flex",
+        alignItems: "center", justifyContent: "center", flex: "0 0 auto" }}>{initial}</span>
+      <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{name}</span>
+    </span>
+  );
+}
+// the contribution byline: the typed name when present, else the mxid handle
+function ContribAuthor({ s, size }) {
+  return s && s.authorName
+    ? <AuthorChip name={s.authorName} seed={s.author} size={size} />
+    : <Handle mxid={s && s.author} size={size} showName />;
+}
+
 /* word-level diff between current span text and the proposed text */
 function DiffText({ before, after }) {
   const a = before.split(/(\s+)/), b = after.split(/(\s+)/);
@@ -68,7 +92,7 @@ function Replies({ s, me, onReply }) {
           {(s.replies || []).map((r, i) => (
             <div key={i} style={{ marginBottom: 7 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <Handle mxid={r.author} size={14} showName />
+                <ContribAuthor s={{ author: r.author, authorName: r.authorName }} size={14} />
                 <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{r.ts}</span>
               </div>
               <div style={{ fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.4, marginTop: 2 }}>{r.text}</div>
@@ -134,7 +158,7 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
         )}
 
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
-          <Handle mxid={s.author} showName />
+          <ContribAuthor s={s} />
           <button className="vote" data-on={s.voted ? "1" : "0"} onClick={() => onVote(s.id)} title="Back this — weight for the editor">
             <I.up style={{ fontSize: 13 }} /> {s.votes}
           </button>
@@ -184,21 +208,25 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
   const [kind, setKind] = useState(draft.kind || "suggestion");
   const [proposed, setProposed] = useState(quote);
   const [rationale, setRationale] = useState("");
-  // anonymous reader → quick account: an optional display name (handle auto-mints)
-  const [acctName, setAcctName] = useState("");
+  // The byline the contributor signs with — the public credit on the deposit.
+  // Decoupled from the Matrix account name: signed out it starts blank (you type
+  // it, and it also seeds the auto-minted account); signed in it pre-fills from
+  // your current name but stays editable, so the name you type is what shows.
+  const [byName, setByName] = useState(() =>
+    signedIn && window.npjPerson ? (window.npjPerson(me).name || "") : "");
   const [acctBusy, setAcctBusy] = useState(false);
   const [acctErr, setAcctErr] = useState(null);
   const isSugg = kind === "suggestion";
   const valid = isSugg
     ? (rationale.trim().length >= 4 && proposed.trim() !== quote.trim() && proposed.trim().length > 0)
     : rationale.trim().length >= 2;
-  const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim() });
+  const deposit = () => onSubmit({ kind, anchor: draft.anchor, proposed: isSugg ? proposed.trim() : "", rationale: rationale.trim(), authorName: byName.trim() });
   // signed in → deposit straight away; otherwise mint + sign in, then deposit
   const submit = async () => {
     if (signedIn || !onSignUp) { deposit(); return; }
     setAcctBusy(true); setAcctErr(null);
     try {
-      await onSignUp({ displayName: acctName.trim() || undefined });
+      await onSignUp({ displayName: byName.trim() || undefined });
       deposit();
     } catch (e) {
       setAcctErr(signupErrorText(e));
@@ -243,13 +271,21 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
           </div>
         )}
 
-        {!signedIn && (
+        {signedIn ? (
+          <div style={{ marginTop: 12 }}>
+            <label className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Sign this as</label>
+            <input value={byName} onChange={e => setByName(e.target.value)} placeholder="Your byline name"
+              onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
+              style={{ width: "100%", marginTop: 4, border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
+            <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginTop: 5, lineHeight: 1.4 }}>The name readers see on this contribution — not your account name.</div>
+          </div>
+        ) : (
           <div style={{ marginTop: 12, border: "1.5px solid var(--ink)", background: "var(--paper-2)", padding: "10px 11px" }}>
             <div className="np-eyebrow" style={{ color: "var(--ink-soft)" }}>Post as a new account</div>
             <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.4, margin: "5px 0 8px" }}>
               You're not signed in. Posting creates a free account on <b>hyphae.social</b> — that's how an editor can credit you and reply. It takes one tap; you can set a password later.
             </div>
-            <input value={acctName} onChange={e => setAcctName(e.target.value)} placeholder="Display name (optional)"
+            <input value={byName} onChange={e => setByName(e.target.value)} placeholder="Display name (optional)"
               onKeyDown={e => { if (e.key === "Enter" && valid && !acctBusy) submit(); }}
               style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", fontFamily: "var(--serif)", fontSize: 13, padding: "6px 8px", boxSizing: "border-box", outline: "none" }} />
             {acctErr && (
@@ -260,7 +296,7 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
 
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", marginTop: 11, gap: 8 }}>
           <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", flex: "1 1 130px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {signedIn ? "as " + me : "new hyphae.social account"}
+            {byName.trim() ? "as " + byName.trim() : (signedIn ? "as " + me : "new hyphae.social account")}
           </span>
           <div style={{ display: "flex", gap: 7, flexShrink: 0, marginLeft: "auto" }}>
             <button className="btn btn-sm" onClick={onCancel} disabled={acctBusy}>Cancel</button>

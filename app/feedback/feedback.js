@@ -171,7 +171,7 @@
         var t = by[o.ref];
         if (!t) return;
         if (o.act === "vote") t.votes += (o.dir || 1);
-        else if (o.act === "reply") t.replies.push({ author: ev.actor || o.author || "@anon", text: o.text || "", ts: String(ev.ts || o.ts || "").slice(0, 10) });
+        else if (o.act === "reply") t.replies.push({ author: ev.actor || o.author || "@anon", authorName: o.authorName || "", text: o.text || "", ts: String(ev.ts || o.ts || "").slice(0, 10) });
         else if (o.act === "resolve") {
           t.status = (o.outcome === "accepted" || o.outcome === "merged") ? "accepted" : (o.outcome === "review" ? "review" : "rejected");
           t.resolution = o.note || "";
@@ -191,6 +191,9 @@
         proposed: o.proposed || "",
         rationale: o.rationale || "",
         author: ev.actor || o.author || "@anon",
+        // the byline the contributor TYPED — the public credit. Independent of the
+        // Matrix account name; falls back to the mxid-resolved name only when blank.
+        authorName: o.authorName || "",
         trust: o.trust || "open",
         base_sha: o.base_sha || "",
         ts: String(ev.ts || o.ts || "").slice(0, 10),
@@ -243,7 +246,7 @@
     var operand = {
       id: id, kind: p.kind || "suggestion", anchor: p.anchor || null,
       proposed: p.kind === "comment" ? "" : (p.proposed || ""), rationale: p.rationale || "",
-      base_sha: p.base_sha || "", author: p.author || null, trust: p.trust || "open"
+      base_sha: p.base_sha || "", author: p.author || null, authorName: p.authorName || "", trust: p.trust || "open"
     };
     return commitEva(p.slug, operand, p.author, p.token, "feedback: " + p.slug).then(function (r) { return { ok: true, id: id, committed: r.committed }; });
   }
@@ -256,7 +259,7 @@
     return on;
   }
   function reply(p) {
-    var operand = { id: newId("fbr"), ref: p.ref, act: "reply", text: p.text || "", author: p.author || null };
+    var operand = { id: newId("fbr"), ref: p.ref, act: "reply", text: p.text || "", author: p.author || null, authorName: p.authorName || "" };
     return commitEva(p.slug, operand, p.author, p.token, "feedback reply: " + p.slug).then(function (r) { return { ok: true, committed: r.committed }; });
   }
   // Editor resolution without a body change: accept (stands), review, or reject.
