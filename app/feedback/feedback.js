@@ -273,32 +273,107 @@
      ordinary edit path (REC), and record the resolution as "merged". Returns the
      new body + the commit sha so the reader can fold the update in place. A
      suggestion whose words can't be found in the current body is a "conflict"
-     (the kind a PR shows when the base moved) — never a silent wrong edit. */
+     (the kind a PR shows when the base moved) — never a silent wrong edit.
+
+     The anchor is the EXACT selected words (a free drag-selection — see
+     makeAnchor), so the merge changes only those words. A `claimId` is just a
+     locating hint: it points us at the sentence the selection sits in, but we
+     still swap the selected sub-span, never the whole sentence — UNLESS the
+     quote IS the whole claim (the "Suggest edit" on a citation, anchorFromClaim),
+     where the selection and the sentence are one and the same. A selection that
+     runs across several tokens/sentences is handled by replaceAcrossTokens. */
+  function tokenText(t) {
+    if (t == null) return "";
+    if (typeof t === "string") return t;
+    if (typeof t === "object") { if (t.c != null) return String(t.c); if (t.text != null) return String(t.text); }
+    return "";
+  }
+  // rebuild a token carrying new text, preserving its shape (string / {c} claim /
+  // {text} styled run). A token with no text slot (a <br>/sup) is returned as-is.
+  function setTokenText(t, s) {
+    if (typeof t === "string") return s;
+    if (t && t.c != null) return Object.assign({}, t, { c: s });
+    if (t && t.text != null) return Object.assign({}, t, { text: s });
+    return t;
+  }
+  // Replace a quote that spans MORE THAN ONE token in a token run (a selection
+  // that crossed sentence/style boundaries). Keep the untouched head of the first
+  // token and tail of the last in place (so their styling/citation survives),
+  // drop the tokens fully inside the selection, and drop the proposed words in as
+  // a plain run between them. Returns the new token array, or null if the quote
+  // doesn't sit across this run.
+  function replaceAcrossTokens(tokens, quote, proposed) {
+    if (!tokens || !quote) return null;
+    var texts = tokens.map(tokenText);
+    var full = texts.join("");
+    var at = full.indexOf(quote);
+    if (at < 0) return null;
+    var end = at + quote.length;
+    var pos = 0, startTok = -1, startOff = 0, endTok = -1, endOff = 0;
+    for (var i = 0; i < tokens.length; i++) {
+      var L = texts[i].length;
+      if (startTok < 0 && pos + L > at) { startTok = i; startOff = at - pos; }
+      if (startTok >= 0 && pos + L >= end) { endTok = i; endOff = end - pos; break; }
+      pos += L;
+    }
+    if (startTok < 0 || endTok < 0 || startTok === endTok) return null; // single-token — caller handles it
+    var out = tokens.slice(0, startTok);
+    var head = texts[startTok].slice(0, startOff);
+    var tail = texts[endTok].slice(endOff);
+    if (head) out.push(setTokenText(tokens[startTok], head));
+    out.push(proposed);
+    if (tail) out.push(setTokenText(tokens[endTok], tail));
+    for (var j = endTok + 1; j < tokens.length; j++) out.push(tokens[j]);
+    return out;
+  }
   function applyToBody(body, s) {
     var next = JSON.parse(JSON.stringify(body || []));
     var claimId = s.anchor && s.anchor.claimId;
     var quote = (s.anchor && s.anchor.quote) || "";
     var proposed = s.proposed || "";
     var done = false;
+    // swap `quote` for `proposed` inside one token's text — within a sub-span of
+    // the sentence, not the whole token. Used for the per-token pass below.
+    function swapInToken(t) {
+      var text = tokenText(t);
+      if (!quote || text.indexOf(quote) < 0) return null;
+      done = true;
+      return setTokenText(t, text.replace(quote, proposed));
+    }
     function fixTokens(tokens) {
-      return (tokens || []).map(function (t) {
-        if (done) return t;
-        if (t && typeof t === "object" && t.c != null) {
-          if (claimId && t.id === claimId) { done = true; return Object.assign({}, t, { c: proposed }); }
-          if (!claimId && quote && t.c.indexOf(quote) >= 0) { done = true; return Object.assign({}, t, { c: t.c.replace(quote, proposed) }); }
-        } else if (typeof t === "string") {
-          if (!claimId && quote && t.indexOf(quote) >= 0) { done = true; return t.replace(quote, proposed); }
-        } else if (t && t.text != null) {
-          if (!claimId && quote && t.text.indexOf(quote) >= 0) { done = true; return Object.assign({}, t, { text: t.text.replace(quote, proposed) }); }
+      var list = tokens || [];
+      // The claim the selection sat in is the surest handle — try it first, so an
+      // identical fragment elsewhere in the paragraph can't be edited by mistake.
+      // A whole-claim anchor (quote === the claim's own text) replaces the claim
+      // outright; a sub-span swaps only the selected words inside it.
+      if (claimId) {
+        var ci = list.findIndex(function (t) { return t && typeof t === "object" && t.c != null && t.id === claimId; });
+        if (ci >= 0) {
+          done = true;
+          var ct = list[ci];
+          var nc = (quote && quote !== ct.c && ct.c.indexOf(quote) >= 0)
+            ? Object.assign({}, ct, { c: ct.c.replace(quote, proposed) })
+            : Object.assign({}, ct, { c: proposed });
+          return list.map(function (t, k) { return k === ci ? nc : t; });
         }
-        return t;
+      }
+      // no claim handle (a free selection), or the claim is gone — locate by the
+      // selected words: within one token, else spliced across several
+      var out = list.map(function (t) {
+        if (done) return t;
+        var swapped = swapInToken(t);
+        return swapped == null ? t : swapped;
       });
+      if (done) return out;
+      var across = replaceAcrossTokens(list, quote, proposed);
+      if (across) { done = true; return across; }
+      return out;
     }
     for (var i = 0; i < next.length && !done; i++) {
       var b = next[i];
       if (b.type === "p" && b.tokens) b.tokens = fixTokens(b.tokens);
       else if ((b.type === "ul" || b.type === "ol") && b.items) b.items = b.items.map(function (it) { return done ? it : fixTokens(it); });
-      else if (!claimId && quote && (b.type === "h2" || b.type === "h3" || b.type === "pull" || b.type === "code" || b.type === "verse") && b.text && b.text.indexOf(quote) >= 0) { b.text = b.text.replace(quote, proposed); done = true; }
+      else if (quote && (b.type === "h2" || b.type === "h3" || b.type === "pull" || b.type === "code" || b.type === "verse") && b.text && b.text.indexOf(quote) >= 0) { b.text = b.text.replace(quote, proposed); done = true; }
     }
     return done ? next : null;
   }

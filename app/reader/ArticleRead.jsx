@@ -1638,16 +1638,18 @@ function TransparencyControl({ level, setLevel, isPhone }) {
    `previews` is true at every level but Clean.
 
    The record stays open to public suggestion, so the bar also carries a SUGGEST
-   toggle: switch it on and anyone reading can select any sentence to propose an
-   edit or leave a comment (the Suggestions rail opens; open suggestions paint
-   into the prose). Posting prompts a one-tap hyphae.social sign-up if needed. */
+   toggle: switch it on and anyone reading can drag-select any run of text — a
+   word, a phrase, a passage across sentences — to propose an edit or leave a
+   comment (the selection is the anchor; it needn't line up with a sentence). The
+   Suggestions rail opens and open suggestions paint into the prose. Posting
+   prompts a one-tap hyphae.social sign-up if needed. */
 function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount }) {
   const isPhone = window.useIsMobile(760);
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "space-between" }}>
         <button onClick={onToggleSuggest} className="np-cond" aria-pressed={!!suggesting}
-          title="Suggest edits or leave comments on any sentence — open to everyone"
+          title="Suggest edits or leave comments — drag-select any words or passage, not just a sentence. Open to everyone."
           style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
             border: "1.5px solid var(--ink)", background: suggesting ? "var(--ink)" : "transparent",
             color: suggesting ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 9px" : "6px 12px",
