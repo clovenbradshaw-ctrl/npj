@@ -613,7 +613,15 @@ function ArticleRead(props) {
     try {
       const v = localStorage.getItem("npj.transparency");
       if (v === "clean" || v === "standard" || v === "full") return v;
-      return localStorage.getItem("npj.previews") === "0" ? "clean" : "standard";
+      if (localStorage.getItem("npj.previews") === "0") return "clean";
+      // First visit on a phone: open to a clean read. The inline transparency
+      // layer — tappable citation sheets, photo/social previews, the assertion
+      // lens — is a lot to land on in a narrow column, and a tap meant to scroll
+      // can surface a card the reader didn't ask for. Default it off and let them
+      // turn it up from the Transparency control at the top.
+      if (typeof window !== "undefined" && window.matchMedia &&
+          window.matchMedia("(max-width: 760px)").matches) return "clean";
+      return "standard";
     } catch (e) { return "standard"; }
   });
   const previews = transLevel !== "clean";
@@ -1094,24 +1102,33 @@ function ArticleRead(props) {
     const claim = claimById[t.id];
     if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
     const gk = groundKind(claim);
+    // Interactive only while the transparency layer is on (Standard/Full). In the
+    // Clean read the citation is hidden, so the claim is an inert plain span — no
+    // tab stop, no button role, no tap target that opens nothing. Mirrors the
+    // owned-claim treatment above. The id stays so the Sources footer can still
+    // jump to the passage.
+    const claimProps = previews ? {
+      tabIndex: 0, role: "button", "aria-haspopup": "dialog",
+      "aria-expanded": hover && hover.claim.id === t.id ? "true" : "false",
+      "aria-label": claimAria(claim),
+      onMouseEnter: isPhone ? undefined : (e) => enterClaim(e, claim),
+      onMouseLeave: isPhone ? undefined : scheduleLeave,
+      onKeyDown: (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (hover && hover.claim.id === t.id) { setHover(null); setActiveSrc(null); }
+          else enterClaim({ currentTarget: e.currentTarget }, claim);
+        } else if (e.key === "Escape" && hover) {
+          e.stopPropagation(); setHover(null); setActiveSrc(null); e.currentTarget.focus();
+        }
+      },
+      onClick: (e) => { if (isPhone) enterClaim({ currentTarget: e.currentTarget }, claim); else setShowSugg(true); }
+    } : {};
     return (
       <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
         data-ground={gk}
         data-active={claim.src.includes(activeSrc) ? "1" : "0"}
-        tabIndex={0} role="button" aria-haspopup="dialog"
-        aria-expanded={hover && hover.claim.id === t.id ? "true" : "false"}
-        aria-label={claimAria(claim)}
-        onMouseEnter={isPhone ? undefined : (e) => enterClaim(e, claim)} onMouseLeave={isPhone ? undefined : scheduleLeave}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            if (hover && hover.claim.id === t.id) { setHover(null); setActiveSrc(null); }
-            else enterClaim({ currentTarget: e.currentTarget }, claim);
-          } else if (e.key === "Escape" && hover) {
-            e.stopPropagation(); setHover(null); setActiveSrc(null); e.currentTarget.focus();
-          }
-        }}
-        onClick={(e) => { if (isPhone) enterClaim({ currentTarget: e.currentTarget }, claim); else setShowSugg(true); }}>
+        {...claimProps}>
         {ent ? markEntities(t.c, ent, "c" + i) : t.c}
         {showMarkers && <sup className="claim-marker">{claim.num}</sup>}
         {transparency && gk && <sup className="gmark" style={{ color: GROUND_KINDS[gk].mark }}>{GROUND_KINDS[gk].glyph}</sup>}
@@ -1343,7 +1360,7 @@ function ArticleRead(props) {
             <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
-          <TransparencyControl level={transLevel} setLevel={setTransLevel} />
+          <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
           {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
              with a fresh cache-buster (reloadTick) — so an embed that's in the draft
              but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
@@ -1531,7 +1548,7 @@ const TRANS_LEVELS = [
 /* One toolbar button that names the current level (a pill) and drops down a
    menu of the three settings — a radio dot, label and one-line description each.
    Replaces the old pair of Transparency / Previews toggles. */
-function TransparencyControl({ level, setLevel }) {
+function TransparencyControl({ level, setLevel, isPhone }) {
   const [open, setOpen] = useState(false);
   const cur = TRANS_LEVELS.find(l => l.id === level) || TRANS_LEVELS[1];
   const on = level !== "clean";
@@ -1543,13 +1560,18 @@ function TransparencyControl({ level, setLevel }) {
   }, [open]);
   return (
     <div style={{ position: "relative" }}>
+      {/* When off (Clean), the button names the thing it reveals — "Show sources" —
+         so a reader landing on a clean article knows where the grounding lives.
+         Once on, it names the layer and shows the current level so they can dial it
+         back. A roomier tap target on a phone. */}
       <button className="btn btn-sm" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}
         title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance)."
         style={{ display: "inline-flex", alignItems: "center", gap: 7,
+          padding: isPhone ? "8px 12px" : undefined, fontSize: isPhone ? 13 : undefined,
           background: on ? "var(--ink)" : "var(--card)", color: on ? "var(--yellow)" : "var(--ink)" }}>
-        <I.swatches style={{ fontSize: 14 }} /> Transparency
-        <span className="np-mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase",
-          padding: "2px 6px", border: "1.5px solid currentColor", borderRadius: 2, lineHeight: 1 }}>{cur.label}</span>
+        <I.swatches style={{ fontSize: 14 }} /> {on ? "Transparency" : "Show sources"}
+        {on && <span className="np-mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase",
+          padding: "2px 6px", border: "1.5px solid currentColor", borderRadius: 2, lineHeight: 1 }}>{cur.label}</span>}
         <I.caretDown style={{ fontSize: 11 }} />
       </button>
       {open && (
@@ -1597,7 +1619,7 @@ function ControlBar({ transLevel, setTransLevel }) {
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "flex-end" }}>
-        <TransparencyControl level={transLevel} setLevel={setTransLevel} />
+        <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
       </div>
     </div>
   );
