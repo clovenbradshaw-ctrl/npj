@@ -17,6 +17,26 @@ const SHELL_W = "min(66.67vw, 1760px)";
 // every other route already uses — which has room to spare.
 const SHELL_MIN = 1180;
 
+// Collapse front-page entries that are the same story to a single card, keeping
+// the first occurrence (the lineup is newest-first, so the freshest copy wins).
+// Identity is the slug, then a normalized headline+dek — so a republish that
+// forks the slug (a new auto-generated slug committed beside the original) still
+// reads as one article instead of doubling up on the cover and in the feed.
+function dedupeArticles(items) {
+  const norm = (s) => String(s || "").trim().toLowerCase().replace(/\s+/g, " ");
+  const seen = new Set();
+  const out = [];
+  for (const a of (items || [])) {
+    const slugKey = a && a.slug ? "slug:" + a.slug : null;
+    const textKey = a && a.headline ? "text:" + norm(a.headline) + "¦" + norm(a.dek) : null;
+    if ((slugKey && seen.has(slugKey)) || (textKey && seen.has(textKey))) continue;
+    if (slugKey) seen.add(slugKey);
+    if (textKey) seen.add(textKey);
+    out.push(a);
+  }
+  return out;
+}
+
 function Placeholder({ label, h = 220, dark = false }) {
   const stroke = dark ? "rgba(255,255,255,.10)" : "rgba(22,20,13,.09)";
   return (
@@ -211,7 +231,14 @@ function FrontPage({ onOpen, onNewsroom, onHome }) {
   // front page for EVERYONE, admins included — nothing is deleted, and it's
   // listed + republishable from Documents. (Admins still reach it by direct
   // link / from Documents, where the reader shows the Unpublished banner.)
-  const visible = all.filter(a => a.status !== "unpublished");
+  const published = all.filter(a => a.status !== "unpublished");
+  // …and never run the same story twice. A republish that forks the slug (e.g. a
+  // fresh auto-generated slug committed alongside the original human-readable
+  // one) leaves two documents for one article — both would otherwise render, as
+  // the cover AND again down the feed. Collapse them by identity, keeping the
+  // first (the lineup arrives newest-first, so the newest copy wins). Keyed by
+  // slug first; a slug fork still dedupes on a normalized headline+dek.
+  const visible = dedupeArticles(published);
   const shown = col ? visible.filter(a => (a.tags || []).includes(col)) : visible;
   // Universal tag filters (admin-curated, layout.filters) → toggle chips that
   // drive the SAME tag filter as the nav columns. Only surface a chip when at
@@ -632,4 +659,4 @@ function FrontLineup({ items, onOpen }) {
   );
 }
 
-Object.assign(window, { Masthead, FrontPage, FrontCard, Placeholder, TagRow });
+Object.assign(window, { Masthead, FrontPage, FrontCard, Placeholder, TagRow, dedupeArticles });
