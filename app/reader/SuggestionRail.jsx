@@ -258,11 +258,11 @@ function Compose({ draft, onSubmit, onCancel, me, signedIn, onSignUp }) {
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11, gap: 8 }}>
-          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "flex-end", marginTop: 11, gap: 8 }}>
+          <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", flex: "1 1 130px", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {signedIn ? "as " + me : "new hyphae.social account"}
           </span>
-          <div style={{ display: "flex", gap: 7, flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 7, flexShrink: 0, marginLeft: "auto" }}>
             <button className="btn btn-sm" onClick={onCancel} disabled={acctBusy}>Cancel</button>
             <button className="btn btn-sm btn-primary" disabled={!valid || acctBusy} style={{ opacity: (valid && !acctBusy) ? 1 : .45, cursor: (valid && !acctBusy) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 6 }}
               onClick={submit}>
