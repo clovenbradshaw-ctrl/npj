@@ -234,7 +234,7 @@ function NameList({ list, onOpen, openId }) {
   ));
 }
 
-function Byline({ authors = [], editors = [], byline = "" }) {
+function Byline({ authors = [], editors = [], byline = "", hang = false }) {
   const [openId, setOpenId] = useState(null);
   const auth = (authors || []).filter(Boolean);
   const eds = (editors || []).filter(Boolean);
@@ -242,10 +242,23 @@ function Byline({ authors = [], editors = [], byline = "" }) {
   const openMx = openId;
   const openP = openMx ? npjPerson(openMx) : null;
   const goContributors = () => { if (window.__nav && window.__nav.contributors) window.__nav.contributors(); };
+  // Hanging byline (article header): the contributor avatars line up with the
+  // headline's left edge while the "Written By" / "Edited by" labels hang back
+  // into the left margin. A two-column grid right-aligns the labels into a fixed
+  // gutter; a matching negative left margin pulls the whole block left so the
+  // avatar column lands exactly on the headline edge. Off (the default) keeps the
+  // inline "By … / Edited by …" used by front-page cards and lists.
+  const LABEL_W = 78, GAP = 14;
+  const rowStyle = hang
+    ? { display: "grid", gridTemplateColumns: LABEL_W + "px 1fr", columnGap: GAP, alignItems: "center" }
+    : { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" };
+  const labelStyle = hang
+    ? { color: "var(--ink-soft)", fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }
+    : { color: "var(--ink-soft)", fontSize: 11 };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 11 }}>By</span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, marginLeft: hang ? -(LABEL_W + GAP) : 0 }}>
+      <div style={rowStyle}>
+        <span className="np-eyebrow" style={labelStyle}>{hang ? "Written By" : "By"}</span>
         {override
           ? <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>{override}</span>
           : auth.length
@@ -253,13 +266,13 @@ function Byline({ authors = [], editors = [], byline = "" }) {
             : <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>Unsigned</span>}
       </div>
       {eds.length > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span className="np-eyebrow" style={{ color: "var(--ink-soft)", fontSize: 11 }}>Edited by</span>
+        <div style={rowStyle}>
+          <span className="np-eyebrow" style={labelStyle}>Edited by</span>
           <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}><NameList list={eds} onOpen={setOpenId} openId={openId} /></span>
         </div>
       )}
       {openP && openP.bio && (
-        <div className="fade-in" style={{ border: "1px solid var(--ink)", background: "var(--card)", padding: "9px 11px", maxWidth: 460 }}>
+        <div className="fade-in" style={{ border: "1px solid var(--ink)", background: "var(--card)", padding: "9px 11px", maxWidth: 460, marginLeft: hang ? (LABEL_W + GAP) : 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14 }}>{openP.name}</span>
             <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{openP.mxid}</span>
