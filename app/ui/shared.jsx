@@ -247,16 +247,23 @@ function Byline({ authors = [], editors = [], byline = "", hang = false }) {
   // into the left margin. A two-column grid right-aligns the labels into a fixed
   // gutter; a matching negative left margin pulls the whole block left so the
   // avatar column lands exactly on the headline edge. Off (the default) keeps the
-  // inline "By … / Edited by …" used by front-page cards and lists.
+  // inline "By … / Edited by …" used by lists.
+  //   hang === true     — article header: grid + the negative-margin pull.
+  //   hang === "flush"  — same labelled grid (the "Written By" / "Edited by"
+  //                       gutter), but anchored to the container's left edge with
+  //                       NO pull — for the front-page cover, where the byline
+  //                       sits in a clipped text column and can't bleed left.
   const LABEL_W = 78, GAP = 14;
-  const rowStyle = hang
+  const grid = !!hang;            // both true and "flush" use the labelled grid
+  const pull = hang === true;     // only the article header pulls into the margin
+  const rowStyle = grid
     ? { display: "grid", gridTemplateColumns: LABEL_W + "px 1fr", columnGap: GAP, alignItems: "center" }
     : { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" };
-  const labelStyle = hang
+  const labelStyle = grid
     ? { color: "var(--ink-soft)", fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }
     : { color: "var(--ink-soft)", fontSize: 11 };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, marginLeft: hang ? -(LABEL_W + GAP) : 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, marginLeft: pull ? -(LABEL_W + GAP) : 0 }}>
       <div style={rowStyle}>
         <span className="np-eyebrow" style={labelStyle}>{hang ? "Written By" : "By"}</span>
         {override
