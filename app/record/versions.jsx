@@ -72,11 +72,13 @@ function DiffView({ from, to }) {
   const body = React.useMemo(() => diffWords(A.text, B.text), [A.text, B.text]);
   const { add, del } = [head, dek, body].reduce((s, p) => { const d = diffStats(p); s.add += d.add; s.del += d.del; return s; }, { add: 0, del: 0 });
   const hasHead = !!(A.headline || B.headline), hasDek = !!(A.dek || B.dek);
+  const unchanged = add === 0 && del === 0;
   return (
     <div>
-      <div className="np-mono" style={{ fontSize: 11, marginBottom: 10, display: "flex", gap: 12 }}>
+      <div className="np-mono" style={{ fontSize: 11, marginBottom: 10, display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ color: "var(--verified, #1f8a5b)" }}>+{add} added</span>
         <span style={{ color: "var(--reject, #b23a26)" }}>−{del} removed</span>
+        {unchanged && <span style={{ color: "var(--ink-soft)" }}>· same prose in both versions — a republish or metadata-only change</span>}
       </div>
       {hasHead && <div style={{ marginBottom: 8 }}><FieldLabel>Title</FieldLabel><p style={titleStyle}>{renderInline(head)}</p></div>}
       {hasDek && <div style={{ marginBottom: 8 }}><FieldLabel>Subtitle</FieldLabel><p style={dekStyle}>{renderInline(dek)}</p></div>}
@@ -179,6 +181,13 @@ function changeChips(prev, cur) {
   if (cur && cur.revert) chips.push({ tone: "revert", label: cur.revert.undo ? "↺ undo revert" : "↩ revert" });
   if (!prev) { chips.push({ tone: "add", label: "created" }); return chips; }
   const A = versionFields(prev), B = versionFields(cur);
+  // a fresh whole-document upload (a second INS, not an in-place REC edit): the
+  // author re-published the piece from the composer. Name it explicitly so the
+  // entry reads as a deliberate republish rather than a mystifying "no textual
+  // change" when the prose happens to be untouched. A status flip (hidden →
+  // live) already says "republished" below, so don't double up.
+  const reupload = cur && cur.op === "INS";
+  if (reupload && A.status === B.status && B.status !== "unpublished") chips.push({ tone: "pub", label: "republished" });
   if (A.status !== B.status) chips.push(B.status === "unpublished" ? { tone: "unpub", label: "unpublished" } : { tone: "pub", label: "republished" });
   if (chNorm(A.headline) !== chNorm(B.headline)) chips.push({ tone: "neutral", label: "title" });
   if (chNorm(A.dek) !== chNorm(B.dek)) chips.push({ tone: "neutral", label: "subtitle" });

@@ -103,6 +103,39 @@ test("reverting to a then-live version republishes a now-hidden document", () =>
   assert.equal(f2.article.status, "published");             // status rode along
 });
 
+test("foldLog orders versions by ts, not file order — a re-published genesis is current", () => {
+  // Reproduces the publish-then-delete-then-publish-again case: the genesis
+  // (folded first, by file order) carries a LATER ts than an event file already
+  // in the folder. Folding by file order would make the newest publish read as
+  // the oldest version and serve a stale body as current. Ordering by ts fixes it.
+  const ev = (op, ts, headline, body) => JSON.stringify({
+    v: "npj/article-eo/1", op, target: "article/x", ts, actor: ACTOR,
+    operand: { slug: "x", headline, dek: "", body, authors: [ACTOR], assignees: [ACTOR], published: "2026-06-19", sources: {} }
+  });
+  // file order: genesis first (ts 19:55), then the event file (ts 19:51 — earlier)
+  const genesis = ev("INS", "2026-06-29T19:55:31.017Z", "Newest publish", [P("Latest body.")]);
+  const earlier = ev("INS", "2026-06-29T19:51:42.652Z", "Earlier publish", [P("Older body.")]);
+  const f = A.foldLog(join(genesis, earlier));
+  assert.equal(f.article.headline, "Newest publish");      // latest ts wins as current
+  assert.deepEqual(f.article.body, [P("Latest body.")]);
+  assert.equal(f.versions[0].headline, "Newest publish");  // versions newest-first by ts
+  assert.equal(f.versions[1].headline, "Earlier publish");
+});
+
+test("a torn/missing ts keeps its file position rather than jumping to the front", () => {
+  const line = (op, ts, headline) => JSON.stringify(Object.assign(
+    { v: "npj/article-eo/1", op, target: "article/y", actor: ACTOR,
+      operand: { slug: "y", headline, dek: "", body: [P(headline)], authors: [ACTOR], assignees: [ACTOR], published: "2026-06-19", sources: {} } },
+    ts ? { ts } : {}));
+  const f = A.foldLog(join(
+    line("INS", "2026-06-29T10:00:00.000Z", "First"),
+    line("REC", null, "Middle (no ts)"),
+    line("REC", "2026-06-29T12:00:00.000Z", "Last")
+  ));
+  assert.equal(f.article.headline, "Last");                // the no-ts edit doesn't leap ahead
+  assert.deepEqual(f.versions.map(v => v.headline), ["Last", "Middle (no ts)", "First"]);
+});
+
 test("reverting an edit that added an assignee leaves the access list intact", () => {
   const OTHER = "@editor:hyphae.social";
   const v1 = { slug: "y", headline: "Y", dek: "", body: [P("One.")], authors: [ACTOR], assignees: [ACTOR], published: "2026-06-19", sources: {} };
