@@ -3556,11 +3556,15 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const bylineEditors = parseEditors(editorsInput);
   // the userid stored on the backend record — you, the signed-in publisher
   const bylineAuthors = meMx ? [meMx] : [];
-  // Publishing under your own name keeps the rich contributor chip (the byline
-  // resolves from your id); a free-text override is stored only when you type a
-  // name different from your own — either way the userid above is what's saved.
+  // Publishing under your own name keeps the rich contributor chip — but ONLY
+  // when that name is the one your COMMITTED profile (window.NPJ.PEOPLE) resolves
+  // to, so the byline can resolve live from your id. With no profile, defaultName
+  // is just your Matrix localpart (the "matrix name") — which readers must never
+  // see — so whatever you type is stored as an explicit byline override. Either
+  // way meMx stays the recorded author, so attribution survives.
+  const profileName = (meMx && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[meMx] && window.NPJ.PEOPLE[meMx].name) || "";
   const typedName = nameInput.trim();
-  const bylineOverride = typedName && typedName !== defaultName ? typedName : "";
+  const bylineOverride = typedName && typedName !== profileName ? typedName : "";
 
   // preflight — measured from the actual draft, shown to the author at the gate
   const flight = useMemo(() => {

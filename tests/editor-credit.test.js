@@ -50,3 +50,16 @@ test("authors stay Matrix-id-only — a plain name is NOT accepted as an author"
   const op = genesisOperand({ actor: "@me:server", authors: ["Jane Doe", "@real:server"] });
   assert.deepEqual(op.authors, ["@real:server"], "only the valid mxid survives as a credited author");
 });
+
+test("a typed byline overrides the shown credit so the public never sees the mxid localpart", () => {
+  // The publish UI stores whatever name the author typed as `byline`; it must
+  // survive onto the record verbatim, while the account id stays in `authors`.
+  const op = genesisOperand({ actor: "@rklacylaw:server", byline: "Robert K. Lacy" });
+  assert.equal(op.byline, "Robert K. Lacy", "the public credit is the typed name");
+  assert.deepEqual(op.authors, ["@rklacylaw:server"], "the Matrix id is still recorded for attribution");
+});
+
+test("an empty byline override leaves the credit to resolve from the author id", () => {
+  const op = genesisOperand({ actor: "@me:server", byline: "" });
+  assert.equal(op.byline, "", "no override — the byline resolves from the recorded author");
+});
