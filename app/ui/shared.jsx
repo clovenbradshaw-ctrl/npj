@@ -45,6 +45,7 @@ const I = {
   moon:    phIcon("moon"),
   link:    phIcon("link-simple"),
   copy:    phIcon("copy"),
+  download: phIcon("download-simple"),
   /* editor toolbar */
   undo:    phIcon("arrow-counter-clockwise"),
   redo:    phIcon("arrow-clockwise"),

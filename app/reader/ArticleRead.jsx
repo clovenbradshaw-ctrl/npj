@@ -1431,7 +1431,8 @@ function ArticleRead(props) {
       <Masthead route="article" onHome={onHome} onNewsroom={onNewsroom} />
       <ControlBar transLevel={transLevel} setTransLevel={setTransLevel}
         suggesting={showSugg} onToggleSuggest={() => { setShowSugg(v => !v); setCompose(null); }}
-        openCount={suggestions.filter(s => s.status === "proposed" || s.status === "review").length} />
+        openCount={suggestions.filter(s => s.status === "proposed" || s.status === "review").length}
+        totalCount={suggestions.length} />
 
       {/* When a docked citation/note/grounding panel is up on a wide window, cede
          a right gutter for it so the column slides left and the two sit centered
@@ -1641,18 +1642,29 @@ function TransparencyControl({ level, setLevel, isPhone }) {
    toggle: switch it on and anyone reading can select any sentence to propose an
    edit or leave a comment (the Suggestions rail opens; open suggestions paint
    into the prose). Posting prompts a one-tap hyphae.social sign-up if needed. */
-function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount }) {
+function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount, totalCount }) {
   const isPhone = window.useIsMobile(760);
+  // The button is the way in to every comment + suggestion on the piece, so it
+  // reads as "Comments" and carries a live count of how many there are — a reader
+  // shouldn't have to guess that this is where the discussion lives. Toggling it
+  // open also lets anyone select a sentence to comment on or suggest an edit.
+  const n = totalCount || 0;
+  const label = suggesting ? "Reading comments" : (n ? "Comments" : "Comment");
   return (
     <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
       <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "space-between" }}>
         <button onClick={onToggleSuggest} className="np-cond" aria-pressed={!!suggesting}
-          title="Suggest edits or leave comments on any sentence — open to everyone"
-          style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+          title="See all comments and suggestions — and select any sentence to add your own. Open to everyone."
+          style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer",
             border: "1.5px solid var(--ink)", background: suggesting ? "var(--ink)" : "transparent",
-            color: suggesting ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 9px" : "6px 12px",
+            color: suggesting ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 10px" : "6px 13px",
             fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
-          <span style={{ fontFamily: "var(--mono)" }}>⊨</span> {suggesting ? "Suggesting" : "Suggest"}{openCount ? " · " + openCount : ""}
+          <I.chat style={{ fontSize: 15 }} /> {label}
+          {n > 0 && (
+            <span aria-label={n + " comments and suggestions"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+              minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, fontSize: 11, lineHeight: 1, fontWeight: 700,
+              background: suggesting ? "var(--yellow)" : "var(--ink)", color: suggesting ? "var(--ink)" : "var(--paper)" }}>{n}</span>
+          )}
         </button>
         <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
       </div>

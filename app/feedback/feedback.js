@@ -191,8 +191,9 @@
         proposed: o.proposed || "",
         rationale: o.rationale || "",
         author: ev.actor || o.author || "@anon",
-        // the byline the contributor TYPED — the public credit. Independent of the
-        // Matrix account name; falls back to the mxid-resolved name only when blank.
+        // legacy field: older records carried a typed byline here. Contributions are
+        // now shown anonymously under a pseudonym derived from `author` (the mxid),
+        // so this is kept only so old deposits still fold cleanly — it isn't displayed.
         authorName: o.authorName || "",
         trust: o.trust || "open",
         base_sha: o.base_sha || "",
