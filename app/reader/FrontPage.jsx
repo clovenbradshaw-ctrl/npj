@@ -524,9 +524,15 @@ function FrontCard({ item, template, variant, onOpen }) {
             photo column, and overflow:hidden clips the text to exactly that. */}
         <div style={{ position: "relative", minWidth: 0 }}>
           <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-            <KickerEl /><BylineEl /><MetaEl /><TitleEl /><DekEl /><ExcerptEl /><TagsEl />
+            <KickerEl /><TitleEl /><DekEl /><BylineEl /><MetaEl /><ExcerptEl /><TagsEl />
+            {/* the column clips the excerpt to the photo's height; the fade signals
+                "continued" and carries a trailing ellipsis at the cut so it reads as
+                a truncation, not a sentence that simply stopped. */}
             <div aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, bottom: 0, height: 64,
-              background: "linear-gradient(to top, var(--paper) 14%, rgba(246,241,228,0))", pointerEvents: "none" }} />
+              background: "linear-gradient(to top, var(--paper) 14%, rgba(246,241,228,0))", pointerEvents: "none",
+              display: "flex", alignItems: "flex-end" }}>
+              <span style={{ fontFamily: "var(--serif)", fontSize: 17, lineHeight: 1, color: "var(--ink)" }}>…</span>
+            </div>
           </div>
         </div>
         <div style={{ minWidth: 0 }}><Photo h={null} /><PhotoCaption /></div>
