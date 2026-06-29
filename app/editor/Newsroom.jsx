@@ -3711,6 +3711,21 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
   const parseEditors = (s) => String(s || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
   const nameOfMx = (m) => (window.npjPerson ? window.npjPerson(m).name : String(m).replace(/^@/, "").split(":")[0]);
   const [unsigned, setUnsigned] = useState(false);
+  // Scheduled publish — commit the piece now but hold it off the public front
+  // page until a chosen moment, which also becomes its shown release date. Off
+  // by default (a normal live publish). Offered only on a first publish: re-gating
+  // an already-live piece behind a future date would yank it off the front page.
+  const [scheduleOn, setScheduleOn] = useState(false);
+  const [scheduleAt, setScheduleAt] = useState("");   // datetime-local value (the author's local wall time)
+  // the ISO release instant the gate will ship, iff scheduling is on and the
+  // picked moment is genuinely in the future (a past/blank pick falls back to a
+  // normal live publish)
+  const releaseIso = (() => {
+    if (isRepublish || !scheduleOn || !scheduleAt) return "";
+    const d = new Date(scheduleAt);
+    return (!isNaN(d.getTime()) && d.getTime() > Date.now()) ? d.toISOString() : "";
+  })();
+  const schedulePast = !isRepublish && scheduleOn && scheduleAt && !releaseIso;
   // Byline is a plain name now — type how you want to be credited. The field is
   // pre-filled ONLY from a committed contributor profile (window.NPJ.PEOPLE); with
   // no profile it starts empty (a "Your name" placeholder) so the piece never
@@ -3886,7 +3901,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
     // Best-effort — the tree/CDN can lag a few seconds; "Open the article" reads
     // the committed file directly, and the next visit reconciles the front page.
     try { if (window.NpjArticles.loadFront) window.NpjArticles.loadFront().catch(() => {}); } catch (e) {}
-    if (alive.current) setOutcome({ ok: true, sha, warn: warn ? warn.msg : null });
+    if (alive.current) setOutcome({ ok: true, sha, warn: warn ? warn.msg : null, scheduled: releaseIso || null });
   };
 
   const run = async () => {
@@ -3940,6 +3955,9 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       // when it was customized away from the contributor's own resolved name
       authors: bylineAuthors, editors: bylineEditors,
       byline: unsigned ? "Unsigned" : bylineOverride,
+      // a scheduled release: the piece commits now but stays off the front page
+      // until this instant, which also becomes its shown date (empty → live now)
+      releaseAt: releaseIso || null,
       // how the draft was assembled (typed vs. pasted, paste sizes, timeline) —
       // aggregate counts only, no words; ships with the piece for the reader's footer
       composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null
@@ -4066,9 +4084,31 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
             {flight.mediaToFreeze > 0 && <Row k="Images">{flight.mediaToFreeze} on the media store · moved to archive.org on publish (Wayback Machine fallback if direct upload is unavailable)</Row>}
             {blocked && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px" }}>{blocked}</div>}
             {!blocked && groundWarn && <div className="np-mono" style={{ fontSize: 11, color: NR.warn, lineHeight: 1.5, margin: "12px 0 0", border: "1px solid " + NR.warn, padding: "9px 10px", display: "flex", gap: 8 }}><span aria-hidden="true">⚠</span><span>{groundWarn}</span></div>}
+            {/* Schedule for later — commit now, hold off the front page until a
+                chosen moment, which becomes the piece's release date. First-publish
+                only (re-gating a live piece would pull it off the site). */}
+            {!isRepublish && (
+              <div style={{ margin: "14px 0 0", border: "1px solid " + NR.line, padding: "10px 12px" }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                  <input type="checkbox" checked={scheduleOn} onChange={e => setScheduleOn(e.target.checked)} />
+                  <span style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5, color: NR.text, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontFamily: "var(--mono)" }}>⧖</span> Schedule for later
+                  </span>
+                </label>
+                <div className="np-mono" style={{ fontSize: 9.5, color: NR.muted, margin: "4px 0 0", lineHeight: 1.5 }}>The piece commits now but stays off the front page until the time you pick — then it goes live on its own. That moment becomes its release date.</div>
+                {scheduleOn && (
+                  <React.Fragment>
+                    <input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)} className="np-mono"
+                      style={{ width: "100%", boxSizing: "border-box", marginTop: 9, border: "1px solid " + (schedulePast ? NR.warn : NR.line), background: NR.field, color: NR.text, padding: "6px 8px", fontSize: 12.5, outline: "none", colorScheme: "dark" }} />
+                    {releaseIso && <div className="np-mono" style={{ fontSize: 10, color: NR.text, margin: "5px 0 0" }}>Releases {new Date(releaseIso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })} · dated {window.NpjArticles.releaseDate(releaseIso)}</div>}
+                    {schedulePast && <div className="np-mono" style={{ fontSize: 10, color: NR.warn, margin: "5px 0 0", lineHeight: 1.5 }}>That time is in the past — pick a future moment, or it publishes live now.</div>}
+                  </React.Fragment>
+                )}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
               <button onClick={onClose} className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "10px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer" }}>Not yet — back to editor</button>
-              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: (blocked || shipUngrounded) ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : shipUngrounded ? NR.warn : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : shipUngrounded ? NR.warn : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> {shipUngrounded ? (isRepublish ? "Republish ungrounded" : "Publish ungrounded") : (isRepublish ? "Republish it" : "Publish it")}</button>
+              <button onClick={blocked ? undefined : run} disabled={!!blocked} className="np-cond" style={{ background: (blocked || shipUngrounded) ? "transparent" : "var(--yellow)", color: blocked ? NR.muted : shipUngrounded ? NR.warn : "var(--ink)", border: "1.5px solid " + (blocked ? NR.line : shipUngrounded ? NR.warn : "var(--ink)"), padding: "10px 18px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, cursor: blocked ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", gap: 7 }}><I.lock style={{ fontSize: 14 }} /> {releaseIso ? (shipUngrounded ? "Schedule ungrounded" : "Schedule it") : shipUngrounded ? (isRepublish ? "Republish ungrounded" : "Publish ungrounded") : (isRepublish ? "Republish it" : "Publish it")}</button>
             </div>
           </div>
         )}
@@ -4099,8 +4139,8 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
               <div className="fade-in" style={{ marginTop: 16, textAlign: "center" }}>
                 {outcome.ok
                   ? <React.Fragment>
-                      <div style={{ fontFamily: "var(--display)", fontSize: 26, color: outcome.warn ? NR.warn : "var(--yellow)", marginBottom: 4 }}>{outcome.warn ? "COMMITTED — CHECK THE FILE" : "COMMITTED — GOING LIVE"}</div>
-                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || (isRepublish ? ("articles/" + slug + ".jsonl has a new version appended to its log in GitHub — every prior version stays in the log. The front page reflects the update and the link below opens the formatted reader.") : ("articles/" + slug + ".jsonl is committed to GitHub — the genesis of the article's append-only event log. Every future edit appends another event to it. The front page lists it and the link below opens the formatted reader."))}</div>
+                      <div style={{ fontFamily: "var(--display)", fontSize: 26, color: outcome.warn ? NR.warn : "var(--yellow)", marginBottom: 4 }}>{outcome.warn ? "COMMITTED — CHECK THE FILE" : outcome.scheduled ? "COMMITTED — SCHEDULED" : "COMMITTED — GOING LIVE"}</div>
+                      <div className="np-mono" style={{ fontSize: 11, color: outcome.warn ? NR.warn : NR.muted, marginBottom: outcome.sha ? 8 : 16, lineHeight: 1.5 }}>{outcome.warn || (outcome.scheduled ? ("articles/" + slug + ".jsonl is committed to GitHub, but held off the front page until " + new Date(outcome.scheduled).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) + " — when it goes live on its own, dated that day. Open it below to preview the scheduled piece.") : isRepublish ? ("articles/" + slug + ".jsonl has a new version appended to its log in GitHub — every prior version stays in the log. The front page reflects the update and the link below opens the formatted reader.") : ("articles/" + slug + ".jsonl is committed to GitHub — the genesis of the article's append-only event log. Every future edit appends another event to it. The front page lists it and the link below opens the formatted reader."))}</div>
                       {outcome.sha && <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, marginBottom: 16 }}>committed @ {outcome.sha.slice(0, 7)}</div>}
                       {!outcome.warn && (
                         <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>

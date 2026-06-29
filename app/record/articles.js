@@ -48,8 +48,12 @@
   // cache-busted by blob sha, so a meta cached under an older code version (e.g.
   // before `excerpt` was folded in) keeps being served for an unchanged article.
   // gh2: added the cover `excerpt` (the story's opening, pulled into the cover).
-  const IDX_CACHE_KEY = "npj_articles_idx_gh3"; // GitHub model: entries keyed by slug, cache-busted by blob sha
-  const FRONT_CACHE_KEY = "npj_front_gh3";       // last front-page line-up, painted instantly on the next visit
+  // gh4: added `releaseAt` — a scheduled piece's release instant (ISO). The meta
+  // carries the raw timestamp, not a baked "scheduled" flag, so the front page
+  // re-decides gating against the wall-clock on every paint (a cached meta whose
+  // blob sha never changes still goes live the moment its release time passes).
+  const IDX_CACHE_KEY = "npj_articles_idx_gh4"; // GitHub model: entries keyed by slug, cache-busted by blob sha
+  const FRONT_CACHE_KEY = "npj_front_gh4";       // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
   // Open reader feedback rides a SEPARATE, write-only webhook: it can only CREATE
@@ -323,7 +327,31 @@
   const editLine = (slug, operand, actor, note) => eventLine("REC", slug, operand, actor, note ? { note } : {});
 
   /* ---------------- fold: JSONL text → current article + version history ---------------- */
-  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "body", "status", "composition", "definitions"];
+  const FOLD_FIELDS = ["slug", "headline", "dek", "column", "tags", "authors", "editors", "byline", "assignees", "published", "releaseAt", "body", "status", "composition", "definitions"];
+
+  /* ---------------- scheduled publish ----------------
+     A piece can be committed to the record now but held off the front page until
+     a chosen instant — its RELEASE. `releaseAt` is that instant as an ISO string;
+     `published` is set to its calendar date, so the piece carries its future
+     release as its shown date. Gating is decided against the live wall-clock (not
+     baked into the cached meta), so a scheduled piece goes live on its own the
+     moment the time passes — no re-commit, no rebuild. A releaseAt already in the
+     past is just a normal live publish (the helper returns "" and the caller dates
+     it today()). */
+  function scheduledFuture(releaseAt) {
+    if (!releaseAt) return false;
+    const t = Date.parse(releaseAt);
+    return Number.isFinite(t) && t > Date.now();
+  }
+  // The calendar date (YYYY-MM-DD) a release instant falls on, in the viewer's
+  // own timezone — so the shown release date matches the date the author picked
+  // on their datetime field, not a UTC-shifted one.
+  function releaseDate(releaseAt) {
+    const d = new Date(releaseAt);
+    if (isNaN(d.getTime())) return today();
+    const p = (n) => (n < 10 ? "0" : "") + n;
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
   function foldLog(text) {
     const events = [];
     String(text || "").split(/\r?\n/).forEach(line => {
@@ -401,6 +429,12 @@
       byline: typeof state.byline === "string" ? state.byline : "",
       assignees: Array.isArray(state.assignees) ? state.assignees : [],
       published: state.published || (versions.length ? String(versions[versions.length - 1].ts).slice(0, 10) : today()),
+      // a scheduled release: the instant the piece comes off the front-page gate.
+      // `scheduled` is computed against the wall-clock at fold time — but consumers
+      // (the front page) re-decide from `releaseAt` on every paint, so a stale-cached
+      // fold can never keep a released piece hidden.
+      releaseAt: typeof state.releaseAt === "string" ? state.releaseAt : null,
+      scheduled: scheduledFuture(state.releaseAt),
       updated: versions.length ? String(versions[0].ts).slice(0, 10) : null,
       base_sha: versions.length ? versions[0].sha : "0000000",
       readMins: readMins(state.body),
@@ -574,7 +608,7 @@
       if (!article) return null;
       const meta = {
         slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
-        column: article.column, tags: article.tags, published: article.published, updated: article.updated,
+        column: article.column, tags: article.tags, published: article.published, releaseAt: article.releaseAt, updated: article.updated,
         authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, base_sha: article.base_sha, readMins: article.readMins,
         status: article.status, image: article.image, excerpt: excerptOf(article.body),
         storage: "github", logPath: blobUrl(d.slug)
@@ -590,7 +624,7 @@
   // each piece's `status` so the front page + reader can hide an unpublished one.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, base_sha: m.base_sha, readMins: m.readMins, status: m.status, image: m.image || null, excerpt: m.excerpt || "" });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, releaseAt: m.releaseAt || null, updated: m.updated, versions: m.versions, base_sha: m.base_sha, readMins: m.readMins, status: m.status, image: m.image || null, excerpt: m.excerpt || "" });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
@@ -1400,6 +1434,11 @@
     // Either way the ACTOR stays an assignee, so they can always edit after publish.
     const unsigned = o.byline === "Unsigned" || o.unsigned === true;
     const authors = o.authors != null ? mxids(o.authors) : (actor ? [actor] : []);
+    // a scheduled release: the piece commits now but stays off the front page
+    // until `releaseAt`. Its shown date is the release date (the day the author
+    // picked), not today. A releaseAt already in the past is ignored — that's a
+    // normal live publish dated today().
+    const scheduleAt = scheduledFuture(o.releaseAt) ? new Date(o.releaseAt).toISOString() : "";
     const operand = {
       slug: o.slug || slugify(headline || o.headline) || "untitled",
       headline: headline || o.headline || "Untitled",
@@ -1415,10 +1454,13 @@
       editors: credits(o.editors),
       byline: unsigned ? "Unsigned" : (typeof o.byline === "string" ? o.byline : ""),
       assignees: actor ? [actor] : [], // the publisher can edit after publish; admin always can
-      published: today(),
+      published: scheduleAt ? releaseDate(scheduleAt) : today(),
       body: blocks,
       sources
     };
+    // only ride a release instant when the piece is genuinely scheduled ahead —
+    // a live publish carries no releaseAt, so the front page never gates it
+    if (scheduleAt) operand.releaseAt = scheduleAt;
     // composition provenance rides the genesis when the editor captured it
     // (aggregate counts only — see app/composition.js); harmless when absent
     if (o.composition && typeof o.composition === "object") operand.composition = o.composition;
@@ -1588,6 +1630,7 @@
   root.NpjArticles = {
     SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, filenameFor, publishEndpoint, suggestEndpoint,
     foldLog, plainText, readMins, lineSha,
+    scheduledFuture, releaseDate,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
     listArticles, loadFront, patchFrontStatus, dropFromFront, publishedMeta, loadArticle, primeFront, saveFront,
