@@ -248,28 +248,23 @@ function Byline({ authors = [], editors = [], byline = "", hang = false }) {
   // gutter; a matching negative left margin pulls the whole block left so the
   // avatar column lands exactly on the headline edge. Off (the default) keeps the
   // inline "By … / Edited by …" used by lists.
-  //   hang === true     — article header: grid + the negative-margin pull, so the
-  //                       avatars land on the headline's left edge and the labels
-  //                       hang back into the margin.
-  //   hang === "flush"  — front-page cover: a flat inline row (label → avatar →
-  //                       name), left-aligned to the headline edge so the circles
-  //                       sit right beside the "Written By"/"Edited by" labels —
-  //                       no gutter grid, no margin pull (the cover's text column
-  //                       is clipped and can't bleed left).
+  //   hang === true  — article header & front-page cover: a two-column grid that
+  //                    right-aligns the "Written By" / "Edited by" labels into a
+  //                    fixed gutter, with a matching negative left margin that
+  //                    pulls the block left so the AVATARS land on the headline's
+  //                    left edge and the LABELS hang back out into the margin.
+  //   hang === false — inline "By … / Edited by …" used by lists.
   const LABEL_W = 78, GAP = 14;
-  const grid = hang === true;     // only the article header uses the gutter grid
-  const pull = hang === true;     // …and only it pulls into the margin
-  const written = !!hang;         // true and "flush" both read "Written By"
-  const rowStyle = grid
+  const rowStyle = hang
     ? { display: "grid", gridTemplateColumns: LABEL_W + "px 1fr", columnGap: GAP, alignItems: "center" }
     : { display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" };
-  const labelStyle = grid
+  const labelStyle = hang
     ? { color: "var(--ink-soft)", fontSize: 11, textAlign: "right", whiteSpace: "nowrap" }
     : { color: "var(--ink-soft)", fontSize: 11 };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, marginLeft: pull ? -(LABEL_W + GAP) : 0 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0, marginLeft: hang ? -(LABEL_W + GAP) : 0 }}>
       <div style={rowStyle}>
-        <span className="np-eyebrow" style={labelStyle}>{written ? "Written By" : "By"}</span>
+        <span className="np-eyebrow" style={labelStyle}>{hang ? "Written By" : "By"}</span>
         {override
           ? <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 15, color: "var(--ink)" }}>{override}</span>
           : auth.length
@@ -283,7 +278,7 @@ function Byline({ authors = [], editors = [], byline = "", hang = false }) {
         </div>
       )}
       {openP && openP.bio && (
-        <div className="fade-in" style={{ border: "1px solid var(--ink)", background: "var(--card)", padding: "9px 11px", maxWidth: 460, marginLeft: grid ? (LABEL_W + GAP) : 0 }}>
+        <div className="fade-in" style={{ border: "1px solid var(--ink)", background: "var(--card)", padding: "9px 11px", maxWidth: 460, marginLeft: hang ? (LABEL_W + GAP) : 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
             <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 14 }}>{openP.name}</span>
             <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{openP.mxid}</span>
