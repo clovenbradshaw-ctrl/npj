@@ -496,9 +496,13 @@ function FrontCard({ item, template, variant, onOpen }) {
   ) : null;
   const TagsEl = () => (lead && (item.tags || []).length > 0) ? <div style={{ marginTop: 12 }}><TagRow tags={item.tags} /></div> : null;
   const hasByline = ((item.authors || []).length || (item.editors || []).length || (item.byline || "").trim());
+  // On the cover the byline hangs like the article header: the avatars sit flush
+  // with the headline's left edge and the "Written By" / "Edited by" labels reach
+  // out into the left margin. Only on desktop — a phone has no margin to hang into,
+  // so it falls back to the inline "By …" form.
   const BylineEl = () => (hasByline && window.Byline) ? (
     <div style={{ margin: lead ? "0 0 16px" : "0 0 12px" }}>
-      <window.Byline authors={item.authors} editors={item.editors} byline={item.byline} hang={lead ? "flush" : false} />
+      <window.Byline authors={item.authors} editors={item.editors} byline={item.byline} hang={lead && !mobile} />
     </div>
   ) : null;
 
@@ -597,7 +601,13 @@ function FrontCard({ item, template, variant, onOpen }) {
             absolutely placed), so the grid row's height is set purely by the
             photo column, and overflow:hidden clips the text to exactly that. */}
         <div style={{ position: "relative", minWidth: 0 }}>
-          <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+          {/* The text is clipped to the photo's height. We use clip-path rather than
+              overflow:hidden so the clip is vertical only (top/right/bottom) and
+              LEFT is left open (inset … -120px): that lets the cover's hanging
+              "Written By"/"Edited by" labels reach out past the column's left edge
+              into the page margin — the headline stays put and the avatars stay
+              flush with its left line, exactly like the article header. */}
+          <div style={{ position: "absolute", inset: 0, clipPath: "inset(0 0 0 -120px)" }}>
             <KickerEl /><TitleEl /><DekEl /><MetaEl /><BylineEl /><ExcerptEl /><TagsEl />
             {/* the column clips the excerpt to the photo's height; the fade signals
                 "continued" and carries a trailing ellipsis at the cut so it reads as
