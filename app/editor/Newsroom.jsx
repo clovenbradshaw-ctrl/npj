@@ -4146,7 +4146,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
                       {outcome.sha && <div className="np-mono" style={{ fontSize: 10.5, color: NR.soft, marginBottom: 16 }}>committed @ {outcome.sha.slice(0, 7)}</div>}
                       {!outcome.warn && (
                         <div style={{ display: "inline-block", textAlign: "left", marginBottom: 18 }}>
-                          <ShareBar dark url={articleUrl} archiveUrl={"https://web.archive.org/save/" + window.npjArticleLogUrl(published.current || slug)} title={title} />
+                          <ShareBar dark url={articleUrl} archiveUrl={window.npjArticleLogUrl(published.current || slug)} title={title} />
                         </div>
                       )}
                     </React.Fragment>
