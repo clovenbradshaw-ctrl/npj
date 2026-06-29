@@ -1311,13 +1311,15 @@ function ArticleRead(props) {
       <h1 className="npj-article-h" style={{ fontFamily: "var(--display)", fontSize: 44, lineHeight: 1, letterSpacing: "-.01em", margin: "0 0 20px" }}>{A.headline}</h1>
       <p style={{ fontFamily: "var(--serif)", fontSize: 22, lineHeight: 1.4, color: "var(--ink)", margin: "0 0 20px", fontStyle: "italic" }}>{A.dek}</p>
       {Hero}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
-        <window.Byline authors={A.authors} editors={A.editors} byline={A.byline} />
-        <span style={{ flex: 1 }} />
-        <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <div style={{ paddingBottom: 16, borderBottom: "2px solid var(--ink)" }}>
+        {/* date first, above the byline; the byline's avatars line up with the
+            headline edge while the "Written By"/"Edited by" labels hang back into
+            the left margin (hang is off on narrow screens, where there's no room). */}
+        <span className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
           <window.VersionBadge sha={A.base_sha} count={artVersions.length} onClick={() => setShowVersions(true)} />
           {fmtDate(A.published)}{A.updated && A.updated !== A.published ? " · updated " + fmtDate(A.updated) : ""} · {A.readMins} min
         </span>
+        <window.Byline authors={A.authors} editors={A.editors} byline={A.byline} hang={!isNarrow} />
       </div>
       <div style={{ paddingTop: 14 }}>
         {/* share link opens the reader; the wayback action targets the
