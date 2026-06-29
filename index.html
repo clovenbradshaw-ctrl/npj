@@ -411,7 +411,7 @@ function App() {
   };
   const onAddSuggestion = (draft) => {
     const A = window.NPJ.ARTICLE; if (!A) return;
-    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: liveMe(), base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
+    window.NpjFeedback.propose({ slug: A.slug, anchor: draft.anchor, kind: draft.kind, proposed: draft.proposed, rationale: draft.rationale, author: liveMe(), authorName: (draft.authorName || "").trim(), base_sha: A.base_sha, token: fbToken() }).then(reloadFeedback);
   };
   // Merge a suggestion: apply its words to the body + commit a REC, then fold the
   // updated article in place (same path as the Edit overlay). Returns the merge
