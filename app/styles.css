@@ -69,17 +69,22 @@ a { color: inherit; }
 .np-scroll::-webkit-scrollbar-track { background: transparent; }
 
 /* ---- claim affordances (the spine) ---- */
-.claim { position: relative; cursor: pointer; transition: background .15s ease; }
+.claim { position: relative; transition: background .15s ease; }
+/* The claim only carries an affordance — pointer, underline, focus ring — when the
+   transparency layer is on (Standard/Full add `previews-on` to the article). In the
+   Clean read the sources are deliberately hidden, so a sourced sentence is inert:
+   plain prose with no dotted hint and no tap target that opens nothing. */
+.previews-on .claim { cursor: pointer; }
 /* keyboard users get a clear focus ring on the claim they're about to open */
-.claim:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+.previews-on .claim:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 
-/* clean read: low-key dotted underline */
-.read-clean .claim {
+/* clean read (transparency layer on, audit off): low-key dotted underline */
+.read-clean .previews-on .claim {
   background: none;
   border-bottom: 1.5px dotted var(--rule-strong);
   padding-bottom: 1px;
 }
-.read-clean .claim:hover { background: rgba(255,236,1,0.35); }
+.read-clean .previews-on .claim:hover { background: rgba(255,236,1,0.35); }
 
 /* audit mode: every claim highlighted + numbered margin tab */
 .read-audit .claim {
