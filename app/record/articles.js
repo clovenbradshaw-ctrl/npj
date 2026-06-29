@@ -529,7 +529,7 @@
       const meta = {
         slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
         column: article.column, tags: article.tags, published: article.published, updated: article.updated,
-        authors: article.authors, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
+        authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
         status: article.status, image: article.image,
         storage: "github", logPath: blobUrl(d.slug)
       };
@@ -544,7 +544,7 @@
   // each piece's `status` so the front page + reader can hide an unpublished one.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
