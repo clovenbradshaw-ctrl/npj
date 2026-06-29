@@ -265,13 +265,12 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
     const origAuthors = (A.authors || []).filter(Boolean);
     const nextAuthors = unsigned ? [] : (origAuthors.length ? origAuthors : (me && /^@[^:]+:[^:]+$/.test(me) ? [me] : []));
     const nextEditors = parseEditors(editorsInput);
-    // keep the rich chip only when the typed name matches the credited author's
-    // COMMITTED profile name (window.NPJ.PEOPLE) — then the byline resolves live
-    // from the recorded id. With no profile that "name" is only the Matrix
-    // localpart, which readers must never see, so store the typed name verbatim.
-    const profileName = (recordedId && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[recordedId] && window.NPJ.PEOPLE[recordedId].name) || "";
+    // The displayed credit is always the MANUAL entry: whatever name is typed is
+    // stored in `byline` verbatim and shown as-is, never resolved live from the
+    // recorded id (which, with no committed profile, is only the Matrix localpart
+    // readers must never see). The recorded id stays in `authors` for attribution.
     const typedName = nameInput.trim();
-    const nextByline = unsigned ? "Unsigned" : (typedName && typedName !== profileName ? typedName : "");
+    const nextByline = unsigned ? "Unsigned" : (typedName || "");
     if (nextAuthors.join(",") !== (A.authors || []).join(",")) operand.authors = nextAuthors;
     if (nextEditors.join(",") !== (A.editors || []).join(",")) operand.editors = nextEditors;
     if (nextByline !== (A.byline || "")) operand.byline = nextByline;
