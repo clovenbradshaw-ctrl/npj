@@ -713,7 +713,7 @@
     ADMIN_MXID, CONTROL_ALIAS, APP_ROOM_TYPE, parseMxid, discover, login, logout, restore, current, token,
     isSignedIn, isAdmin, resolveRoom, invite, joinRoom, tagRoom, ensureControlRoom, readPermissions, writePermissions, getProfile,
     // invite someone who has no account yet: mint it, name it, re-key it
-    register, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
+    register, signUp, setDisplayName, changePassword, buildInviteLink, parseInviteToken,
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange,
