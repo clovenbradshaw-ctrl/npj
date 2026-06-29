@@ -42,13 +42,77 @@ function diffStats(parts) {
   return { add, del };
 }
 
-/* render a token-diff parts[] inline — additions underlined green, deletions struck red */
-function renderInline(parts) {
-  return parts.map((p, i) => p.type === "same"
+/* render ONE token-diff part — addition underlined green, deletion struck red */
+function renderPart(p, i) {
+  return p.type === "same"
     ? <React.Fragment key={i}>{p.text}</React.Fragment>
     : p.type === "add"
       ? <ins key={i} style={{ textDecoration: "none", background: "color-mix(in srgb, var(--verified,#1f8a5b) 18%, transparent)", borderBottom: "2px solid var(--verified,#1f8a5b)" }}>{p.text}</ins>
-      : <del key={i} style={{ background: "color-mix(in srgb, var(--reject,#b23a26) 13%, transparent)", color: "var(--reject,#b23a26)", textDecorationThickness: "1.5px" }}>{p.text}</del>);
+      : <del key={i} style={{ background: "color-mix(in srgb, var(--reject,#b23a26) 13%, transparent)", color: "var(--reject,#b23a26)", textDecorationThickness: "1.5px" }}>{p.text}</del>;
+}
+/* render a token-diff parts[] inline — used for short fields (title, subtitle) shown whole */
+function renderInline(parts) { return parts.map(renderPart); }
+
+/* ---- focus a body diff on what changed ----
+   The body is the long one: dropping a whole article into the pane and tinting a
+   few words is not a diff, it's the article again. So for the body we keep only
+   the changed runs plus a little context on each side, and collapse every long
+   stretch of untouched prose into a single "⋯ N unchanged words ⋯" pill the
+   reader can expand. A short gap between two edits is kept whole (a pill that
+   hides three words helps no one). Title/subtitle stay rendered in full. */
+const CONTEXT = 18;            // words of surrounding context kept beside each change
+const countWords = (s) => (String(s).match(/\S+/g) || []).length;
+// first / last N words of a string, KEEPING their whitespace so reflow is faithful
+function takeHead(text, n) {
+  const toks = String(text).split(/(\s+)/); let words = 0, out = "";
+  for (const t of toks) { out += t; if (t.trim() && ++words >= n) break; }
+  return out;
+}
+function takeTail(text, n) {
+  const toks = String(text).split(/(\s+)/); let words = 0, out = "";
+  for (let i = toks.length - 1; i >= 0; i--) { out = toks[i] + out; if (toks[i].trim() && ++words >= n) break; }
+  return out;
+}
+// parts[] → a focused list where far-from-change "same" runs become {type:"gap"}
+function focusParts(parts, ctx) {
+  if (!parts.some(p => p.type !== "same")) return parts; // nothing changed — caller handles
+  const out = [];
+  parts.forEach((p, i) => {
+    if (p.type !== "same") { out.push(p); return; }
+    const ctxBefore = i > 0;                    // a change precedes → keep a head of context
+    const ctxAfter = i < parts.length - 1;      // a change follows → keep a tail of context
+    const wc = countWords(p.text);
+    const budget = (ctxBefore ? ctx : 0) + (ctxAfter ? ctx : 0);
+    if (wc <= budget || wc <= 4) { out.push(p); return; }   // short enough to show whole
+    const head = ctxBefore ? takeHead(p.text, ctx) : "";
+    const tail = ctxAfter ? takeTail(p.text, ctx) : "";
+    const mid = p.text.slice(head.length, tail ? p.text.length - tail.length : p.text.length);
+    const hidden = countWords(mid);
+    if (!hidden) { out.push(p); return; }       // head+tail already cover it
+    if (head) out.push({ type: "same", text: head });
+    out.push({ type: "gap", text: mid, hidden });
+    if (tail) out.push({ type: "same", text: tail });
+  });
+  return out;
+}
+// a collapsed run of unchanged prose; click to reveal it inline
+function Gap({ text, hidden }) {
+  const [open, setOpen] = useState(false);
+  if (open) return <React.Fragment>{text}</React.Fragment>;
+  return (
+    <button onClick={() => setOpen(true)} className="np-mono" title="Show the unchanged text"
+      style={{ display: "inline", margin: "0 3px", padding: "0 7px", fontSize: 11, lineHeight: 1.4, color: "var(--ink-soft)",
+        border: "1px dashed var(--rule)", borderRadius: 2, background: "transparent", cursor: "pointer", verticalAlign: "baseline", whiteSpace: "nowrap" }}>
+      ⋯ {hidden} unchanged word{hidden === 1 ? "" : "s"} ⋯
+    </button>
+  );
+}
+// the body diff, collapsed to its changes; a body with no change says so in one line
+function FocusedBody({ parts }) {
+  const changed = parts.some(p => p.type !== "same");
+  const focused = React.useMemo(() => focusParts(parts, CONTEXT), [parts]);
+  if (!changed) return <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>Body unchanged in this revision.</div>;
+  return <p style={bodyStyle}>{focused.map((p, i) => p.type === "gap" ? <Gap key={i} text={p.text} hidden={p.hidden} /> : renderPart(p, i))}</p>;
 }
 
 // a version snapshot is { headline, dek, text }; tolerate a bare body string too
@@ -78,12 +142,24 @@ function DiffView({ from, to }) {
       <div className="np-mono" style={{ fontSize: 11, marginBottom: 10, display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap" }}>
         <span style={{ color: "var(--verified, #1f8a5b)" }}>+{add} added</span>
         <span style={{ color: "var(--reject, #b23a26)" }}>−{del} removed</span>
-        {unchanged && <span style={{ color: "var(--ink-soft)" }}>· same prose in both versions — a republish or metadata-only change</span>}
       </div>
-      {hasHead && <div style={{ marginBottom: 8 }}><FieldLabel>Title</FieldLabel><p style={titleStyle}>{renderInline(head)}</p></div>}
-      {hasDek && <div style={{ marginBottom: 8 }}><FieldLabel>Subtitle</FieldLabel><p style={dekStyle}>{renderInline(dek)}</p></div>}
-      {(hasHead || hasDek) && <div style={ruleStyle} />}
-      <p style={bodyStyle}>{renderInline(body)}</p>
+      {unchanged ? (
+        /* zero words changed — don't re-print the whole article. Say what this is
+           and stop; the changelog chips on the left name any metadata change. */
+        <div style={{ border: "1px solid var(--rule)", background: "var(--card)", padding: "13px 15px" }}>
+          <div className="np-cond" style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 6 }}>No textual changes</div>
+          <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", lineHeight: 1.5 }}>
+            Title, subtitle and body are identical in both versions — this entry is a republish, or a metadata-only change (section, tags, byline or photo). See the chips on the left for what moved.
+          </div>
+        </div>
+      ) : (
+        <React.Fragment>
+          {hasHead && <div style={{ marginBottom: 8 }}><FieldLabel>Title</FieldLabel><p style={titleStyle}>{renderInline(head)}</p></div>}
+          {hasDek && <div style={{ marginBottom: 8 }}><FieldLabel>Subtitle</FieldLabel><p style={dekStyle}>{renderInline(dek)}</p></div>}
+          {(hasHead || hasDek) && <div style={ruleStyle} />}
+          <FocusedBody parts={body} />
+        </React.Fragment>
+      )}
     </div>
   );
 }
