@@ -53,9 +53,32 @@ const LAYOUT_DEFAULTS = {
   //              cover / row-2 / "more". Empty → fall back to newest-first.
   //   cards    : per-slug card-template override (wins over the page template).
   front: { template: "standard", order: [], cards: {} },
+  // Universal tag filters — a curated set of tags surfaced as toggle CHIPS on the
+  // front page (filter the lineup in place), NOT nav columns. Articles opt in by
+  // carrying one of these in their own tags. Seeded with the journal's standing
+  // beats; the admin curates the list in "Edit layout".
+  filters: ["Governing The Commons", "Housing is a Human Right"],
   roles: {},
   contributors: {}
 };
+
+// Universal-tag filters: trimmed, de-duplicated, length-clamped, capped. Mirrors
+// the taglines treatment — an array of plain strings the admin curates.
+const FILTER_MAX = 60;   // per-tag length clamp
+const FILTERS_CAP = 12;  // at most this many filter chips
+function normalizeFilters(raw) {
+  if (!Array.isArray(raw)) return [...LAYOUT_DEFAULTS.filters];
+  const seen = new Set(), out = [];
+  for (const t of raw) {
+    const s = String(t == null ? "" : t).replace(/\s+/g, " ").trim().slice(0, FILTER_MAX);
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k); out.push(s);
+    if (out.length >= FILTERS_CAP) break;
+  }
+  return out;
+}
 
 const LAYOUT_LS_KEY = "npj_layout_v1";
 
@@ -185,7 +208,7 @@ function normalizeSections(raw) {
 
 function normalizeLayout(raw) {
   const d = LAYOUT_DEFAULTS;
-  if (!raw || typeof raw !== "object") return { ...d, sections: [...d.sections], taglines: [...d.taglines], utility: d.utility.map(u => ({ ...u })), front: normalizeFront(null), roles: {}, contributors: {} };
+  if (!raw || typeof raw !== "object") return { ...d, sections: [...d.sections], taglines: [...d.taglines], utility: d.utility.map(u => ({ ...u })), front: normalizeFront(null), filters: [...d.filters], roles: {}, contributors: {} };
   const cleanNav = (n) => (["explore", "standards", "submit", "contributors"].includes(n) ? n : "submit");
   // tolerate the older `members: []` shape by upgrading it to editor roles
   let roles = normalizeRoles(raw.roles);
@@ -198,6 +221,7 @@ function normalizeLayout(raw) {
       : d.utility.map(u => ({ ...u })),
     brand: raw.brand && typeof raw.brand === "object" ? raw.brand : null,
     front: normalizeFront(raw.front),
+    filters: normalizeFilters(raw.filters),
     roles,
     contributors: normalizeContributors(raw.contributors)
   };
@@ -289,7 +313,7 @@ function useIsMobile(maxWidth = 760) {
 
 Object.assign(window, {
   LAYOUT_DEFAULTS, SEED_ADMIN, BIO_MAX, NAME_MAX, normalizeLayout, normalizeRoles, normalizeSections,
-  normalizeContributors, loadLayout, saveLayoutLocal,
+  normalizeContributors, normalizeFilters, loadLayout, saveLayoutLocal,
   roleOf, canPublish, canPublishColumn, canEdit, isMember, nameOf, profileOf, applyContributorsToPeople,
   LayoutCtx, useIsMobile,
   FRONT_CARD_TEMPLATES, FRONT_CARD_DEFAULT, FRONT_TEMPLATES, FRONT_TEMPLATE_DEFAULT,
