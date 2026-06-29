@@ -364,6 +364,27 @@
       if (!l) return;
       try { const ev = JSON.parse(l); if (ev && ev.op) events.push({ ev, line: l }); } catch (e) { /* a torn line never breaks the fold */ }
     });
+    /* Fold in true CHRONOLOGICAL order, by each event's own `ts` — not by file
+       order. The append-only files are normally already chronological (the
+       genesis articles/<slug>.jsonl, which gatherLog/docPaths always lists
+       first, then the articles/<slug>/ event files in filename-stamp order). But
+       a piece that was published, then deleted and PUBLISHED AGAIN lands a brand
+       new genesis whose timestamp is LATER than event files already sitting in
+       its folder. Folding genesis-first then by filename would replay that newest
+       publish FIRST — so the fold would treat the latest version as the oldest,
+       serve a stale body as "current", and render the edit history with its
+       timeline inverted (a "current" stamped earlier than the version above it).
+       Ordering by ts puts the real latest event last (current) and the changelog
+       newest-first. A stable index tiebreak preserves order for equal stamps, and
+       a missing/torn ts inherits the previous event's so it keeps its place. */
+    let lastT = -Infinity;
+    events.forEach((e, i) => {
+      const t = Date.parse(e.ev.ts);
+      e.idx = i;
+      e.t = Number.isFinite(t) ? t : lastT;
+      lastT = e.t;
+    });
+    events.sort((p, q) => (p.t - q.t) || (p.idx - q.idx));
     let state = null;
     const sources = {};
     const versions = []; // newest first when returned
