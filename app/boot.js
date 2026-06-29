@@ -60,7 +60,7 @@
   // Gated behind window.__npjReady.all.
   var EDITOR = [
     "app/editor/GroundingWorkspace.jsx", "app/editor/PostStructure.jsx", "app/graph/GraphView.jsx",
-    "app/editor/DefinitionsRail.jsx", "app/editor/Newsroom.jsx", "app/grounding/Citey.jsx", "app/redaction/CiteyRedact.jsx"
+    "app/editor/DefinitionsRail.jsx", "app/editor/BlockView.jsx", "app/editor/Newsroom.jsx", "app/grounding/Citey.jsx", "app/redaction/CiteyRedact.jsx"
   ];
 
   // The app shell (the <App/> component + the React mount) lives in an inline
