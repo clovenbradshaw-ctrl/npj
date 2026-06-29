@@ -88,6 +88,11 @@
   const filenameFor = (slug) => DIR + "/" + slug + ".jsonl";
   const rawUrl = (slug) => RAW_BASE + "/" + filenameFor(slug);   // raw CDN — the reader fetches this
   const blobUrl = (slug) => BLOB_BASE + "/" + filenameFor(slug); // GitHub UI — the "view the log" link
+  // A document that lives entirely in its own folder (no legacy flat anchor) — the
+  // guid folder IS the article. Its "view the log" link opens the folder, not a
+  // single file, since the genesis + every event file together are the record.
+  const TREE_BASE = "https://github.com/" + OWNER_REPO + "/tree/main";
+  const folderUrl = (slug) => TREE_BASE + "/" + DIR + "/" + slug;
 
   /* djb2 → 7 hex chars. Not crypto — just a stable, human-quotable version id
      derived from the event line itself, so every reader derives the same one. */
@@ -507,8 +512,16 @@
      every event file in filename (timestamp) order — the exact order foldLog
      must replay them in. `key` is the combined blob shas, so adding ANY new
      event file changes the key and the slug refolds; an unchanged document is
-     served from cache. A slug with event files but no genesis anchor is skipped
-     (an orphan can't define a document). */
+     served from cache.
+
+     A FOLDER stands on its own: when a slug has event files but no flat anchor,
+     the folder IS the article and its earliest INS event file is the genesis.
+     A guid-named piece whose genesis lives inside articles/<guid>/ (with no
+     sibling articles/<guid>.jsonl) is therefore a complete, listable document —
+     the publish, every edit and every republish fold from the folder alone.
+     Such a doc is flagged `folder:true` so its "view the log" link opens the
+     folder, not a missing single file. Only a folder with NO INS at all (edits
+     but no publish) is an orphan that can't define a document, and is skipped. */
   async function listDocs(signal) {
     const res = await fetch(API_TREE, { headers: { Accept: "application/vnd.github+json" }, signal });
     if (!res.ok) throw new Error("github " + res.status);
@@ -523,10 +536,19 @@
     });
     return Object.keys(bySlug).map(slug => {
       const g = bySlug[slug];
-      if (!g.genesis) return null;
       const events = g.events.slice().sort((a, b) => String(a.path).localeCompare(String(b.path)));
-      const files = [g.genesis].concat(events);
-      return { slug, files, key: files.map(f => f.sha).join("·") };
+      let files, folder;
+      if (g.genesis) {
+        files = [g.genesis].concat(events);   // legacy flat anchor first, then its folder events
+        folder = false;
+      } else {
+        // No flat anchor — the folder defines the document. The earliest INS
+        // event file is the genesis; with no INS at all it's an orphan, skip.
+        if (!events.some(e => /-ins-/i.test(e.path))) return null;
+        files = events;
+        folder = true;
+      }
+      return { slug, folder, files, key: files.map(f => f.sha).join("·") };
     }).filter(Boolean);
   }
 
@@ -577,7 +599,7 @@
         column: article.column, tags: article.tags, published: article.published, updated: article.updated,
         authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, base_sha: article.base_sha, readMins: article.readMins,
         status: article.status, image: article.image, excerpt: excerptOf(article.body),
-        storage: "github", logPath: blobUrl(d.slug)
+        storage: "github", logPath: d.folder ? folderUrl(d.slug) : blobUrl(d.slug)
       };
       live[d.slug] = { key: d.key, meta };
       return meta;
@@ -644,12 +666,17 @@
   // methods footer all resolve.
   async function loadArticle(slug) {
     const s = slugify(slug) || slug;
-    const text = await gatherLog(s);
+    const paths = await docPaths(s);
+    const texts = await Promise.all(paths.map(p => fetchRaw(p)));
+    const text = texts.filter(t => t != null).join("\n");
     if (!text) return null;
     const { article, sources } = foldLog(text);
     if (article) {
       article.storage = "github";
-      article.logPath = blobUrl(article.slug || s);
+      // A folder-only document (no flat anchor among its paths) links to its
+      // folder; a legacy single-file log links to the blob.
+      const hasFlatAnchor = paths.indexOf(filenameFor(article.slug || s)) >= 0;
+      article.logPath = hasFlatAnchor ? blobUrl(article.slug || s) : folderUrl(article.slug || s);
       Object.keys(sources).forEach(k => { window.NPJ.SOURCES[k] = Object.assign(window.NPJ.SOURCES[k] || {}, sources[k]); });
     }
     return article;
@@ -1586,7 +1613,7 @@
   }
 
   root.NpjArticles = {
-    SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, filenameFor, publishEndpoint, suggestEndpoint,
+    SCHEMA, DIR, RAW_BASE, rawUrl, blobUrl, folderUrl, filenameFor, publishEndpoint, suggestEndpoint,
     foldLog, plainText, readMins, lineSha,
     META_STANDARD, checkMeta,
     snapshotOperand, revertOperand,
