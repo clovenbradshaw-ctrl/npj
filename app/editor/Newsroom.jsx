@@ -1356,10 +1356,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       } catch (e) { /* fall back to the plain serialization */ }
     }
     const actor = (session && session.user_id) || ((window.MatrixAuth.current() || {}).user_id) || null;
+    // Credit the piece EXACTLY as the publish gate will, so the preview's byline
+    // matches the public page: the actor is the recorded author, the typed name
+    // becomes an override only when it differs from the contributor's resolved
+    // name, and the editors field is parsed the same way (names or mxids, split
+    // on commas/newlines). Without this the preview showed only the author and
+    // silently dropped the "Edited by" line that ships on publish.
+    const profileName = (actor && window.NPJ && window.NPJ.PEOPLE && window.NPJ.PEOPLE[actor] && window.NPJ.PEOPLE[actor].name) || "";
+    const typedName = (byline && byline.trim()) || profileName;
+    const bylineOverride = typedName && typedName !== profileName ? typedName : "";
+    const previewEditors = String(editorsField || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
     try {
       const gen = window.NpjArticles.genesisFromContent(
         { html, title, tags, column, sources },
         { slug: fileSlug || slugify(title), headline: title, actor, preview: true,
+          authors: actor ? [actor] : [],
+          editors: previewEditors,
+          byline: bylineOverride,
           composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null }
       );
       setPreviewDoc(gen.article);
