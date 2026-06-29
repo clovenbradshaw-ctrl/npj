@@ -58,6 +58,7 @@ const I = {
   dots:    phIcon("dots-three-outline"),
   code:    phIcon("code"),
   codeBlock: phIcon("code-block"),
+  blocks:  phIcon("squares-four"),
   alignLeft:   phIcon("text-align-left"),
   alignCenter: phIcon("text-align-center"),
   alignRight:  phIcon("text-align-right"),

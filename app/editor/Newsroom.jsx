@@ -1528,6 +1528,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [htmlMode, setHtmlMode] = useState(false);  // editing the document's raw HTML in the source view
   const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
   const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
+  const [blockMode, setBlockMode] = useState(false); // the building-block editor — the surface between Prose and HTML
+  const [blockHtml, setBlockHtml] = useState("");    // snapshot of the document handed to the block editor
   const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
   const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
   useEffect(() => {
@@ -1669,6 +1671,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const openHtmlSource = () => {
     if (!ed.current) return;
+    setBlockMode(false);
     setHtmlDraft(nrSerializeHtml(ed.current));
     setHtmlMsg(""); setFmtMenu(null); setMenu(null);
     if (scroller.current) scroller.current.scrollTop = 0;
@@ -1686,9 +1689,28 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     reconcileAfterReplace();
     setHtmlMode(false); setHtmlMsg("");
   };
-  // leaving prose for a grounding/graph surface drops the source panel so it
-  // can't shadow another view; the next open re-snapshots the live document
+  // ---- block mode: the building-block editor (between Prose and HTML) ----
+  // Snapshots the live document, hands it to BlockView as discrete cards, and on
+  // Apply re-parses + runs the same reconcile a restored draft / HTML apply does.
+  const openBlockMode = () => {
+    if (!ed.current) return;
+    setHtmlMode(false); setHtmlMsg("");
+    setBlockHtml(ed.current.innerHTML);
+    setFmtMenu(null); setMenu(null);
+    if (scroller.current) scroller.current.scrollTop = 0;
+    setBlockMode(true);
+  };
+  const closeBlockMode = () => setBlockMode(false);
+  const applyBlockMode = (html) => {
+    const root = ed.current; if (!root) return;
+    root.innerHTML = html;
+    reconcileAfterReplace();
+    setBlockMode(false);
+  };
+  // leaving prose for a grounding/graph surface drops the source/block panels so
+  // they can't shadow another view; the next open re-snapshots the live document
   useEffect(() => { if (view !== "prose" && htmlMode) setHtmlMode(false); }, [view, htmlMode]);
+  useEffect(() => { if (view !== "prose" && blockMode) setBlockMode(false); }, [view, blockMode]);
 
   // Footnote hygiene in the LIVE editor — the DOM mirror of articles.js
   // mergeStrandedFootnotes. A footnote marker references a WORD, so a marker left
@@ -2969,6 +2991,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </button>
         {view === "prose" && <Sep />}
         {view === "prose" && (
+          <button onMouseDown={e => e.preventDefault()} onClick={() => (blockMode ? closeBlockMode() : openBlockMode())} aria-pressed={blockMode}
+            title={blockMode ? "Close the block editor" : "Edit as building blocks — one block at a time, with granular control over line breaks and citations (no raw HTML)"}
+            className="np-cond" style={{ background: blockMode ? "var(--yellow)" : "transparent", border: 0, color: blockMode ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <I.blocks style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Blocks</span>
+          </button>
+        )}
+        {view === "prose" && (
           <button onMouseDown={e => e.preventDefault()} onClick={() => (htmlMode ? closeHtmlSource() : openHtmlSource())} aria-pressed={htmlMode}
             title={htmlMode ? "Close the HTML source view" : "Edit the underlying HTML — unstick a block, retag a heading, clear broken markup"}
             className="np-cond" style={{ background: htmlMode ? "var(--yellow)" : "transparent", border: 0, color: htmlMode ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -3077,7 +3106,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: (htmlMode || blockMode) ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
           <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
             <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
@@ -3092,7 +3121,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
-            style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
+            style={{ color: NR.text, outline: "none", display: (htmlMode || blockMode) ? "none" : undefined }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
@@ -3149,6 +3178,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <textarea value={htmlDraft} onChange={(e) => setHtmlDraft(e.target.value)} spellCheck={false} autoCapitalize="off" autoCorrect="off" wrap="off"
                 className="np-mono" style={{ flex: 1, minHeight: 0, width: "100%", resize: "none", border: 0, outline: "none", background: NR.field, color: NR.text, padding: "16px 18px", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre", overflow: "auto" }} />
             </div>
+          )}
+          {/* the building-block editor — the surface between Prose (WYSIWYG) and
+              the HTML source. Fills the canvas; the editable stays mounted behind
+              it (hidden) so autosave/DOM survive, exactly like the HTML view. */}
+          {blockMode && window.BlockView && (
+            <window.BlockView html={blockHtml} NR={NR} isMobile={isMobile}
+              onApply={applyBlockMode} onCancel={closeBlockMode} />
           )}
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
