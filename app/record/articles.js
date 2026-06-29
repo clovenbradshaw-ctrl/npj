@@ -44,8 +44,12 @@
   const RAW_BASE = "https://raw.githubusercontent.com/" + OWNER_REPO + "/main";
   const API_TREE = "https://api.github.com/repos/" + OWNER_REPO + "/git/trees/main?recursive=1";
   const BLOB_BASE = "https://github.com/" + OWNER_REPO + "/blob/main"; // human-facing "view the log" link
-  const IDX_CACHE_KEY = "npj_articles_idx_gh1"; // GitHub model: entries keyed by slug, cache-busted by blob sha
-  const FRONT_CACHE_KEY = "npj_front_gh1";       // last front-page line-up, painted instantly on the next visit
+  // Bump the version suffix whenever the cached meta SHAPE changes — entries are
+  // cache-busted by blob sha, so a meta cached under an older code version (e.g.
+  // before `excerpt` was folded in) keeps being served for an unchanged article.
+  // gh2: added the cover `excerpt` (the story's opening, pulled into the cover).
+  const IDX_CACHE_KEY = "npj_articles_idx_gh2"; // GitHub model: entries keyed by slug, cache-busted by blob sha
+  const FRONT_CACHE_KEY = "npj_front_gh2";       // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
   // Open reader feedback rides a SEPARATE, write-only webhook: it can only CREATE
