@@ -404,11 +404,35 @@ function FrontCard({ item, template, variant, onOpen }) {
     <p style={{ fontSize: lead ? 22 : 17.5, lineHeight: 1.5, margin: lead ? "0 0 20px" : "12px 0 16px", maxWidth: lead ? "60ch" : undefined,
       color: light ? "rgba(255,255,255,.9)" : "var(--ink)" }}>{item.dek}</p>
   ) : null;
+  // The version chip the article header carries (⊛ v.<sha>), pulled through to the
+  // cover so the front page leads with the same provenance receipt. It mirrors
+  // window.VersionBadge's look, but is inlined here because the front page paints
+  // before the versions module (with its diff viewer) lazy-loads; clicking it just
+  // opens the article, where the full edit history lives.
+  const VersionChip = () => (lead && item.base_sha) ? (
+    <button onClick={open} className="np-mono" title="Open the article to see its edit history"
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)",
+        background: "var(--card)", color: "var(--ink)", padding: "3px 9px", fontSize: 11, cursor: "pointer" }}>
+      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{item.base_sha}{item.versions > 1 ? " · " + item.versions + " versions" : ""}
+    </button>
+  ) : null;
+  // The cover's meta line reads like the article header: the version chip, then the
+  // date · read time. Secondary cards keep the plain short date.
   const MetaEl = () => item.published ? (
-    <div style={{ fontFamily: "var(--mono)", fontSize: lead ? 13 : 12, color: "var(--ink-soft)" }}>
-      {lead ? fmtDate(item.published) : shortDate(item.published)}
-      {lead && item.updated && item.updated !== item.published ? " · updated " + shortDate(item.updated) : ""}
-    </div>
+    lead ? (
+      <div className="np-mono" style={{ fontSize: 13, color: "var(--ink-soft)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <VersionChip />
+        <span>
+          {fmtDate(item.published)}
+          {item.updated && item.updated !== item.published ? " · updated " + shortDate(item.updated) : ""}
+          {item.readMins ? " · " + item.readMins + " min" : ""}
+        </span>
+      </div>
+    ) : (
+      <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--ink-soft)" }}>
+        {shortDate(item.published)}
+      </div>
+    )
   ) : null;
   // The opening of the story, pulled through into the cover's text column to fill
   // the space beside a tall photo. It's deliberately generous — the column clips
@@ -424,7 +448,7 @@ function FrontCard({ item, template, variant, onOpen }) {
   const hasByline = ((item.authors || []).length || (item.editors || []).length || (item.byline || "").trim());
   const BylineEl = () => (hasByline && window.Byline) ? (
     <div style={{ margin: lead ? "0 0 16px" : "0 0 12px" }}>
-      <window.Byline authors={item.authors} editors={item.editors} byline={item.byline} />
+      <window.Byline authors={item.authors} editors={item.editors} byline={item.byline} hang={lead ? "flush" : false} />
     </div>
   ) : null;
 
@@ -524,7 +548,7 @@ function FrontCard({ item, template, variant, onOpen }) {
             photo column, and overflow:hidden clips the text to exactly that. */}
         <div style={{ position: "relative", minWidth: 0 }}>
           <div style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
-            <KickerEl /><TitleEl /><DekEl /><BylineEl /><MetaEl /><ExcerptEl /><TagsEl />
+            <KickerEl /><TitleEl /><DekEl /><MetaEl /><BylineEl /><ExcerptEl /><TagsEl />
             {/* the column clips the excerpt to the photo's height; the fade signals
                 "continued" and carries a trailing ellipsis at the cut so it reads as
                 a truncation, not a sentence that simply stopped. */}
@@ -545,7 +569,7 @@ function FrontCard({ item, template, variant, onOpen }) {
   // secondary cards keep the date in the footer under the photo.
   return (
     <div>
-      <KickerEl /><BylineEl />{lead ? <MetaEl /> : null}<TitleEl /><DekEl />
+      <KickerEl />{lead ? <MetaEl /> : null}<BylineEl /><TitleEl /><DekEl />
       {place === "below" && (hasPhoto
         ? <div style={{ margin: lead ? "0 0 18px" : "0 0 14px", maxWidth: lead ? 640 : undefined }}><Photo h={lead ? null : 220} /><PhotoCaption /></div>
         : (lead ? <div style={{ margin: "0 0 18px", maxWidth: 640 }}><Placeholder label="hero image" h={300} /></div> : null))}

@@ -48,8 +48,8 @@
   // cache-busted by blob sha, so a meta cached under an older code version (e.g.
   // before `excerpt` was folded in) keeps being served for an unchanged article.
   // gh2: added the cover `excerpt` (the story's opening, pulled into the cover).
-  const IDX_CACHE_KEY = "npj_articles_idx_gh2"; // GitHub model: entries keyed by slug, cache-busted by blob sha
-  const FRONT_CACHE_KEY = "npj_front_gh2";       // last front-page line-up, painted instantly on the next visit
+  const IDX_CACHE_KEY = "npj_articles_idx_gh3"; // GitHub model: entries keyed by slug, cache-busted by blob sha
+  const FRONT_CACHE_KEY = "npj_front_gh3";       // last front-page line-up, painted instantly on the next visit
   const RECEIPT_KEY = "npj_publish_receipts_v1";
   const DEFAULT_ENDPOINT = "https://n8n.intelechia.com/webhook/site/publish-npj";
   // Open reader feedback rides a SEPARATE, write-only webhook: it can only CREATE
@@ -575,7 +575,7 @@
       const meta = {
         slug: article.slug || d.slug, headline: article.headline, dek: article.dek, kicker: article.kicker,
         column: article.column, tags: article.tags, published: article.published, updated: article.updated,
-        authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, readMins: article.readMins,
+        authors: article.authors, editors: article.editors, byline: article.byline, assignees: article.assignees, versions: article.versions.length, base_sha: article.base_sha, readMins: article.readMins,
         status: article.status, image: article.image, excerpt: excerptOf(article.body),
         storage: "github", logPath: blobUrl(d.slug)
       };
@@ -590,7 +590,7 @@
   // each piece's `status` so the front page + reader can hide an unpublished one.
   async function loadFront() {
     const metas = await listArticles();
-    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, readMins: m.readMins, status: m.status, image: m.image || null, excerpt: m.excerpt || "" });
+    const item = (m) => ({ slug: m.slug, kicker: m.kicker, column: m.column || "", headline: m.headline, dek: m.dek, tags: m.tags || [], authors: m.authors || [], editors: m.editors || [], byline: m.byline || "", assignees: m.assignees || [], published: m.published, updated: m.updated, versions: m.versions, base_sha: m.base_sha, readMins: m.readMins, status: m.status, image: m.image || null, excerpt: m.excerpt || "" });
     window.NPJ.FRONT = { lead: metas.length ? item(metas[0]) : null, secondary: metas.slice(1).map(item), briefs: [] };
     saveFront(window.NPJ.FRONT); // head start for the next visit (stale-while-revalidate)
     return metas;
