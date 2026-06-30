@@ -1353,7 +1353,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const previewEditors = String(editorsField || "").split(/[\n,]+/).map(x => x.replace(/\s+/g, " ").trim()).filter(Boolean);
     try {
       const gen = window.NpjArticles.genesisFromContent(
-        { html, title, tags, column, sources },
+        { html, title, tags, column, sources, definitions },
         { slug: fileSlug || slugify(title), headline: title, actor, preview: true,
           authors: actor ? [actor] : [],
           editors: previewEditors,
@@ -2772,7 +2772,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
             ["sources", "Sources", "Read the source documents and grab the words that back a claim"],
-            ["definitions", "Definitions", "The piece's glossary — terms a reader may need defined, suggested by eoreader4 and sourced"]].map(([k, label, ti]) => (
+            ["definitions", "Definitions" + (definitions.length ? " · " + definitions.length : ""), "The piece's glossary — terms a reader may need defined, suggested by eoreader4 and sourced. Defined terms are marked inline in the published article."]].map(([k, label, ti]) => (
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>

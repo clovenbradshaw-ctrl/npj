@@ -563,6 +563,33 @@ a { color: inherit; }
   color: inherit;
 }
 
+/* ── inline definitions ───────────────────────────────────────────────────────
+   A defined term wears a quiet dotted underline in the prose; hover or focus
+   floats up its first sourced definition. Distinct from the yellow claim
+   highlight and the entity mark — a hairline cue that there's a definition to
+   read, not a source to audit. The full glossary still rides the footer. */
+.def-term {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted var(--ink-soft, #595139);
+  text-underline-offset: 2px;
+}
+.def-term:hover, .def-term:focus-visible { background: rgba(255,236,1,.16); outline: none; border-bottom-style: solid; }
+.def-pop {
+  position: absolute; left: 0; top: calc(100% + 7px); z-index: 45;
+  width: max-content; max-width: min(320px, 78vw);
+  background: var(--card); color: var(--ink);
+  border: 1.5px solid var(--ink); box-shadow: 4px 4px 0 rgba(22,20,13,.16);
+  padding: 9px 11px; display: none;
+  font-family: var(--serif); font-size: 14px; font-style: normal; line-height: 1.45;
+  white-space: normal; text-align: left; cursor: auto;
+}
+.def-term:hover .def-pop, .def-term:focus .def-pop, .def-term:focus-within .def-pop { display: block; }
+.def-pop-term { display: block; font-family: var(--cond); font-weight: 700; font-size: 13px; letter-spacing: .01em; margin-bottom: 3px; }
+.def-pop-text { display: block; }
+.def-pop-more { display: block; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 6px; }
+@media (max-width: 760px) { .def-pop { position: fixed; left: 12px; right: 12px; width: auto; max-width: none; } }
+
 /* newsroom (private) inverts the palette — themeable. Dark is the default;
    adding .nr-light on the newsroom root flips the whole editor to a paper
    scheme. Every piece of newsroom chrome reads these vars, so the theme
