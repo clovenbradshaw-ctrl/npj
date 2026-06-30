@@ -13,7 +13,9 @@ const NR = {
 };
 
 const THEME_KEY = "npj_nr_theme";
-function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (e) { return "dark"; } }
+// Default to the light "paper" surface — the editor opens looking like the
+// published page (you can still flip to the dark room, and that choice sticks).
+function nrTheme() { try { return localStorage.getItem(THEME_KEY) === "dark" ? "dark" : "light"; } catch (e) { return "light"; } }
 
 // clean-read preference (the toolbar's Citations eye). Default ON — highlights,
 // marker chips and footnotes are shown. "0" means the author chose a clean read:
@@ -3086,36 +3088,40 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
         <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
-          {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
-          <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
-            <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
-            <input id="nr-title-field" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Untitled headline" spellCheck={true}
-              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontFamily: "var(--display)", fontSize: isMobile ? 16 : 18, lineHeight: 1.15, padding: "2px 0 8px", outline: "none" }} />
-            <label htmlFor="nr-dek-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, margin: "14px 0 3px" }}>Subtitle</label>
-            <input id="nr-dek-field" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="One line under the headline" spellCheck={true}
-              style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.soft, fontFamily: "var(--serif)", fontStyle: "italic", fontSize: isMobile ? 14 : 15, lineHeight: 1.35, padding: "2px 0 8px", outline: "none" }} />
-            {/* Byline + editors, set here so they're ready before the publish gate —
-                the gate inherits these (and still lets you tweak at publish time). */}
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 14 }}>
-              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                <label htmlFor="nr-byline-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>By</label>
-                <input id="nr-byline-field" value={byline} onChange={e => setByline(e.target.value)} placeholder="Author name readers see" spellCheck={true}
-                  className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
-              </div>
-              <div style={{ flex: "1 1 220px", minWidth: 0 }}>
-                <label htmlFor="nr-editors-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Edited by <span style={{ color: NR.muted, textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
-                <input id="nr-editors-field" value={editorsField} onChange={e => setEditorsField(e.target.value)} placeholder="Editor name, or @editor:server" spellCheck={false}
-                  className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
+          {/* The headline, subtitle and byline are the published article's own
+              masthead — rendered on the paper sheet at the reader's scale, so the
+              editor opens looking like the page it becomes. They stay explicit
+              fields (the publish gate reads them) rather than loose prose, but
+              they read as the article, not a form. */}
+          <div className="nr-sheet">
+            <div className="nr-fields">
+              <input id="nr-title-field" aria-label="Headline" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Headline" spellCheck={true}
+                className="nr-field-title" style={{ fontSize: isMobile ? 28 : 40 }} />
+              <input id="nr-dek-field" aria-label="Subtitle" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="A subtitle line under the headline" spellCheck={true}
+                className="nr-field-dek" style={{ fontSize: isMobile ? 17 : 21 }} />
+              {/* Byline + editors — the credit line readers see, set here so the
+                  publish gate inherits it (and still lets you tweak at publish). */}
+              <div className="nr-field-byline" style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  <label htmlFor="nr-byline-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Written by</label>
+                  <input id="nr-byline-field" value={byline} onChange={e => setByline(e.target.value)} placeholder="Author name readers see" spellCheck={true}
+                    className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
+                </div>
+                <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+                  <label htmlFor="nr-editors-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Edited by <span style={{ color: NR.muted, textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
+                  <input id="nr-editors-field" value={editorsField} onChange={e => setEditorsField(e.target.value)} placeholder="Editor name, or @editor:server" spellCheck={false}
+                    className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
+                </div>
               </div>
             </div>
+            <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
+              onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
+              onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
+              onPaste={onPaste} onDrop={onDropText}
+              onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
+              style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
+              dangerouslySetInnerHTML={{ __html: START_DOC }} />
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
-            onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
-            onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
-            onPaste={onPaste} onDrop={onDropText}
-            onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
-            style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
-            dangerouslySetInnerHTML={{ __html: START_DOC }} />
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
           {!isMobile && grip && !htmlMode && (

@@ -622,23 +622,28 @@ a { color: inherit; }
    the dense toolbar and never let a slow font swap collapse their box */
 .newsroom i[class*="ph-"] { line-height: 1; }
 
-/* the document page — the draft renders as a bounded sheet centered on the
-   canvas, so the document border and the headline read as one artifact:
-   banner flush at the top of the page, headline directly beneath it. */
-.nr-page {
-  --page-pad: 52px;
-  --page-pad-top: 36px;
+/* the document sheet — in the editor the draft renders as a bounded paper sheet
+   centered on the canvas, carrying its own masthead (the Title/Subtitle/byline
+   fields) above the body. The masthead and the body share one sheet at the
+   reader's measure and type scale, so the editor opens looking like the page it
+   becomes — closing the daylight between writing and the published article. */
+.nr-sheet {
   max-width: 800px;
   margin: 0 auto;
-  min-height: 70vh;
   background: var(--nr-page);
   border: 1.5px solid var(--nr-line-strong);
   box-shadow: var(--nr-page-shadow);
+}
+.nr-page {
+  --page-pad: 52px;
+  --page-pad-top: 18px;
+  min-height: 58vh;
+  background: transparent;
   padding: var(--page-pad-top) var(--page-pad) 72px;
 }
-/* banner bleeds to the page border (kills the stray floating outline) */
+/* banner bleeds to the sheet edge, but no longer pulls up under the masthead */
 .md-preview figure.nr-banner { margin: 0 calc(-1 * var(--page-pad, 0px)) 26px; }
-.nr-page > figure.nr-banner:first-child { margin-top: calc(-1 * var(--page-pad-top)); }
+.nr-sheet .nr-page > figure.nr-banner:first-child { margin-top: 4px; }
 /* body prose is justified by default; per-block alignment from the toolbar's
    align menu (incl. Select-all → Justify) sets an inline text-align that wins. */
 .nr-page p, .nr-page li { text-align: justify; }
@@ -653,14 +658,26 @@ a { color: inherit; }
 .nr-page .nr-dek:empty::before,
 .nr-page .nr-dek:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); pointer-events: none; }
 
-/* The headline + dek are now filled in via the explicit Title/Subtitle fields
-   above the sheet; the in-canvas nodes stay (the publish pipeline reads them)
+/* The headline + dek are filled via the explicit Title/Subtitle fields in the
+   sheet's masthead; the in-canvas nodes stay (the publish pipeline reads them)
    but are hidden so the canvas holds body prose only. */
 .md-preview.nr-fielded > h1:first-of-type,
 .md-preview.nr-fielded > .nr-dek { display: none; }
-/* the Title/Subtitle field group — readable placeholders + a visible focus ring */
+
+/* ── the masthead: Title / Subtitle / byline, on the paper sheet ──────────────
+   Padded to the body's text column so the headline sits exactly over the prose
+   that follows, and scaled to the reader's own header (display headline, italic
+   serif dek) so what you write reads like what publishes. */
+.nr-fields { padding: 34px 52px 0; }
+.nr-field-title { display: block; width: 100%; border: 0; background: transparent; color: var(--nr-text);
+  font-family: var(--display); font-weight: 400; line-height: 1.02; letter-spacing: -.01em; padding: 0; margin: 0 0 14px; outline: none; }
+.nr-field-dek { display: block; width: 100%; border: 0; background: transparent; color: var(--nr-soft);
+  font-family: var(--serif); font-style: italic; line-height: 1.32; padding: 0; margin: 0 0 18px; outline: none; }
+.nr-field-byline { padding-top: 14px; border-top: 1px solid var(--nr-line); }
+/* readable placeholders + a visible focus ring (the masthead inputs are
+   borderless, so the ring is the only focus cue) */
 .nr-fields input::placeholder { color: var(--nr-muted); opacity: 1; }
-.nr-fields input:focus { border-bottom-color: var(--nr-line-strong); }
+.nr-field-byline input:focus { border-bottom-color: var(--nr-line-strong); }
 .nr-fields input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 3px; }
 /* the drop-slot's shadow-DOM colors are black-on-black in the dark room —
    re-skin its exposed parts to the theme */
@@ -668,7 +685,8 @@ a { color: inherit; }
 .newsroom image-slot::part(ring) { border-color: var(--nr-line-strong); }
 .newsroom image-slot::part(empty) { color: var(--nr-muted); }
 @media (max-width: 760px) {
-  .nr-page { --page-pad: 18px; --page-pad-top: 18px; padding-bottom: 44px; min-height: 60vh; }
+  .nr-page { --page-pad: 18px; --page-pad-top: 12px; padding-bottom: 44px; min-height: 50vh; }
+  .nr-fields { padding: 22px 18px 0; }
 }
 
 /* ---- in-document block drag (the Google-Docs grip) ----
