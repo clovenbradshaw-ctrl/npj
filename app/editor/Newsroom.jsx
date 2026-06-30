@@ -456,11 +456,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [collabs, setCollabs] = useState(() => (session ? [session.user_id] : []));
   const [room, setRoom] = useState(null);            // the project this document belongs to
   const [commentsOn, setCommentsOn] = useState(false); // when on, the right panel is the e2ee collaboration rail
+  const [commenters, setCommenters] = useState({});   // project members invited comment/suggest-only (mxid → {by,ts})
   const [invite, setInvite] = useState(false);
   const [inviteVal, setInviteVal] = useState("");
   const [inviteMsg, setInviteMsg] = useState("");
   const [projects, setProjects] = useState(null);    // existing projects, for the picker
   const [projPick, setProjPick] = useState("");      // "" = start a new project for this doc
+  // A commenter — the Google-Docs default for an invitee — works the draft
+  // comment/suggest-only: the prose is read-only, publish is hidden, and the
+  // collaboration rail is the surface. Admins always edit; anyone listed in the
+  // project's commenters set is comment-only until an editor promotes them.
+  const amCommenter = !!(session && !isAdmin && commenters[session.user_id]);
+  // pull the project's commenter set when the room is known/changes
+  useEffect(() => {
+    const rid = room && room.roomId;
+    if (!rid || !(window.MatrixAuth && window.MatrixAuth.readCommenters)) { setCommenters({}); return; }
+    let live = true;
+    window.MatrixAuth.readCommenters(rid).then(c => { if (live) setCommenters(c || {}); }).catch(() => {});
+    return () => { live = false; };
+  }, [room]);
+  // a commenter always lands in the collaboration rail — that's their surface
+  useEffect(() => { if (amCommenter) setCommentsOn(true); }, [amCommenter]);
   const ed = useRef(null);
   const scroller = useRef(null);                     // the editor scroll container (the page scrolls inside it)
   const selRange = useRef(null);
@@ -2600,9 +2616,23 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setRoom(rm);
       }
       await window.MatrixAuth.invite(rm.roomId, id.mxid);
+      // Default tier: a commenter (Google-Docs style) — they can comment and
+      // suggest edits, but not edit or publish directly, until promoted below.
+      try { if (window.MatrixAuth.setCommenter) { await window.MatrixAuth.setCommenter(rm.roomId, id.mxid); setCommenters(m => ({ ...m, [id.mxid]: { by: session.user_id, ts: new Date().toISOString() } })); } } catch (e) {}
       setCollabs(c => c.includes(id.mxid) ? c : [...c, id.mxid]);
-      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " into the project — they can work on every document in it.");
+      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " as a commenter — they can suggest edits and comment on every document in the project. Promote them to editor below when you're ready.");
     } catch (e) { setInviteMsg("Invite failed: " + (e.message || "try again")); }
+  };
+  // Promote a commenter to a full editor (drop them from the commenters set), or
+  // step an editor back to commenter. The room's creator/admin holds the power
+  // level to write this state; for everyone else it's a no-op the server rejects.
+  const promoteMember = async (mxid) => {
+    const rid = room && room.roomId; if (!rid || !window.MatrixAuth.removeCommenter) return;
+    try { await window.MatrixAuth.removeCommenter(rid, mxid); setCommenters(m => { const n = { ...m }; delete n[mxid]; return n; }); setInviteMsg(mxid + " is now an editor — they can edit and draft directly."); } catch (e) {}
+  };
+  const demoteMember = async (mxid) => {
+    const rid = room && room.roomId; if (!rid || !window.MatrixAuth.setCommenter) return;
+    try { await window.MatrixAuth.setCommenter(rid, mxid, session.user_id); setCommenters(m => ({ ...m, [mxid]: { by: session.user_id, ts: new Date().toISOString() } })); setInviteMsg(mxid + " is now a commenter — comment & suggest only."); } catch (e) {}
   };
   const openRooms = async () => {
     setShowRooms(true);
@@ -2765,8 +2795,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </span>
         </div>
         </div>{/* end LEFT zone */}
-        {/* CENTER zone: the four pivoting views — centered in the bar and fixed
-            in place, so they never shift when the document name changes. */}
+        {/* CENTER zone: the pivoting views — centered in the bar and fixed in
+            place, so they never shift when the document name changes. A commenter
+            doesn't get the editing views; they stay on the read-only Prose. */}
+        {!amCommenter && (
         <div style={{ display: isMobile ? "flex" : "inline-flex", width: isMobile ? "100%" : undefined, border: "1px solid " + NR.line, borderRadius: 8, overflow: "hidden", justifySelf: "center" }}>
           {[["prose", "Prose", "The prose editor"],
             ["grounding", "Grounding", "Every sentence as a row to ground"],
@@ -2776,6 +2808,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
+        )}
         {/* RIGHT zone: autosave status + tools + publish */}
         <div style={{ display: "flex", alignItems: "center", gap: 14, justifySelf: "end", flexWrap: "wrap", minWidth: 0 }}>
         <span className="npj-hide-sm" style={{ display: "inline-flex" }}>
@@ -2791,6 +2824,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <button onClick={openRooms} title="Your projects" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.folder style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Projects</span></button>
           {showRooms && <ProjectsMenu rooms={rooms} onClose={() => setShowRooms(false)} signedIn={!!session} />}
         </div>
+        {!amCommenter && (
         <div style={{ position: "relative" }}>
           <button onClick={() => setInvite(v => !v)} title="Invite a collaborator" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "5px 11px", fontSize: 12.5, textTransform: "uppercase", letterSpacing: ".04em", display: "inline-flex", alignItems: "center", gap: 6 }}><I.plus style={{ fontSize: 13 }} /> <span className="npj-hide-sm">Invite</span></button>
           {invite && (
@@ -2810,6 +2844,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
               </div>
               {inviteMsg && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.4 }}>{inviteMsg}</div>}
+              {/* who's on the project + their tier. New invitees default to
+                  commenter (comment/suggest only); promote to editor here. */}
+              {room && collabs.filter(mx => mx !== (session && session.user_id)).length > 0 && (
+                <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed var(--rule-strong)" }}>
+                  <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>On the project</div>
+                  {collabs.filter(mx => mx !== (session && session.user_id)).map(mx => {
+                    const p = window.NPJ.PEOPLE[mx] || { name: mx.replace(/^@/, "") };
+                    const isCommenter = !!commenters[mx];
+                    return (
+                      <div key={mx} style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 6 }}>
+                        <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={mx}>{p.name}</span>
+                        <span className="np-mono" style={{ fontSize: 9, color: isCommenter ? "var(--review)" : "var(--verified)", border: "1px solid currentColor", padding: "1px 5px", whiteSpace: "nowrap" }}>{isCommenter ? "commenter" : "editor"}</span>
+                        <button onClick={() => isCommenter ? promoteMember(mx) : demoteMember(mx)} title={isCommenter ? "Promote to editor — they can edit & draft directly" : "Step back to commenter — comment & suggest only"}
+                          className="np-mono" style={{ border: "1px solid var(--ink)", background: "transparent", color: "var(--ink)", cursor: "pointer", fontSize: 9, padding: "2px 6px", whiteSpace: "nowrap" }}>
+                          {isCommenter ? "Make editor" : "Make commenter"}
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
               {/* invite someone with no Matrix account — mint one + a single link,
                   and put them in the same project the typed-mxid invite would use */}
               <NewAccountInvite
@@ -2825,11 +2880,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   }
                   return rm.roomId;
                 }}
-                onInvited={(mx) => setCollabs(c => c.includes(mx) ? c : [...c, mx])} />
+                onInvited={(mx) => { setCollabs(c => c.includes(mx) ? c : [...c, mx]); setCommenters(m => m[mx] ? m : { ...m, [mx]: { by: session && session.user_id, ts: new Date().toISOString() } }); }} />
               {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>{room.alias}</div>}
             </div>
           )}
         </div>
+        )}
         <div className="npj-hide-sm" style={{ display: "flex" }}>
           {collabs.slice(0, 4).map((e, i) => { const p = window.NPJ.PEOPLE[e] || { name: e.replace(/^@/, ""), color: "#888" }; return <span key={e + i} title={p.name} style={{ width: 26, height: 26, borderRadius: "50%", background: p.color, color: "#fff", border: "2px solid " + NR.bg, marginLeft: i ? -8 : 0, fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13, display: "inline-flex", alignItems: "center", justifyContent: "center" }}>{(p.name || "?")[0].toUpperCase()}</span>; })}
         </div>
@@ -2843,13 +2899,24 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <button onClick={openPreview} title="Preview — see the piece exactly as it will appear once published" className="np-cond" style={{ background: "transparent", color: NR.text, border: "1px solid " + NR.line, padding: "7px 13px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
           <I.eye style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Preview</span>
         </button>
+        {!amCommenter && (
         <button onClick={() => canPub ? setPublish({ step: 0 }) : null} disabled={!canPub} title={canPub ? (isRepublish ? (isLive ? "Republish — this piece is already live; committing lands an updated version in its event log" : "Republish — this piece is off the site; committing pushes the draft and brings it back live") : "Publish") : "Only an admin or assigned column publisher can publish"} className="np-cond" style={{ background: canPub ? "var(--yellow)" : "transparent", color: canPub ? "var(--ink)" : NR.muted, border: "1.5px solid " + (canPub ? "var(--ink)" : NR.line), padding: "7px 16px", fontSize: 14, textTransform: "uppercase", letterSpacing: ".05em", fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 6, cursor: canPub ? "pointer" : "not-allowed" }}>
           <I.lock style={{ fontSize: 14 }} /> {isRepublish ? "Republish" : "Publish"}
         </button>
+        )}
         </div>{/* end RIGHT zone */}
       </div>
 
-      {/* formatting toolbar — pinned alongside the top bar */}
+      {/* A commenter doesn't get the formatting toolbar — the prose is read-only.
+          In its place, a banner explaining the comment/suggest-only mode. */}
+      {amCommenter ? (
+      <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "8px 12px" : "9px 20px", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 14, color: "var(--review, #7c74de)" }}>✎</span>
+        <span style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, color: NR.text }}>You're a commenter on this project.</span>
+        <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.4 }}>Select words in the draft, then <b>Comment</b> or <b>Suggest edit</b> in the panel — an editor reviews and merges. You can't edit or publish directly.</span>
+      </div>
+      ) : (
+      /* formatting toolbar — pinned alongside the top bar */
       <div className="nr-chrome" style={{ borderBottom: "1px solid " + NR.line, padding: isMobile ? "6px 8px" : "7px 20px", display: "flex", alignItems: "center", gap: 2, flexWrap: "wrap", flexShrink: 0 }}>
         <span className="np-eyebrow npj-hide-sm" style={{ color: NR.muted, marginRight: 6 }}>Format</span>
         <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
@@ -2996,6 +3063,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <span style={{ flex: 1 }} />
         <span className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted }}>select text → format, link, or bind a source — then pin the words in the source</span>
       </div>
+      )}
 
       {/* mobile tab switcher — one panel at a time; the editor node stays mounted so a draft is never dropped */}
       {isMobile && (
@@ -3022,6 +3090,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               path as a drag/drop or paste (NpjMedia.upload → durable URL). */}
           <input ref={mediaPick} type="file" accept="image/*" multiple style={{ display: "none" }}
             onChange={e => { const fs = Array.from(e.target.files || []); if (fs.length) insertImageFiles(fs, null); e.target.value = ""; }} />
+          {!amCommenter && (
           <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
             <button onClick={() => mediaPick.current && mediaPick.current.click()} className="np-cond"
               style={{ flex: 1, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, background: "var(--yellow)", border: "1px solid var(--yellow)", color: "var(--ink)", padding: "7px 8px", fontSize: 11.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>
@@ -3032,6 +3101,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               <I.plus style={{ fontSize: 13 }} /> Slot
             </button>
           </div>
+          )}
           {/* review — every image/embed in the piece; images open the viewer,
               embeds jump to where they sit in the document. */}
           {media.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.5, marginBottom: 4 }}>No media yet. <b>Upload</b> a photo here — or paste / drag one straight onto the page. Everything you add collects in this panel.</div>}
@@ -3087,7 +3157,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={amCommenter ? undefined : onBlockDragOver} onDrop={amCommenter ? undefined : onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* The headline, subtitle and byline are the published article's own
               masthead — rendered on the paper sheet at the reader's scale, so the
               editor opens looking like the page it becomes. They stay explicit
@@ -3095,30 +3165,30 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               they read as the article, not a form. */}
           <div className="nr-sheet">
             <div className="nr-fields">
-              <input id="nr-title-field" aria-label="Headline" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Headline" spellCheck={true}
+              <input id="nr-title-field" aria-label="Headline" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Headline" spellCheck={true} readOnly={amCommenter}
                 className="nr-field-title" style={{ fontSize: isMobile ? 28 : 40 }} />
-              <input id="nr-dek-field" aria-label="Subtitle" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="A subtitle line under the headline" spellCheck={true}
+              <input id="nr-dek-field" aria-label="Subtitle" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="A subtitle line under the headline" spellCheck={true} readOnly={amCommenter}
                 className="nr-field-dek" style={{ fontSize: isMobile ? 17 : 21 }} />
               {/* Byline + editors — the credit line readers see, set here so the
                   publish gate inherits it (and still lets you tweak at publish). */}
               <div className="nr-field-byline" style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <label htmlFor="nr-byline-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Written by</label>
-                  <input id="nr-byline-field" value={byline} onChange={e => setByline(e.target.value)} placeholder="Author name readers see" spellCheck={true}
+                  <input id="nr-byline-field" value={byline} onChange={e => setByline(e.target.value)} placeholder="Author name readers see" spellCheck={true} readOnly={amCommenter}
                     className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
                 </div>
                 <div style={{ flex: "1 1 220px", minWidth: 0 }}>
                   <label htmlFor="nr-editors-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Edited by <span style={{ color: NR.muted, textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>· optional</span></label>
-                  <input id="nr-editors-field" value={editorsField} onChange={e => setEditorsField(e.target.value)} placeholder="Editor name, or @editor:server" spellCheck={false}
+                  <input id="nr-editors-field" value={editorsField} onChange={e => setEditorsField(e.target.value)} placeholder="Editor name, or @editor:server" spellCheck={false} readOnly={amCommenter}
                     className="np-mono" style={{ width: "100%", border: 0, borderBottom: "1px solid " + NR.line, background: "transparent", color: NR.text, fontSize: isMobile ? 13 : 13.5, lineHeight: 1.3, padding: "2px 0 8px", outline: "none" }} />
                 </div>
               </div>
             </div>
-            <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
-              onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
-              onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
-              onPaste={onPaste} onDrop={onDropText}
-              onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
+            <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable={!amCommenter} suppressContentEditableWarning onInput={amCommenter ? undefined : (e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
+              onKeyDown={amCommenter ? undefined : onEditorKeyDown} onFocus={amCommenter ? undefined : ensureParaSep}
+              onMouseOver={amCommenter ? undefined : onBodyOver} onMouseLeave={amCommenter ? undefined : onBodyLeave} onMouseMove={amCommenter ? undefined : onEdMouseMove}
+              onPaste={amCommenter ? undefined : onPaste} onDrop={amCommenter ? undefined : onDropText}
+              onDragStart={amCommenter ? undefined : () => { dragFromSelf.current = true; }} onDragEnd={amCommenter ? undefined : () => { dragFromSelf.current = false; }}
               style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
               dangerouslySetInnerHTML={{ __html: START_DOC }} />
           </div>

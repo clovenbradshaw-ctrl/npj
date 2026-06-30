@@ -73,6 +73,8 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
         try { await window.MatrixAuth.invite(r, acct.mxid); } catch (e) {}
         // record who this guest is for, on the room, for every member to see
         try { await window.MatrixAuth.setGuestName(r, acct.mxid, who, me.user_id); } catch (e) {}
+        // default tier: a commenter — comment + suggest only, until promoted
+        try { if (window.MatrixAuth.setCommenter) await window.MatrixAuth.setCommenter(r, acct.mxid, me.user_id); } catch (e) {}
         onInvited && onInvited(acct.mxid, who);
       }
       const url = window.MatrixAuth.buildInviteLink({ v: 1, hs: acct.domain, u: acct.localpart, p: acct.password, r: r || undefined, rt: roomTitle || undefined, n: who, g: 1, by: me.user_id });
@@ -103,7 +105,7 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
       {!link && (
         <>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.45 }}>
-            Mints a <strong>guest account</strong> on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, confirm their name and set a password — no sign-up. A guest works inside this project only; they can't publish.
+            Mints a <strong>guest account</strong> on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, confirm their name and set a password — no sign-up. They join as a <strong>commenter</strong>: they can comment and suggest edits inside this project, but can't edit or publish directly until you promote them.
           </div>
           <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 4, fontSize: 9.5 }}>Who's this guest?</label>
           <input value={name} onChange={e => { setName(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && create()} placeholder="e.g. Sam Rivera (City Hall source)" className="np-mono"
