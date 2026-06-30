@@ -463,7 +463,7 @@ function FrontCard({ item, template, variant, onOpen }) {
     <button onClick={open} className="np-mono" title="Open the article to see its edit history"
       style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)",
         background: "var(--card)", color: "var(--ink)", padding: "3px 9px", fontSize: 11, cursor: "pointer" }}>
-      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{item.base_sha}{item.versions > 1 ? " · " + item.versions + " versions" : ""}
+      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{item.base_sha}
     </button>
   ) : null;
   // The cover's meta line reads like the article header: the version chip, then the

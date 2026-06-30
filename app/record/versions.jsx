@@ -183,7 +183,7 @@ function VersionBadge({ sha, count, onClick, dark }) {
     <button onClick={onClick} title="View edit history & diffs" className="np-mono"
       style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid " + (dark ? "rgba(255,255,255,.3)" : "var(--ink)"),
         background: dark ? "transparent" : "var(--card)", color: dark ? "#e3ddcc" : "var(--ink)", padding: "3px 9px", fontSize: 11, cursor: "pointer" }}>
-      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{sha || "draft"}{count > 1 ? " · " + count + " versions" : ""}
+      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{sha || "draft"}
     </button>
   );
 }
@@ -320,6 +320,11 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
   if (!list.length) return null;
   const single = list.length < 2;
   const vA = list[a], vB = list[b];
+  // click a version to see ITS edits — the diff from the version right before it
+  // (what the changelog chips on that card summarize). The clicked version is the
+  // newer side ("to"); its predecessor is the older side ("from"). The oldest
+  // version has no predecessor, so it just shows its original snapshot.
+  const viewEdits = (i) => { setB(i); setA(i < list.length - 1 ? i + 1 : i); };
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(8,7,5,.72)", zIndex: 5200, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "6vh 22px" }} className="fade-in">
@@ -331,7 +336,6 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT HISTORY</span>
-          <span className="np-mono" style={{ fontSize: 11, opacity: .7 }}>{list.length} version{list.length !== 1 ? "s" : ""}</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 18 }}><I.x /></button>
         </div>
@@ -367,7 +371,10 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
             {list.map((v, i) => {
               const isFrom = i === a, isTo = i === b;
               return (
-                <div key={v.sha + i} style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
+                <div key={v.sha + i} onClick={() => viewEdits(i)} role="button" tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); viewEdits(i); } }}
+                  title={i < list.length - 1 ? "See this version's edits" : "See the original"}
+                  style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", cursor: "pointer", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
                   <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>⊛ v.{v.sha}{i === 0 ? " · current" : ""}</div>
                   <VersionMeta v={v} />
                   {(v.note || v.op === "INS") && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35 }}>{v.note || "Published"}</div>}
@@ -376,13 +383,13 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
                     {changeChips(list[i + 1], v).map((c, ci) => <Chip key={ci} tone={c.tone}>{c.label}</Chip>)}
                   </div>
                   <div style={{ display: "flex", gap: 5, marginTop: 7 }}>
-                    <button onClick={() => setA(i)} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isFrom ? "var(--ink)" : "transparent", color: isFrom ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>from</button>
-                    <button onClick={() => setB(i)} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isTo ? "var(--ink)" : "transparent", color: isTo ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>to</button>
+                    <button onClick={(e) => { e.stopPropagation(); setA(i); }} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isFrom ? "var(--ink)" : "transparent", color: isFrom ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>from</button>
+                    <button onClick={(e) => { e.stopPropagation(); setB(i); }} className="np-cond" style={{ flex: 1, fontSize: 10.5, padding: "3px", textTransform: "uppercase", letterSpacing: ".04em", border: "1px solid var(--ink)", background: isTo ? "var(--ink)" : "transparent", color: isTo ? "var(--yellow)" : "var(--ink)", cursor: "pointer" }}>to</button>
                   </div>
                   {/* revert the whole document to this version — an editor-only,
                       append-only REC; the current version has nothing to revert to */}
                   {onRevert && canRevert && i !== 0 && v.snapshot && (
-                    <div style={{ marginTop: 6 }}>
+                    <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 6 }}>
                       <RevertControl label="↩ Revert to this" title={"Revert the document to v." + v.sha} busy={reverting === v.sha} onConfirm={() => onRevert(v, {})} />
                     </div>
                   )}
