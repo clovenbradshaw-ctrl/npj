@@ -394,8 +394,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const isMobile = window.useIsMobile();
   const [mTab, setMTab] = useState("write");          // mobile: write | contents | sources
   const [view, setView] = useState("prose");          // prose editor | grounding workspace (grounding / citations / sources) | graph — same draft
-  const [graphText, setGraphText] = useState("");      // plain text fed to the eoreader4 proposition graph (refreshed on entering the Graph view)
-  const [structMode, setStructMode] = useState("nested"); // CONTENTS rail: nested outline (holonic) | graph
   const [activeId, setActiveId] = useState(null);      // heading the reader is currently scrolled into (outline "you are here")
   const [theme, setTheme] = useState(nrTheme);        // light | dark — persisted
   const toggleTheme = () => setTheme(t => { const next = t === "light" ? "dark" : "light"; try { localStorage.setItem(THEME_KEY, next); } catch (e) {} return next; });
@@ -442,8 +440,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // persisted with the draft, NEVER published (stripped at build — Invariant I1).
   const structLog = useRef([]);
   const [structure, setStructure] = useState(() => (window.NpjStructure ? window.NpjStructure.emptyState(draftId) : null));
-  const [structTypes, setStructTypes] = useState(() => (window.NpjStructure ? window.NpjStructure.types.all() : []));
-  const [blankChosen, setBlankChosen] = useState(false);   // dismissed the start-a-post picker
   const reconcileRef = useRef(null);
   const reconcileTimer = useRef(null);
   const [media, setMedia] = useState([]);           // images + embeds in the piece
@@ -579,7 +575,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         if (Array.isArray(d.structure) && window.NpjStructure) {
           structLog.current = d.structure;
           const s0 = window.NpjStructure.fold(d.structure); s0.articleId = draftId; setStructure(s0);
-          if (d.structure.length) setBlankChosen(true);
         }
         setTimeout(scanHeadings, 30); setRev(v => v + 1);
       }
@@ -685,12 +680,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   useEffect(() => { reconcileRef.current = reconcileStructure; });
 
   // pull the author's saved post types in (localStorage + Matrix mirror).
-  useEffect(() => {
-    if (!window.NpjStructure) return;
-    setStructTypes(window.NpjStructure.types.all());
-    Promise.resolve(window.NpjStructure.types.sync()).then(() => setStructTypes(window.NpjStructure.types.all())).catch(() => {});
-  }, [session]);
-
   // ---- explicit Title / Subtitle fields ----
   // The fields are the source of truth; each writes through to the hidden body
   // <h1> / .nr-dek so the publish gate, reader, markdown export and front page
@@ -724,15 +713,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     cont.scrollTop += (er.top - cr.top) - 18;
   };
 
-  // Refresh the text the proposition graph reads. The editor is only editable in
-  // prose view, so a debounced refresh on input keeps the rail's compact graph
-  // live; entering either graph surface (the Graph view, or the rail in graph
-  // mode) refreshes at once. docFor() caches by text, so unchanged prose is free.
-  const graphTimer = useRef(null);
-  const refreshGraphText = useCallback(() => { setGraphText(ed.current ? (ed.current.innerText || "") : ""); }, []);
-  const scheduleGraphText = useCallback(() => { clearTimeout(graphTimer.current); graphTimer.current = setTimeout(refreshGraphText, 700); }, [refreshGraphText]);
-  useEffect(() => { if (view === "graph" || structMode === "graph") refreshGraphText(); }, [view, structMode, refreshGraphText]);
-
   // Outline "you are here": track the heading the reader is currently scrolled
   // into (the last heading above the top of the viewport) and highlight its row.
   useEffect(() => {
@@ -754,68 +734,20 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return () => { cont.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
   }, [toc, view]);
 
-  // Clicking a node/edge in the graph jumps back to where that proposition sits
-  // in the prose: switch to the editor, find the block holding the sentence (or
-  // the entity name), scroll to it and flash it.
-  const jumpToProse = useCallback((info) => {
-    setView("prose");
-    setTimeout(() => {
-      const root = ed.current, cont = scroller.current; if (!root || !cont) return;
-      const needle = String((info && (info.text || info.label)) || "").trim().slice(0, 60).toLowerCase();
-      if (!needle) return;
-      const blocks = Array.from(root.querySelectorAll("h1,h2,h3,p,li,blockquote"));
-      let target = blocks.find(b => (b.innerText || "").toLowerCase().includes(needle));
-      if (!target && info && info.label) { const lb = String(info.label).toLowerCase(); target = blocks.find(b => (b.innerText || "").toLowerCase().includes(lb)); }
-      if (!target) return;
-      const cr = cont.getBoundingClientRect(), er = target.getBoundingClientRect();
-      cont.scrollTop += (er.top - cr.top) - 40;
-      target.classList.add("nr-jump-flash");
-      setTimeout(() => { try { target.classList.remove("nr-jump-flash"); } catch (e) {} }, 1200);
-    }, 50);
-  }, []);
-
-  // the api the structure rail (app/PostStructure.jsx) drives. Every mutation
-  // goes through dispatchStruct → append-only log → fold → (reflow) → persist.
+  // the api the in-document heading-block drag drives, so moving a heading keeps
+  // the append-only structure log in step. Every mutation goes through
+  // dispatchStruct → append-only log → fold → (reflow) → persist.
   const structApi = useMemo(() => {
     const lib = window.NpjStructure; if (!lib) return null;
-    const appliedType = (structure && structure.appliedTypeId)
-      ? (structTypes.find(t => t.id === structure.appliedTypeId) || lib.types.get(structure.appliedTypeId)) : null;
     return {
-      state: structure, types: structTypes, appliedType,
-      hasContent: blankChosen || toc.length > 0 || !!(structure && structure.sections.length),
-      applyType: (typeId) => { const t = lib.types.get(typeId); if (t) { setBlankChosen(true); dispatchStruct(lib.ops.applyType(structure, t), { reflow: true }); } },
-      startBlank: () => { setBlankChosen(true); if (ed.current) ed.current.focus(); },
-      removeType: () => dispatchStruct(lib.ops.removeType(), { reflow: true }),
-      saveType: (name) => { const t = lib.saveFrom(structure, name); lib.types.save(t); setStructTypes(lib.types.all()); dispatchStruct(lib.ops.saveType(structure, t.id)); },
-      addSlot: (slotId) => { const sl = lib.slotById(structure, slotId); if (sl) dispatchStruct(lib.ops.addSlot(structure, sl)); },
-      // "Start →": lay this slot's section into the page so the prompt guides
-      // writing in context. An H2 carrying the slot label (selected, so the first
-      // keystroke replaces it) + a ghost prompt paragraph that publishes nothing
-      // while empty (the .nr-dek mechanism). The section is created bound to this
-      // slot, then reflowed into place; reconcile keeps it bound as you type.
-      startSlot: (slotId) => {
-        const sl = lib.slotById(structure, slotId); if (!sl || !ed.current) return;
-        const label = sl.label || "New section";
-        const evs = lib.ops.createSection(slotId, 1e6, { heading: label });
-        const secId = evs[0] && evs[0].id; if (!secId) return;
-        const h = document.createElement("h2"); h.setAttribute("data-sec", secId); h.textContent = label;
-        const p = document.createElement("p"); p.className = "nr-prompt"; if (sl.prompt) p.setAttribute("data-ph", sl.prompt); p.innerHTML = "<br>";
-        ed.current.appendChild(h); ed.current.appendChild(p);
-        dispatchStruct(evs, { reflow: true });
-        setTimeout(() => {
-          scanHeadings();
-          try { const sel = window.getSelection(); const r = document.createRange(); r.selectNodeContents(h); sel.removeAllRanges(); sel.addRange(r); } catch (e) {}
-          if (h.id) scrollToId(h.id);
-          if (ed.current) ed.current.focus();
-        }, 0);
-      },
+      state: structure,
       moveSection: (id, parent, order) => dispatchStruct(lib.ops.moveSection(id, parent, order), { reflow: true }),
       moveBulk: (ids, parent, order) => dispatchStruct(lib.ops.moveBulk(ids, parent, order), { reflow: true }),
       reorderSlot: (id, order) => dispatchStruct(lib.ops.reorderSlot(id, order), { reflow: true }),
       deleteSection: (id) => dispatchStruct(lib.ops.deleteSection(id)),
       jumpTo: (slug) => { if (isMobile) setMTab("write"); setTimeout(() => scrollToId(slug), isMobile ? 30 : 0); }
     };
-  }, [structure, structTypes, blankChosen, toc.length, dispatchStruct, isMobile]);
+  }, [structure, dispatchStruct, isMobile]);
 
   // ---- in-document block drag (the Google-Docs/Notion grip) ----------------
   // A grip in the page's left gutter lets the author grab any block — paragraph,
@@ -1604,8 +1536,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [htmlMode, setHtmlMode] = useState(false);  // editing the document's raw HTML in the source view
   const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
   const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
-  const [blockMode, setBlockMode] = useState(false); // the building-block editor — the surface between Prose and HTML
-  const [blockHtml, setBlockHtml] = useState("");    // snapshot of the document handed to the block editor
   const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
   const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
   useEffect(() => {
@@ -1748,7 +1678,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const openHtmlSource = () => {
     if (!ed.current) return;
-    setBlockMode(false);
     setHtmlDraft(nrSerializeHtml(ed.current));
     setHtmlMsg(""); setFmtMenu(null); setMenu(null);
     if (scroller.current) scroller.current.scrollTop = 0;
@@ -1766,28 +1695,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     reconcileAfterReplace();
     setHtmlMode(false); setHtmlMsg("");
   };
-  // ---- block mode: the building-block editor (between Prose and HTML) ----
-  // Snapshots the live document, hands it to BlockView as discrete cards, and on
-  // Apply re-parses + runs the same reconcile a restored draft / HTML apply does.
-  const openBlockMode = () => {
-    if (!ed.current) return;
-    setHtmlMode(false); setHtmlMsg("");
-    setBlockHtml(ed.current.innerHTML);
-    setFmtMenu(null); setMenu(null);
-    if (scroller.current) scroller.current.scrollTop = 0;
-    setBlockMode(true);
-  };
-  const closeBlockMode = () => setBlockMode(false);
-  const applyBlockMode = (html) => {
-    const root = ed.current; if (!root) return;
-    root.innerHTML = html;
-    reconcileAfterReplace();
-    setBlockMode(false);
-  };
-  // leaving prose for a grounding/graph surface drops the source/block panels so
-  // they can't shadow another view; the next open re-snapshots the live document
+  // leaving prose for a grounding surface drops the source panel so it can't
+  // shadow another view; the next open re-snapshots the live document
   useEffect(() => { if (view !== "prose" && htmlMode) setHtmlMode(false); }, [view, htmlMode]);
-  useEffect(() => { if (view !== "prose" && blockMode) setBlockMode(false); }, [view, blockMode]);
 
   // Footnote hygiene in the LIVE editor — the DOM mirror of articles.js
   // mergeStrandedFootnotes. A footnote marker references a WORD, so a marker left
@@ -2860,8 +2770,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             ["grounding", "Grounding", "Every sentence as a row to ground"],
             ["citations", "Citations", "The registry of reusable citation records"],
             ["sources", "Sources", "Read the source documents and grab the words that back a claim"],
-            ["definitions", "Definitions", "The piece's glossary — terms a reader may need defined, suggested by eoreader4 and sourced"],
-            ["graph", "Graph", "The document as a graph of its propositions — entities and the relations between them"]].map(([k, label, ti]) => (
+            ["definitions", "Definitions", "The piece's glossary — terms a reader may need defined, suggested by eoreader4 and sourced"]].map(([k, label, ti]) => (
             <button key={k} onClick={() => setView(k)} className="np-cond" title={ti} style={{ flex: isMobile ? 1 : undefined, textAlign: "center", background: view === k ? "var(--yellow)" : "transparent", color: view === k ? "var(--ink)" : NR.text, border: 0, padding: isMobile ? "9px 6px" : "5px 13px", fontSize: 12.5, fontWeight: 700, letterSpacing: ".03em", cursor: "pointer" }}>{label}</button>
           ))}
         </div>
@@ -3068,13 +2977,6 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         </button>
         {view === "prose" && <Sep />}
         {view === "prose" && (
-          <button onMouseDown={e => e.preventDefault()} onClick={() => (blockMode ? closeBlockMode() : openBlockMode())} aria-pressed={blockMode}
-            title={blockMode ? "Close the block editor" : "Edit as building blocks — one block at a time, with granular control over line breaks and citations (no raw HTML)"}
-            className="np-cond" style={{ background: blockMode ? "var(--yellow)" : "transparent", border: 0, color: blockMode ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <I.blocks style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Blocks</span>
-          </button>
-        )}
-        {view === "prose" && (
           <button onMouseDown={e => e.preventDefault()} onClick={() => (htmlMode ? closeHtmlSource() : openHtmlSource())} aria-pressed={htmlMode}
             title={htmlMode ? "Close the HTML source view" : "Edit the underlying HTML — unstick a block, retag a heading, clear broken markup"}
             className="np-cond" style={{ background: htmlMode ? "var(--yellow)" : "transparent", border: 0, color: htmlMode ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 13, fontWeight: 700, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -3183,7 +3085,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             banner, headline and body as one sheet */}
         {/* the editor stays MOUNTED even in the workspace views (display:none) so its
             DOM, ranges and autosave stay valid — the workspace mutates the same nodes */}
-        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: (htmlMode || blockMode) ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
+        <div className="np-scroll" ref={scroller} onMouseLeave={clearGrip} onDragOver={onBlockDragOver} onDrop={onBlockDrop} style={{ position: "relative", display: (view !== "prose") || (isMobile && mTab !== "write") ? "none" : "block", flex: isMobile ? 1 : undefined, overflowY: htmlMode ? "hidden" : "auto", padding: isMobile ? "14px 10px 40px" : "26px 32px 60px", background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0 }}>
           {/* explicit Title + Subtitle fields — not loose prose in the canvas */}
           <div className="nr-fields" style={{ maxWidth: 800, margin: "0 auto 18px" }}>
             <label htmlFor="nr-title-field" className="np-eyebrow" style={{ display: "block", color: NR.muted, marginBottom: 3 }}>Title</label>
@@ -3207,12 +3109,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               </div>
             </div>
           </div>
-          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); if (view === "graph" || structMode === "graph") scheduleGraphText(); }} onClick={onBodyClick}
+          <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable suppressContentEditableWarning onInput={(e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
             onKeyDown={onEditorKeyDown} onFocus={ensureParaSep}
             onMouseOver={onBodyOver} onMouseLeave={onBodyLeave} onMouseMove={onEdMouseMove}
             onPaste={onPaste} onDrop={onDropText}
             onDragStart={() => { dragFromSelf.current = true; }} onDragEnd={() => { dragFromSelf.current = false; }}
-            style={{ color: NR.text, outline: "none", display: (htmlMode || blockMode) ? "none" : undefined }}
+            style={{ color: NR.text, outline: "none", display: htmlMode ? "none" : undefined }}
             dangerouslySetInnerHTML={{ __html: START_DOC }} />
           {/* the Google-Docs grip + the live insertion line. Editing chrome only —
               they live OUTSIDE the contentEditable, so they never serialize. */}
@@ -3270,21 +3172,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 className="np-mono" style={{ flex: 1, minHeight: 0, width: "100%", resize: "none", border: 0, outline: "none", background: NR.field, color: NR.text, padding: "16px 18px", fontSize: 12.5, lineHeight: 1.6, whiteSpace: "pre", overflow: "auto" }} />
             </div>
           )}
-          {/* the building-block editor — the surface between Prose (WYSIWYG) and
-              the HTML source. Fills the canvas; the editable stays mounted behind
-              it (hidden) so autosave/DOM survive, exactly like the HTML view. */}
-          {blockMode && window.BlockView && (
-            <window.BlockView html={blockHtml} NR={NR} isMobile={isMobile}
-              onApply={applyBlockMode} onCancel={closeBlockMode} />
-          )}
         </div>
         {view !== "prose" && !(isMobile && mTab !== "write") && (
           <div style={{ flex: isMobile ? 1 : undefined, background: NR.bg, borderRight: isMobile ? 0 : "1.5px solid " + NR.line, minHeight: 0, overflow: "hidden" }}>
-            {view === "graph"
-              ? (window.GraphView
-                  ? <window.GraphView text={graphText} onSelectSentence={jumpToProse} NR={NR} isMobile={isMobile} />
-                  : null)
-              : view === "definitions"
+            {view === "definitions"
               ? (window.DefinitionsView
                   ? <window.DefinitionsView NR={NR} definitions={definitions} onChange={setDefinitions}
                       getBodyText={() => ed.current ? (ed.current.innerText || "") : ""}

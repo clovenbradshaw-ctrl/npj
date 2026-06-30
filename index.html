@@ -161,12 +161,11 @@
 <script src="app/grounding/citey-states.js"></script>
 <script src="app/grounding/CiteyBrain.js"></script>
 <script src="app/grounding/CiteyVoice.js"></script>
-<!-- proposition graph: eoreader4's model-free reading core, vendored + bridged
-     (window.EOReader4), the prose→doc adapter (window.NpjPropGraph) and the SVG
-     node-link renderer (window.NpjGraphRender). The bridge is an ES module that
-     publishes window.EOReader4 after load — consumers guard on its presence. -->
+<!-- eoreader4's model-free reading core, vendored + bridged (window.EOReader4),
+     plus the prose→doc adapter (window.NpjPropGraph) the Definitions view reads
+     terms from. The bridge is an ES module that publishes window.EOReader4 after
+     load — consumers guard on its presence. -->
 <script src="app/graph/prop-graph.js"></script>
-<script src="app/graph/graph-render.js"></script>
 <script type="module" src="app/graph/eoreader4-bridge.js"></script>
 <!-- layout publish client (ES module → window.NpjLayout) -->
 <script type="module" src="backend/npj-layout.client.js"></script>

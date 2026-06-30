@@ -20,7 +20,7 @@ Those two orderings are the wiring — keep them in sync with any move here.
 | Holon | Public surface | What lives here |
 |---|---|---|
 | **`core/`** | `window.NPJ`, void taxonomy | `data.js`, `void-kinds.js` |
-| **`graph/`** | `EOReader4`, `NpjPropGraph`, `NpjGraphRender` | `eoreader4-bridge.js` (ES-module seam to vendored eoreader4), `prop-graph.js`, `graph-render.js`, `GraphView.jsx` |
+| **`graph/`** | `EOReader4`, `NpjPropGraph` (the model-free reading core the Definitions view draws terms from) | `eoreader4-bridge.js` (ES-module seam to vendored eoreader4), `prop-graph.js` |
 | **`record/`** | `NpjArticles`, `NpjStructure`, `NpjComposition`, `NpjSentences` | `articles.js`, `structure.js`, `composition.js`, `sentences.js`, `versions.jsx` |
 | **`sources/`** | `NpjSources`, `NpjCitations`, `NpjSourceView`, `NpjArchiveCDN`, `NpjSourceTitle` | `sources.js`, `citations.js`, `source-view.js`, `source-title.js`, `archive-sources.js`, `archive-cdn.js` |
 | **`grounding/`** | `CiteyBrain`, `CiteyAssist`, `NpjDefinitions` | `CiteyBrain.js`, `CiteyVoice.js`, `citey-assist.js`, `citey-states.js`, `evidence-needs.js`, `definitions.js`, `Citey.jsx` |
@@ -29,7 +29,7 @@ Those two orderings are the wiring — keep them in sync with any move here.
 | **`identity/`** | `MatrixAuth`, `NpjProfiles`, `NpjDrafts`, `PasskeyVault`, `NpjE2EE` | `matrix-auth.js`, `profiles.js`, `passkey-vault.js`, `drafts.js`, `e2ee.js` (Web Crypto group sessions) |
 | **`feedback/`** | `NpjFeedback`, `NpjCollab` | `feedback.js`, `collab.js` (e2ee comments/chat/suggested edits) |
 | **`export/`** | `NpjSubstack`, `NpjFactCheck` | `substack-export.js`, `SubstackExport.jsx`, `fact-check-export.js`, `FactCheckExport.jsx` |
-| **`editor/`** | the newsroom (mounts core/record/grounding) | `Newsroom.jsx`, `GroundingWorkspace.jsx`, `PostStructure.jsx`, `DefinitionsRail.jsx`, `SourcePicker.jsx`, `SourceViewer.jsx`, `SourceAdapter.jsx`, `SourceExplorer.jsx`, `InterviewSource.jsx` |
+| **`editor/`** | the newsroom (mounts core/record/grounding) | `Newsroom.jsx`, `GroundingWorkspace.jsx`, `DefinitionsRail.jsx`, `SourcePicker.jsx`, `SourceViewer.jsx`, `SourceAdapter.jsx`, `SourceExplorer.jsx`, `InterviewSource.jsx` |
 | **`reader/`** | the published-record reader + its rails | `ArticleRead.jsx`, `ArticleEdit.jsx`, `FrontPage.jsx`, `Contributors.jsx`, `Standards.jsx`, `SuggestionRail.jsx`, `CollabRail.jsx` |
 | **`admin/`** | `LayoutCtx` | `AdminEditor.jsx`, `layout.jsx`, `Documents.jsx`, `Data.jsx`, `Entities.jsx`, `Submit.jsx`, `Invite.jsx` |
 | **`ui/`** | shared kit (icons, hooks) | `shared.jsx` |
