@@ -1324,8 +1324,9 @@ function ArticleRead(props) {
       <div style={{ paddingTop: 14 }}>
         {/* share link opens the reader; the wayback action targets the
             committed EO log — the document's version folder on GitHub (or the
-            raw file, for a legacy single-file log) */}
-        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={`https://web.archive.org/web/${window.npjArticleLogUrl(A)}`} title={A.headline} />
+            raw file, for a legacy single-file log). Pass the bare log URL;
+            ShareBar resolves it to a live snapshot or captures one. */}
+        <ShareBar url={window.npjArticleUrl(A.slug)} archiveUrl={window.npjArticleLogUrl(A)} title={A.headline} />
       </div>
       {tocItems.length >= 2 && (
         <nav style={{ marginTop: 18, border: "1.5px solid var(--ink)", background: "var(--card)" }}>

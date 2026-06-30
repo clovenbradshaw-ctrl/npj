@@ -45,6 +45,7 @@ const I = {
   moon:    phIcon("moon"),
   link:    phIcon("link-simple"),
   copy:    phIcon("copy"),
+  share:   phIcon("share-network"),
   download: phIcon("download-simple"),
   /* editor toolbar */
   undo:    phIcon("arrow-counter-clockwise"),
@@ -629,14 +630,22 @@ function DraftStatusPill({ id, signedIn, user, what = "text, title and tags", st
   );
 }
 
-/* ---------- share bar: archive.org permalink + basic socials ---------- */
+/* ---------- share bar: archive.org permalink + basic socials ----------
+   Endpoints follow each platform's current published intent docs (2026):
+   X uses x.com/intent/tweet (the canonical host since the rebrand — the old
+   twitter.com host still 30x-redirects, but link to the live one); Bluesky
+   uses the official bsky.app/intent/compose; Facebook/Reddit/LinkedIn/mailto
+   are the documented sharer endpoints. Where the OS supports it we lead with
+   the native Web Share API (navigator.share) and keep the per-network links as
+   the universal fallback — progressive enhancement, not a replacement. */
 function ShareBar({ url, title, archiveUrl, dark = false }) {
   const [copied, setCopied] = useState(null);
+  const [arching, setArching] = useState(false);
   const u = encodeURIComponent(url || "");
   const au = encodeURIComponent(archiveUrl || url || "");
   const t = encodeURIComponent(title || "");
   const links = [
-    ["X", `https://twitter.com/intent/tweet?url=${u}&text=${t}`],
+    ["X", `https://x.com/intent/tweet?text=${t}&url=${u}`],
     ["Bluesky", `https://bsky.app/intent/compose?text=${t}%20${u}`],
     ["Facebook", `https://www.facebook.com/sharer/sharer.php?u=${u}`],
     ["Reddit", `https://www.reddit.com/submit?url=${u}&title=${t}`],
@@ -648,18 +657,60 @@ function ShareBar({ url, title, archiveUrl, dark = false }) {
   const copy = (text, key) => { navigator.clipboard && navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(null), 1400); };
   const pill = { fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13, textTransform: "uppercase", letterSpacing: ".04em",
     border: "1.5px solid " + line, color: fg, background: "transparent", padding: "5px 11px", textDecoration: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5, whiteSpace: "nowrap" };
+
+  // The Wayback target (the committed EO log, or the page itself if no log was
+  // passed). Save Page Now is the no-JS default href: it always resolves — it
+  // shows the latest capture or makes a fresh one — so the link is never dead
+  // even before anything has been archived. (The old `/web/<url>` form 404s
+  // until a snapshot exists.)
+  const archiveTarget = archiveUrl || url || "";
+  const saveUrl = "https://web.archive.org/save/" + archiveTarget;
+  // Enhancement: prefer an existing snapshot when there is one (instant view,
+  // no re-crawl), and only fall through to Save Page Now when there isn't.
+  // archive.org's availability API is CORS-open, so this runs straight from the
+  // browser; any failure just lands on the save URL the href already points to.
+  const openArchive = (e) => {
+    if (!archiveTarget) return;
+    e.preventDefault();
+    setArching(true);
+    // open synchronously (inside the click) so the popup blocker allows it; we
+    // null `opener` ourselves rather than passing "noopener", which would make
+    // window.open return null and lose the handle we need to navigate.
+    const win = window.open("", "_blank");
+    if (win) try { win.opener = null; } catch (e) {}
+    const go = (href) => { setArching(false); if (win) { win.location = href; } else { window.open(href, "_blank", "noopener"); } };
+    fetch("https://archive.org/wayback/available?url=" + encodeURIComponent(archiveTarget))
+      .then(r => r.json())
+      .then(d => {
+        const snap = d && d.archived_snapshots && d.archived_snapshots.closest;
+        go(snap && snap.available && snap.url ? snap.url.replace(/^http:/, "https:") : saveUrl);
+      })
+      .catch(() => go(saveUrl));
+  };
+
+  const canNativeShare = typeof navigator !== "undefined" && typeof navigator.share === "function";
+  const nativeShare = () => { try { navigator.share({ title: title || document.title, text: title || "", url: url || location.href }).catch(() => {}); } catch (e) {} };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: dark ? "rgba(216,211,196,.7)" : "var(--ink-soft)" }}>Permanent link</span>
-        {/* a real wayback action (view or trigger a capture), not a copied string */}
-        <a href={archiveUrl} target="_blank" rel="noopener" title="Open this page on archive.org" style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)" }}>
-          <I.archive style={{ fontSize: 14 }} /> archive.org snapshot
+        {/* a real wayback action (view the snapshot, or create one), not a copied string */}
+        <a href={saveUrl} onClick={openArchive} target="_blank" rel="noopener" title="View this page on archive.org, or capture it now if it isn't archived yet"
+          style={{ ...pill, background: dark ? "rgba(255,236,1,.12)" : "var(--yellow)", borderColor: dark ? "var(--yellow)" : "var(--ink)", color: dark ? "var(--yellow)" : "var(--ink)", opacity: arching ? .6 : 1, pointerEvents: arching ? "none" : "auto" }}>
+          <I.archive style={{ fontSize: 14 }} /> {arching ? "Opening…" : "archive.org snapshot"}
         </a>
-        <button onClick={() => copy(url, "url")} style={pill}>{copied === "url" ? "Copied!" : <React.Fragment><I.ext style={{ fontSize: 13 }} /> Copy link</React.Fragment>}</button>
+        <button onClick={() => copy(url, "url")} style={pill}>{copied === "url" ? "Copied!" : <React.Fragment><I.link style={{ fontSize: 13 }} /> Copy link</React.Fragment>}</button>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
         <span className="np-eyebrow" style={{ color: dark ? "rgba(216,211,196,.7)" : "var(--ink-soft)" }}>Share</span>
+        {canNativeShare && (
+          <button onClick={nativeShare} title="Share via your device" style={pill}
+            onMouseEnter={(e) => { e.currentTarget.style.background = dark ? "rgba(255,255,255,.1)" : "var(--ink)"; e.currentTarget.style.color = dark ? "#fff" : "var(--yellow)"; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = fg; }}>
+            <I.share style={{ fontSize: 13 }} /> Share…
+          </button>
+        )}
         {links.map(([label, href]) => (
           <a key={label} href={href} target="_blank" rel="noopener" style={pill}
             onMouseEnter={(e) => { e.currentTarget.style.background = dark ? "rgba(255,255,255,.1)" : "var(--ink)"; e.currentTarget.style.color = dark ? "#fff" : "var(--yellow)"; }}
