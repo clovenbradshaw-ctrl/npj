@@ -1013,8 +1013,46 @@ function ArticleRead(props) {
   // render tokens for a paragraph: plain strings, style tokens ({t}) and
   // source-bound claims ({c, src, id}) — the EO log's full inline vocabulary
   const ent = activeEntity ? activeEntity.name : null;
+  // Inline definitions: a lookup of every defined term's surface forms (the term
+  // + its acronym), longest-first, so the first time each appears in the prose we
+  // mark it. `defSeen` resets every render, so the mark lands once per term.
+  const defLookup = (() => {
+    const D = window.NpjDefinitions;
+    const list = (D ? D.normList(A.definitions) : (A.definitions || []))
+      .map(e => Object.assign({}, e, { defs: (e && Array.isArray(e.defs) ? e.defs : []).filter(x => x && x.text) }))
+      .filter(e => e && e.term && e.defs.length);
+    if (!list.length) return null;
+    const byForm = {}, forms = [];
+    list.forEach(e => [e.term, e.acronym].filter(Boolean).forEach(f => {
+      const key = String(f).toLowerCase().trim();
+      if (key && !byForm[key]) { byForm[key] = e; forms.push(f); }
+    }));
+    if (!forms.length) return null;
+    forms.sort((a, b) => b.length - a.length);
+    const esc = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return { byForm, re: new RegExp("\\b(" + forms.map(esc).join("|") + ")\\b", "g") };
+  })();
+  const defSeen = {};
+  const markDefs = (str, keyPrefix) => {
+    if (!defLookup) return str;
+    const s = String(str); defLookup.re.lastIndex = 0;
+    const out = []; let last = 0, m, n = 0;
+    while ((m = defLookup.re.exec(s)) !== null) {
+      const form = m[1], entry = defLookup.byForm[form.toLowerCase()];
+      if (!entry) continue;
+      const tk = entry.termKey || form.toLowerCase();
+      if (defSeen[tk]) continue;          // only the first mention is marked
+      defSeen[tk] = 1;
+      if (m.index > last) out.push(s.slice(last, m.index));
+      out.push(<DefTermMark key={(keyPrefix || "") + "d" + (n++)} term={form} entry={entry} />);
+      last = m.index + form.length;
+    }
+    if (!n) return str;
+    if (last < s.length) out.push(s.slice(last));
+    return out;
+  };
   const renderTokens = (tokens) => (tokens || []).map((t, i) => {
-    if (typeof t === "string") return <React.Fragment key={i}>{ent ? markEntities(t, ent, "p" + i) : t}</React.Fragment>;
+    if (typeof t === "string") return <React.Fragment key={i}>{ent ? markEntities(t, ent, "p" + i) : markDefs(t, "p" + i)}</React.Fragment>;
     if (t && t.t) {
       if (t.t === "br") return <br key={i} />;
       if (t.t === "strong") return <strong key={i}>{t.text}</strong>;
@@ -1775,6 +1813,29 @@ function DefSourceLine({ source }) {
       {source.outlet && <span>· {source.outlet}</span>}
       {source.preserved && <span>· preserved {source.preserved}</span>}
     </div>
+  );
+}
+
+// An inline definition mark: a defined term wears a subtle dotted underline in
+// the prose, and hovering / focusing it floats up its first sourced definition
+// (a CSS popover — no state). The full glossary still rides the DEFINITIONS
+// footer; this just makes a defined term legible where the reader meets it.
+function DefTermMark({ term, entry }) {
+  const d0 = (entry.defs && entry.defs[0]) || null;
+  const more = (entry.defs || []).length - 1;
+  if (!d0) return term;
+  const jump = () => { const el = document.getElementById("article-definitions"); if (el) el.scrollIntoView({ behavior: "smooth", block: "start" }); };
+  return (
+    <span className="def-term" tabIndex={0} role="button" aria-label={"Definition of " + (entry.term || term)} onClick={jump}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); jump(); } }}>
+      {term}
+      <span className="def-pop" role="tooltip" onClick={(e) => e.stopPropagation()}>
+        <span className="def-pop-term">{entry.term || term}{entry.acronym ? " (" + entry.acronym + ")" : ""}</span>
+        <span className="def-pop-text">{d0.text}</span>
+        <DefSourceLine source={d0.source} />
+        {more > 0 ? <span className="def-pop-more">+{more} more definition{more > 1 ? "s" : ""} · see Definitions ↓</span> : null}
+      </span>
+    </span>
   );
 }
 

@@ -24,6 +24,7 @@
   const PERM_EVENT = "press.npj.permissions";          // state event type holding { roles }
   const APP_ROOM_TYPE = "press.npj.room";              // state event tagging a room as one of OURS
   const GUEST_STATE = "press.npj.guests";              // state event: { guests: { mxid → {name,by,ts} } }
+  const COMMENTER_STATE = "press.npj.commenters";      // state event: { commenters: { mxid → {by,ts} } }
   const APP_DOC_TYPE = "press.npj.doc";                // state event per shared document: { mxc, title, updated, by, words, deleted }
   const LS_KEY = "npj_matrix_session_v1";               // localStorage → survives tab close & refresh
 
@@ -358,6 +359,40 @@
     try {
       await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(GUEST_STATE) + "/", { method: "PUT", token: session.access_token, body: { guests } });
     } catch (e) { /* labelling is best-effort; never block the invite on it */ }
+  }
+
+  /* ---- commenters: a project member invited with comment/suggest-only access ----
+     The Google-Docs default for an invitee. Membership still IS the credential to
+     reach the room, but a member listed here works the draft like a Google-Docs
+     commenter — comments + suggested edits, no direct edit or publish — until an
+     editor promotes them. One state event holds the whole { mxid → {by,ts} } map
+     (read-modify-write; a small newsroom won't race on it). */
+  async function readCommenters(roomId) {
+    if (!session || !roomId) return {};
+    try {
+      const st = await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(COMMENTER_STATE) + "/", { token: session.access_token });
+      return (st && st.commenters) || {};
+    } catch (e) { return {}; }
+  }
+  async function writeCommenters(roomId, commenters) {
+    if (!session || !roomId) return;
+    try {
+      await api(session.base_url, "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/state/" + encodeURIComponent(COMMENTER_STATE) + "/", { method: "PUT", token: session.access_token, body: { commenters: commenters || {} } });
+    } catch (e) { /* best-effort; never block the invite/promotion on it */ }
+  }
+  // Mark a member comment-only (the invite default).
+  async function setCommenter(roomId, mxid, by) {
+    const id = parseMxid(mxid); if (!id) return;
+    const commenters = { ...(await readCommenters(roomId)), [id.mxid]: { by: by || session.user_id, ts: new Date().toISOString() } };
+    await writeCommenters(roomId, commenters);
+  }
+  // Promote a commenter to full editor — just drop them from the map.
+  async function removeCommenter(roomId, mxid) {
+    const id = parseMxid(mxid); if (!id) return;
+    const commenters = { ...(await readCommenters(roomId)) };
+    if (!commenters[id.mxid]) return;
+    delete commenters[id.mxid];
+    await writeCommenters(roomId, commenters);
   }
 
   /* ---- public profile (displayname + avatar) ----
@@ -735,6 +770,8 @@
     // room + workspace recovery (used by the Newsroom; previously omitted from the
     // export, which made "Rooms", invites and draft recovery throw at runtime)
     joinedRooms, roomMembers, setGuestName, listDrafts, registerDraft, createDraftRoom, getAccountData, setAccountData, onChange,
+    // comment/suggest-only invitees (the Google-Docs default tier)
+    readCommenters, setCommenter, removeCommenter,
     // shared project documents (the draft lives in the room, not just the account)
     putRoomDoc, deleteRoomDoc, getRoomDocs, getRoomDocContent, ensureDocPower
   };

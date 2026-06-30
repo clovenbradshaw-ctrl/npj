@@ -563,6 +563,33 @@ a { color: inherit; }
   color: inherit;
 }
 
+/* ── inline definitions ───────────────────────────────────────────────────────
+   A defined term wears a quiet dotted underline in the prose; hover or focus
+   floats up its first sourced definition. Distinct from the yellow claim
+   highlight and the entity mark — a hairline cue that there's a definition to
+   read, not a source to audit. The full glossary still rides the footer. */
+.def-term {
+  position: relative;
+  cursor: help;
+  border-bottom: 1px dotted var(--ink-soft, #595139);
+  text-underline-offset: 2px;
+}
+.def-term:hover, .def-term:focus-visible { background: rgba(255,236,1,.16); outline: none; border-bottom-style: solid; }
+.def-pop {
+  position: absolute; left: 0; top: calc(100% + 7px); z-index: 45;
+  width: max-content; max-width: min(320px, 78vw);
+  background: var(--card); color: var(--ink);
+  border: 1.5px solid var(--ink); box-shadow: 4px 4px 0 rgba(22,20,13,.16);
+  padding: 9px 11px; display: none;
+  font-family: var(--serif); font-size: 14px; font-style: normal; line-height: 1.45;
+  white-space: normal; text-align: left; cursor: auto;
+}
+.def-term:hover .def-pop, .def-term:focus .def-pop, .def-term:focus-within .def-pop { display: block; }
+.def-pop-term { display: block; font-family: var(--cond); font-weight: 700; font-size: 13px; letter-spacing: .01em; margin-bottom: 3px; }
+.def-pop-text { display: block; }
+.def-pop-more { display: block; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); margin-top: 6px; }
+@media (max-width: 760px) { .def-pop { position: fixed; left: 12px; right: 12px; width: auto; max-width: none; } }
+
 /* newsroom (private) inverts the palette — themeable. Dark is the default;
    adding .nr-light on the newsroom root flips the whole editor to a paper
    scheme. Every piece of newsroom chrome reads these vars, so the theme
@@ -622,23 +649,28 @@ a { color: inherit; }
    the dense toolbar and never let a slow font swap collapse their box */
 .newsroom i[class*="ph-"] { line-height: 1; }
 
-/* the document page — the draft renders as a bounded sheet centered on the
-   canvas, so the document border and the headline read as one artifact:
-   banner flush at the top of the page, headline directly beneath it. */
-.nr-page {
-  --page-pad: 52px;
-  --page-pad-top: 36px;
+/* the document sheet — in the editor the draft renders as a bounded paper sheet
+   centered on the canvas, carrying its own masthead (the Title/Subtitle/byline
+   fields) above the body. The masthead and the body share one sheet at the
+   reader's measure and type scale, so the editor opens looking like the page it
+   becomes — closing the daylight between writing and the published article. */
+.nr-sheet {
   max-width: 800px;
   margin: 0 auto;
-  min-height: 70vh;
   background: var(--nr-page);
   border: 1.5px solid var(--nr-line-strong);
   box-shadow: var(--nr-page-shadow);
+}
+.nr-page {
+  --page-pad: 52px;
+  --page-pad-top: 18px;
+  min-height: 58vh;
+  background: transparent;
   padding: var(--page-pad-top) var(--page-pad) 72px;
 }
-/* banner bleeds to the page border (kills the stray floating outline) */
+/* banner bleeds to the sheet edge, but no longer pulls up under the masthead */
 .md-preview figure.nr-banner { margin: 0 calc(-1 * var(--page-pad, 0px)) 26px; }
-.nr-page > figure.nr-banner:first-child { margin-top: calc(-1 * var(--page-pad-top)); }
+.nr-sheet .nr-page > figure.nr-banner:first-child { margin-top: 4px; }
 /* body prose is justified by default; per-block alignment from the toolbar's
    align menu (incl. Select-all → Justify) sets an inline text-align that wins. */
 .nr-page p, .nr-page li { text-align: justify; }
@@ -653,14 +685,26 @@ a { color: inherit; }
 .nr-page .nr-dek:empty::before,
 .nr-page .nr-dek:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); pointer-events: none; }
 
-/* The headline + dek are now filled in via the explicit Title/Subtitle fields
-   above the sheet; the in-canvas nodes stay (the publish pipeline reads them)
+/* The headline + dek are filled via the explicit Title/Subtitle fields in the
+   sheet's masthead; the in-canvas nodes stay (the publish pipeline reads them)
    but are hidden so the canvas holds body prose only. */
 .md-preview.nr-fielded > h1:first-of-type,
 .md-preview.nr-fielded > .nr-dek { display: none; }
-/* the Title/Subtitle field group — readable placeholders + a visible focus ring */
+
+/* ── the masthead: Title / Subtitle / byline, on the paper sheet ──────────────
+   Padded to the body's text column so the headline sits exactly over the prose
+   that follows, and scaled to the reader's own header (display headline, italic
+   serif dek) so what you write reads like what publishes. */
+.nr-fields { padding: 34px 52px 0; }
+.nr-field-title { display: block; width: 100%; border: 0; background: transparent; color: var(--nr-text);
+  font-family: var(--display); font-weight: 400; line-height: 1.02; letter-spacing: -.01em; padding: 0; margin: 0 0 14px; outline: none; }
+.nr-field-dek { display: block; width: 100%; border: 0; background: transparent; color: var(--nr-soft);
+  font-family: var(--serif); font-style: italic; line-height: 1.32; padding: 0; margin: 0 0 18px; outline: none; }
+.nr-field-byline { padding-top: 14px; border-top: 1px solid var(--nr-line); }
+/* readable placeholders + a visible focus ring (the masthead inputs are
+   borderless, so the ring is the only focus cue) */
 .nr-fields input::placeholder { color: var(--nr-muted); opacity: 1; }
-.nr-fields input:focus { border-bottom-color: var(--nr-line-strong); }
+.nr-field-byline input:focus { border-bottom-color: var(--nr-line-strong); }
 .nr-fields input:focus-visible { outline: 2px solid var(--yellow); outline-offset: 3px; }
 /* the drop-slot's shadow-DOM colors are black-on-black in the dark room —
    re-skin its exposed parts to the theme */
@@ -668,7 +712,8 @@ a { color: inherit; }
 .newsroom image-slot::part(ring) { border-color: var(--nr-line-strong); }
 .newsroom image-slot::part(empty) { color: var(--nr-muted); }
 @media (max-width: 760px) {
-  .nr-page { --page-pad: 18px; --page-pad-top: 18px; padding-bottom: 44px; min-height: 60vh; }
+  .nr-page { --page-pad: 18px; --page-pad-top: 12px; padding-bottom: 44px; min-height: 50vh; }
+  .nr-fields { padding: 22px 18px 0; }
 }
 
 /* ---- in-document block drag (the Google-Docs grip) ----
@@ -866,32 +911,6 @@ a { color: inherit; }
 }
 .newsroom.nr-light .md-preview ol.nr-fnotes { border-top-color: var(--rule, rgba(22,20,13,.18)); }
 
-/* ============================ block editor =============================
-   The building-block surface (BlockView.jsx) — the third editor view, between
-   the Prose canvas and the HTML source. Each block is its own small md-preview
-   editor, so the citation highlight/marker styling above is reused; the rules
-   here size each block by type and make every citation marker VISIBLE inline
-   (unlike Prose, which hides the number) so the author can see exactly where a
-   marker sits relative to a line break and control it. */
-.nr-blk-card { transition: border-color .12s; }
-.nr-blk-card:hover { border-color: var(--nr-line-strong, rgba(255,255,255,.28)); }
-.nr-blk-ed { font-family: var(--serif); font-size: 16px; line-height: 1.6; }
-.nr-blk-ed:focus { box-shadow: inset 0 0 0 2px rgba(255,236,1,.25); border-radius: 6px; }
-.nr-blk-ed.is-h2 { font-family: var(--cond); font-weight: 700; font-size: 23px; line-height: 1.12; }
-.nr-blk-ed.is-h3 { font-family: var(--cond); font-weight: 700; font-size: 18px; }
-.nr-blk-ed.is-quote { border-left: 3px solid var(--yellow); padding-left: 16px !important; font-family: var(--quote); font-weight: 300; font-size: 20px; line-height: 1.45; color: var(--nr-quote, #cfc8b6); }
-.nr-blk-ed.is-list { padding-left: 30px !important; }
-/* show the citation marker inline in the block editor (Prose hides it) */
-.nr-blk-ed .md-cite:not([data-fn]) { display: inline !important; }
-/* the in-block <br> the author inserts — a faint ↵ so a line break is visible */
-.nr-blk-ed br::after { content: "↵"; color: var(--nr-muted, #8c8676); opacity: .45; font-size: .8em; }
-/* flash a marker when its chip is clicked, to locate it in the block */
-.nr-blk-flash { outline: 2px solid var(--yellow); outline-offset: 1px; border-radius: 2px; }
-.nr-blk-chip:hover { border-color: var(--nr-line-strong, rgba(255,255,255,.3)) !important; }
-.nr-blk-add { display: inline-flex; align-items: center; gap: 5px; margin: -4px 0 0 10px; background: transparent; border: 0; color: var(--nr-muted, #8c8676); font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; cursor: pointer; padding: 4px 6px 10px; }
-.nr-blk-add:hover { color: var(--yellow); }
-.newsroom.nr-light .nr-blk-add:hover { color: var(--ink); }
-
 /* composer widgets dropped into the newsroom editor */
 .md-preview .cmp-widget { border-color: var(--nr-line-strong, rgba(255,255,255,.3)); background: var(--nr-code-bg, rgba(255,255,255,.04)); margin: 0 0 13px; }
 .md-preview .cmp-widget-h .np-mono { color: var(--yellow); }
@@ -1013,62 +1032,6 @@ a { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   [data-citey-anim] *, [data-citey-anim] { animation: none !important; transition: none !important; }
 }
-
-/* ── Graph view (window.GraphView / NpjGraphRender) ───────────────────────────
-   The document read into an eoreader4 proposition graph: entities as nodes
-   (sized by sightings), subject-verb-object relations as edges. Themed off the
-   newsroom --nr-* palette so it flips with light/dark like everything else. */
-.graph-view, .graph-wrap { height: 100%; }
-.graph-wrap { display: flex; flex-direction: column; min-height: 0; position: relative; }
-.graph-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--nr-line); flex: 0 0 auto; }
-.graph-bar .graph-cursor { flex: 1; min-width: 60px; accent-color: var(--yellow); }
-.graph-bar button { font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
-  background: transparent; color: var(--nr-soft); border: 1px solid var(--nr-line); padding: 3px 8px; cursor: pointer; }
-.graph-bar button:hover { color: var(--nr-text); border-color: var(--nr-soft); }
-.graph-readout { font-family: var(--mono); font-size: 10.5px; color: var(--nr-muted); min-width: 100px; }
-.graph-svg { flex: 1; width: 100%; min-height: 0; display: block; touch-action: none; cursor: grab; }
-.graph-svg.panning { cursor: grabbing; }
-
-/* zoom / fit controls, floated over the graph (always available, bar or not) */
-.graph-zoom { position: absolute; right: 10px; bottom: 12px; z-index: 16; display: flex; flex-direction: column; gap: 5px; }
-.graph-zoom button { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  font-family: var(--cond); font-size: 17px; line-height: 1; font-weight: 700; cursor: pointer;
-  background: var(--nr-panel); color: var(--nr-text); border: 1px solid var(--nr-line); border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0,0,0,.2); }
-.graph-zoom button:hover { border-color: var(--nr-soft); background: var(--nr-bg); }
-.graph-empty { display: flex; align-items: center; justify-content: center; height: 100%; padding: 24px; text-align: center;
-  font-family: var(--mono); font-size: 12px; color: var(--nr-muted); }
-
-.gedge { stroke: var(--nr-soft); stroke-opacity: .55; stroke-width: 1; }
-.gedge.con { stroke: var(--nr-link); }
-.gedge.hl { stroke: var(--yellow); stroke-opacity: 1; }
-.gedge.dim { stroke-opacity: .08; }
-
-.gnode { cursor: pointer; }
-.gnode circle { fill: var(--nr-link); stroke: var(--nr-bg); stroke-width: 1.5; transition: fill .12s; }
-.gnode .glabel { fill: var(--nr-text); font-family: var(--cond); font-size: 12px; text-anchor: middle; paint-order: stroke;
-  stroke: var(--nr-bg); stroke-width: 2.5px; stroke-linejoin: round; pointer-events: none; }
-.gnode:hover circle, .gnode.hl circle { fill: var(--yellow); }
-.gnode.sel circle { fill: var(--yellow); stroke: var(--nr-text); stroke-width: 2; }
-.graph-svg.focusing .gnode.dim { opacity: .25 !important; }
-.graph-svg.focusing .gnode.dim .glabel { opacity: 0; }
-
-.graph-tip { position: absolute; z-index: 20; max-width: 240px; background: var(--nr-panel); color: var(--nr-text);
-  border: 1px solid var(--nr-line); padding: 6px 8px; font-family: var(--mono); font-size: 10.5px; line-height: 1.5;
-  pointer-events: none; box-shadow: 0 6px 20px rgba(0,0,0,.3); }
-.graph-tip strong { font-family: var(--cond); font-size: 12px; }
-
-/* brief highlight when a graph node jumps you back to its place in the prose */
-.nr-jump-flash { animation: nrJumpFlash 1.2s ease-out; border-radius: 2px; }
-@keyframes nrJumpFlash { 0% { background: rgba(255,236,1,.38); box-shadow: 0 0 0 4px rgba(255,236,1,.18); } 100% { background: transparent; box-shadow: none; } }
-
-/* inline section prompts laid into the page by "Start →" (Phase E). Empty ⇒ the
-   ghost shows and nothing publishes (same mechanism as .nr-dek's placeholder). */
-.nr-page p.nr-prompt:empty::before,
-.nr-page p.nr-prompt:has(> br:only-child)::before { content: attr(data-ph); color: var(--nr-muted); font-style: italic; pointer-events: none; }
-.nr-page h1.nr-ghost:empty::before, .nr-page h2.nr-ghost:empty::before, .nr-page h3.nr-ghost:empty::before,
-.nr-page h1.nr-ghost:has(> br:only-child)::before, .nr-page h2.nr-ghost:has(> br:only-child)::before, .nr-page h3.nr-ghost:has(> br:only-child)::before {
-  content: attr(data-ph); color: var(--nr-muted); font-style: italic; font-weight: inherit; pointer-events: none; }
 
 /* ════════════════════════════════════════════════════════════════════════
    Image carousel + fullscreen viewer (Splide + GLightbox, vendored).
