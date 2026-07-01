@@ -1941,6 +1941,29 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [renameSrcKey, setRenameSrcKey] = useState(null);
   const [renameSrcText, setRenameSrcText] = useState("");
   const [confirmDelKey, setConfirmDelKey] = useState(null);   // a rail card armed for delete (unbinds its claims)
+  // the "Export sources" panel — the draft's bound sources as a portable packet
+  // (links, snapshots, pinned evidence + extracted text) an article can be
+  // written or generated from. Shaping: app/export/sources-export.js.
+  const [srcExportOpen, setSrcExportOpen] = useState(false);
+  const buildSourcePacket = () => {
+    const order = docOrderKeys();   // cited first in document order, uncited trail after
+    const root = ed.current;
+    const items = sources.slice()
+      .sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key))
+      .map(s => {
+        const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key };
+        // every pinned passage on a span citing this source, with the claim
+        // (the span's own words) it backs — the export dedupes repeats
+        const quotes = [];
+        if (root) root.querySelectorAll('.claim-src[data-src]').forEach(el => {
+          if ((el.getAttribute("data-src") || "").split(/\s+/).indexOf(s.key) < 0) return;
+          const q = String(quoteForKey(el, s.key) || "").trim();
+          if (q) quotes.push({ quote: q, claim: (el.textContent || "").trim() });
+        });
+        return { key: s.key, rec, quotes, spans: spanCount(s.key) };
+      });
+    return { title, byline, items };
+  };
   const openPin = (cid, key, claimText) => {
     // re-opening an existing binding? read back this source's pinned quote (a span
     // can carry several, so read the one for THIS key, not just source #1)
@@ -3369,6 +3392,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <div className="np-eyebrow" style={{ color: NR.muted, display: "flex", alignItems: "center", gap: 6, marginBottom: 10 }}>
             <I.source style={{ fontSize: 14 }} /> Sources · {sources.length}
             <span style={{ flex: 1 }} />
+            {sources.length > 0 && window.SourcesExport && (
+              <button onClick={() => setSrcExportOpen(true)} title="Export every bound source — links, snapshots, pinned evidence and text — as a packet (.html / .md / .json) an article can be written from" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "3px 9px", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.ext style={{ fontSize: 12 }} /> Export</button>
+            )}
             {sources.some(s => nrIsFileSrc(window.NPJ.SOURCES[s.key])) && (
               <button onClick={() => setExplorer({ key: null })} title="Open the file explorer — read every uploaded source" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "3px 9px", fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><I.folder style={{ fontSize: 12 }} /> Browse files</button>
             )}
@@ -3677,6 +3703,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           onClose={() => { setExplorer(null); setSources(x => [...x]); }} />
         );
       })()}
+      {srcExportOpen && window.SourcesExport && <window.SourcesExport payload={buildSourcePacket()} onClose={() => setSrcExportOpen(false)} />}
       {showVersions && <window.VersionHistory versions={versions} onClose={() => setShowVersions(false)} />}
       {redactTarget && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={redactTarget}
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
