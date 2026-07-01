@@ -108,3 +108,44 @@ test("a grounded quote round-trips back to editor HTML with its citation", () =>
   assert.match(html, /data-quotes=/, "the pinned passage survives the round trip");
   assert.ok(html.includes(QUOTE), "the quote text is intact");
 });
+
+// --- multi-paragraph quotes keep their breaks (the "…scathing.A sentence…" bug) ---
+const para = (text) => enode("p", {}, [tnode(text)]);
+
+test("a multi-paragraph block quote keeps a blank line between paragraphs", () => {
+  // <blockquote><p>P1.</p><p>P2.</p><p>P3.</p></blockquote> — the editor wraps each
+  // paragraph in its own <p>; flattening ran them together with no separator.
+  const bq = enode("blockquote", {}, [
+    para("The response is, to put it mildly, scathing."),
+    para("A sentence in the second paragraph gives you the gist."),
+    para("It goes on to characterize the report."),
+  ]);
+  const pull = foldPull(bq);
+  assert.ok(pull);
+  assert.equal(pull.kind, "block");
+  assert.equal(
+    pull.text,
+    "The response is, to put it mildly, scathing.\n\n" +
+    "A sentence in the second paragraph gives you the gist.\n\n" +
+    "It goes on to characterize the report.",
+    "paragraphs are separated by a blank line, not run together"
+  );
+  assert.ok(!/scathing\.A sentence/.test(pull.text), "no paragraphs collapsed into one run-on");
+  assert.ok(!pull.tokens, "a plain multi-paragraph quote stays lean — no tokens");
+});
+
+test("hard <br> lines inside a quote become newlines", () => {
+  const bq = enode("blockquote", {}, [
+    tnode("line one"), enode("br", {}, []), tnode("line two"),
+  ]);
+  const pull = foldPull(bq);
+  assert.ok(pull);
+  assert.equal(pull.text, "line one\nline two");
+});
+
+test("a multi-paragraph quote round-trips through editor HTML keeping its breaks", () => {
+  const pull = { type: "pull", kind: "block", text: "First para.\n\nSecond para." };
+  const html = A.blocksToHtml([pull]);
+  assert.match(html, /<blockquote>First para\.<br\/><br\/>Second para\.<\/blockquote>/,
+    "the paragraph break survives as <br/> so re-editing keeps it");
+});
