@@ -49,7 +49,7 @@
   var READ = [
     "app/media/PdfView.jsx", "app/redaction/PdfRedactView.jsx", "app/editor/SourceViewer.jsx", "app/editor/SourceAdapter.jsx", "app/editor/SourceExplorer.jsx",
     "app/record/versions.jsx", "app/admin/Entities.jsx", "app/reader/SuggestionRail.jsx",
-    "app/export/SubstackExport.jsx", "app/export/FactCheckExport.jsx", "app/reader/ArticleRead.jsx",
+    "app/export/SubstackExport.jsx", "app/export/FactCheckExport.jsx", "app/export/SourcesExport.jsx", "app/reader/ArticleRead.jsx",
     "app/reader/ArticleEdit.jsx", "app/editor/SourcePicker.jsx", "app/editor/InterviewSource.jsx",
     "app/reader/Standards.jsx", "app/reader/Contributors.jsx", "app/admin/Submit.jsx",
     "app/admin/Data.jsx", "app/admin/Documents.jsx", "app/admin/Invite.jsx", "app/admin/AdminEditor.jsx",
