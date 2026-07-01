@@ -47,7 +47,7 @@
     },
     silent: {
       label: 'Silent', group: 'locate', glyph: '○', strength: 4,
-      blurb: "The record exists and simply never mentions the thing — the report that never names the lawsuit. No sign anything is missing.",
+      blurb: "The record exists and simply never mentions the thing. No sign anything is missing.",
       prompt: "Name the record you'd expect it in, and the gap you're flagging — what isn't there."
     },
     inaccessible: {
