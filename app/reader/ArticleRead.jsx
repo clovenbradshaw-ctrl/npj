@@ -1270,6 +1270,21 @@ function ArticleRead(props) {
             </blockquote>
           );
         }
+        if (b.type === "callout") {
+          // A callout — a highlighted aside / note box (Substack-style): a tinted
+          // panel with a heavy accent bar, set apart from the body flow. It carries
+          // inline tokens, so bold/links/citations inside it render live like prose.
+          return (
+            <aside key={i} className="np-callout" style={{
+              margin: "26px 0", padding: "16px 18px",
+              borderLeft: "4px solid var(--yellow-deep)",
+              background: "color-mix(in srgb, var(--yellow) 12%, var(--paper-2, var(--card)))",
+              fontFamily: "var(--serif)", fontSize: 16.5, lineHeight: 1.55
+            }}>
+              {renderTokens(b.tokens)}
+            </aside>
+          );
+        }
         if (b.type === "img") {
           if (b.banner) return null; // the banner is lifted into the hero above — never inline
           return (

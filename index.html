@@ -112,6 +112,10 @@
 <!-- editing-only post structure: the append-only log + fold + flatten + built-in
      post types (window.NpjStructure). Never published — stripped at build (I1). -->
 <script src="app/record/structure.js"></script>
+<!-- clean block-type conversion for the prose editor (window.NpjRichBlocks) —
+     rebuilds a fresh element instead of execCommand("formatBlock"), so converting
+     text types (¶/H/quote/pull/callout/code) leaves no stray-artifact cruft. -->
+<script src="app/record/rich-blocks.js"></script>
 <script src="app/media/image-slot.js"></script>
 <!-- photo editor: crop + HARD redaction baked into the pixels before the image is
      re-uploaded, so only the redacted copy can ever reach archive.org (window.NpjPhotoEditor) -->

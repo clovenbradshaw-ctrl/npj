@@ -111,19 +111,37 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
   const cmd = (c, v) => { document.execCommand(c, false, v || null); if (bodyRef.current) bodyRef.current.focus(); };
   const addLink = () => { const u = prompt("Link URL"); if (u) cmd("createLink", u); };
-  // A block quote (a bordered passage) and a pull quote (a large display callout,
-  // class np-pull) share the <blockquote> tag; justification rides as inline
-  // text-align. Both round-trip through htmlToBlocks. See app/record/articles.js.
-  const quoteAs = (kind) => {
+  // Convert the block(s) the selection touches to a target type WITHOUT execCommand.
+  // formatBlock leaves a long tail of cruft (nested spans, carried styles, empty
+  // class=""/style="", wrapper divs) that then has to be scrubbed on the way into
+  // the record — so ¶/H2/H3/quote/pull/callout all route through the shared clean
+  // converter, which rebuilds a fresh element and moves only inline content over.
+  // Falls back to the old execCommand path for a shape the converter declines.
+  const setBlock = (kind) => {
     const root = bodyRef.current; if (!root) return;
-    root.focus(); document.execCommand("formatBlock", false, "blockquote");
-    const sel = window.getSelection();
-    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
-    root.querySelectorAll("blockquote").forEach(bq => {
-      if (range && range.intersectsNode && !range.intersectsNode(bq)) return;
-      if (kind === "pull") bq.classList.add("np-pull"); else bq.classList.remove("np-pull");
-    });
+    root.focus();
+    const ok = window.NpjRichBlocks && window.NpjRichBlocks.setBlockType(root, kind);
+    if (ok) return;
+    if (kind === "blockquote" || kind === "pull" || kind === "callout") {
+      document.execCommand("formatBlock", false, "blockquote");
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+      root.querySelectorAll("blockquote").forEach(bq => {
+        if (range && range.intersectsNode && !range.intersectsNode(bq)) return;
+        if (kind === "callout") {
+          const a = document.createElement("aside"); a.className = "np-callout";
+          while (bq.firstChild) a.appendChild(bq.firstChild); bq.parentNode.replaceChild(a, bq);
+        } else if (kind === "pull") bq.classList.add("np-pull");
+        else bq.classList.remove("np-pull");
+      });
+    } else {
+      document.execCommand("formatBlock", false, kind === "code" ? "pre" : kind);
+    }
   };
+  // A block quote (a bordered passage), a pull quote (a large display callout,
+  // class np-pull) and a callout (a highlighted note box) all round-trip through
+  // htmlToBlocks. See app/record/articles.js and app/record/rich-blocks.js.
+  const quoteAs = (kind) => setBlock(kind === "pull" ? "pull" : kind === "callout" ? "callout" : "blockquote");
 
   // ---- images: same media path as the newsroom (drop → media store → archive.org on save) ----
   // caption + credit + description are editable lines under the (non-editable)
@@ -318,6 +336,8 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
         .eo-edit-body h2, .eo-edit-body h3 { font-family: var(--display); line-height: 1.05; }
         .eo-edit-body blockquote { border-left: 4px solid var(--yellow-deep); margin: 16px 0; padding-left: 14px; font-family: var(--quote); font-weight: 300; font-size: 19px; line-height: 1.5; }
         .eo-edit-body blockquote.np-pull { border-left: 0; padding: 10px 0; border-top: 2px solid var(--yellow-deep); border-bottom: 2px solid var(--yellow-deep); font-size: 25px; line-height: 1.28; text-align: center; }
+        .eo-edit-body aside.np-callout { border-left: 4px solid var(--yellow-deep); background: color-mix(in srgb, var(--yellow) 12%, var(--card)); margin: 16px 0; padding: 14px 16px; font-family: var(--serif); font-size: 16px; line-height: 1.55; }
+        .eo-edit-body aside.np-callout p:last-child { margin-bottom: 0; }
       `}</style>
       <div className="np-scroll" style={{ width: "min(880px, 97vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
@@ -343,11 +363,12 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("bold")}><strong>B</strong></button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("italic")}><em>I</em></button>
-            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "h2")}>H2</button>
-            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "h3")}>H3</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => setBlock("h2")}>H2</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => setBlock("h3")}>H3</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => quoteAs("block")}>“ Quote</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => quoteAs("pull")} title="Pull quote — a large display callout">“ Pull</button>
-            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("formatBlock", "p")}>¶</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => quoteAs("callout")} title="Callout — a highlighted note box">◈ Callout</button>
+            <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => setBlock("p")}>¶</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyLeft")} title="Align left">⬱</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyCenter")} title="Center">≡</button>
             <button style={tb} onMouseDown={e => e.preventDefault()} onClick={() => cmd("justifyRight")} title="Align right">⬲</button>
