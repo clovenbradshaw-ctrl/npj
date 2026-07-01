@@ -249,7 +249,11 @@ function HoverCard({ data, onEnter, onLeave, onSuggest, onClose, suggCount, span
       )}
       <SourceCard srcKey={srcKeys[tab]} quote={claim.q && claim.q[srcKeys[tab]]} preview={preview} onExpand={onExpand} />
       {spans.length > 1 && (
-        <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: 124, overflowY: "auto" }} className="np-scroll">
+        // In the full-height drawer and the phone bottom sheet the CARD itself
+        // scrolls, so DON'T cap this inner list — a 124px cap there strands 10 of
+        // 13 passages behind a tiny scroller in an otherwise empty panel. Only the
+        // compact floating margin card (which can't grow) keeps the cap.
+        <div style={{ borderTop: "1.5px solid var(--ink)", maxHeight: (drawer || sheet) ? "none" : 124, overflowY: (drawer || sheet) ? "visible" : "auto" }} className="np-scroll">
           <div className="np-eyebrow" style={{ color: "var(--ink-soft)", padding: "7px 10px 1px" }}>Backs {spans.length} passages — {sheet ? "tap" : "click"} to jump</div>
           <CitedSpanList claims={spans} onJump={onJump} currentId={claim.id} />
         </div>
