@@ -900,6 +900,16 @@
           if (tag === "s" || tag === "strike" || tag === "del") { flush(); toks.push({ t: "s", text: plain(c) }); return; }
           if (tag === "code") { flush(); toks.push({ t: "code", text: plain(c) }); return; }
           if (tag === "a") { flush(); toks.push({ t: "a", text: plain(c), href: c.getAttribute("href") || "" }); return; }
+          // a block-level child (a wrapped paragraph/line of a multi-paragraph quote)
+          // is its own line — keep the break between blocks so a GROUNDED quote reads
+          // like the plain-text path, instead of running its paragraphs together.
+          if (/^(?:p|div|li|blockquote|h[1-6]|ul|ol|pre)$/.test(tag)) {
+            flush();
+            const last = toks[toks.length - 1];
+            if (toks.length && !(last && last.t === "br")) { toks.push({ t: "br" }, { t: "br" }); }
+            walk(c);
+            return;
+          }
           walk(c); // unknown wrapper → recurse through it
         });
       };
@@ -975,13 +985,22 @@
         // keep `text` clean: it renders as a trailing superscript instead of stranding
         // on its own line (the marker references the quote, not the paragraph below).
         const marks = [];
+        // Block-level children of a quote (the editor wraps each line/paragraph of a
+        // multi-paragraph quote in its own <p>/<div>) and hard <br>s must survive as
+        // line breaks. Flattening them with no separator ran the paragraphs together
+        // AND dropped the space at every boundary ("…scathing.A sentence…"). The
+        // reader/exports treat "\n" as the line separator inside pull.text, so emit
+        // one per <br> and a blank line between blocks.
+        const QUOTE_BLOCK = /^(?:p|div|li|blockquote|h[1-6]|ul|ol|pre)$/;
         const quoteText = (n) => {
           let s = "";
           (n.childNodes || []).forEach(c => {
             if (!c) return;
             if (c.nodeType === 3) { s += c.nodeValue || ""; return; }
             if (c.nodeType !== 1) return;
-            if (c.tagName && c.tagName.toLowerCase() === "sup" && c.classList && c.classList.contains("md-cite")) {
+            const ctag = (c.tagName || "").toLowerCase();
+            if (ctag === "br") { s += "\n"; return; }
+            if (ctag === "sup" && c.classList && c.classList.contains("md-cite")) {
               // A footnote marker (data-fn) lifts onto `marks` and renders as a
               // trailing superscript. An inline CITATION marker (no data-fn) is
               // source chrome with no home in a pull — the quote text is a plain
@@ -994,11 +1013,16 @@
               }
               return;   // the marker leaves the quote TEXT (a sup is never prose)
             }
+            if (QUOTE_BLOCK.test(ctag)) {
+              const inner = quoteText(c).trim();
+              if (inner) { if (s && !/\n$/.test(s)) s += "\n\n"; s += inner; }
+              return;
+            }
             s += quoteText(c);
           });
           return s;
         };
-        const qt = quoteText(node).trim();
+        const qt = quoteText(node).replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
         // Two quote flavours share the <blockquote> tag: a bordered BLOCK quote
         // (the default, for quoting a passage) and a large display PULL quote
         // (class np-pull, Substack-style). Either can carry a justification —
@@ -1274,7 +1298,7 @@
         // markers) so re-editing keeps the citation; a plain quote stays text + marks.
         const inner = (b.tokens && b.tokens.length)
           ? tokensToHtml(b.tokens) + tokensToHtml(b.marks || [])
-          : esc(b.text) + tokensToHtml(b.marks || []);
+          : esc(b.text).replace(/\n/g, "<br/>") + tokensToHtml(b.marks || []);
         return "<blockquote" + cls + sty + ">" + inner + "</blockquote>";
       }
       if (b.type === "ul" || b.type === "ol") return "<" + b.type + ">" + (b.items || []).map(it => "<li>" + tokensToHtml(it) + "</li>").join("") + "</" + b.type + ">";

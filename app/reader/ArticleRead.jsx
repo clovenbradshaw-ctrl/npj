@@ -1261,7 +1261,10 @@ function ArticleRead(props) {
                  lens tint, the footnote marker — instead of inert text. A plain
                  quote renders its text. Either way trailing stranded footnote
                  markers (folded onto `marks`) render after. */}
-              {(b.tokens && b.tokens.length) ? renderTokens(b.tokens) : b.text}
+              {(b.tokens && b.tokens.length)
+                ? renderTokens(b.tokens)
+                : String(b.text || "").split("\n").map((line, li, arr) =>
+                    <React.Fragment key={li}>{line}{li < arr.length - 1 ? <br /> : null}</React.Fragment>)}
               {(b.marks && b.marks.length) ? renderTokens(b.marks) : null}
               {b.attribution ? <footer className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)", marginTop: 8, fontWeight: 400, letterSpacing: 0 }}>{b.attribution}</footer> : null}
             </blockquote>
