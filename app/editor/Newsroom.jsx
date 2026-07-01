@@ -1028,24 +1028,47 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // block, so the new block always lands in the prose flow rather than splitting a
   // heading or vanishing into the non-editable banner figure.
   const insertBlock = (html) => { caretIntoBody(); escapeBlock(); document.execCommand("insertHTML", false, html); upgradeCustomEls(); scanHeadings(); scheduleSave(); };
-  // Quotes come in two flavours that share the <blockquote> tag: a bordered BLOCK
-  // quote (default) and a large display PULL quote (class np-pull, Substack-style).
-  // formatBlock makes the blockquote; we then tag every blockquote the selection
-  // touches with the right class. The justification is the standard align command,
-  // which writes text-align inline — both round-trip through htmlToBlocks.
-  const setQuoteKind = (kind) => {
+  // Convert the block(s) the selection touches to a target type WITHOUT execCommand.
+  // document.execCommand("formatBlock") is the source of most stray-artifact cruft
+  // in the record — nested <span style>, carried heading styles, fragmented <b>…</b>
+  // runs, empty class=""/style="" attributes, wrapper <div>s — and every conversion
+  // that goes through it has to be scrubbed again on the way into htmlToBlocks. The
+  // shared clean converter (NpjRichBlocks) rebuilds a fresh element and moves only
+  // the block's INLINE content over, so ¶/H1/H2/H3/quote/pull/callout/code all land
+  // as one tidy element. It falls back to the old execCommand path on any shape it
+  // won't touch (a list item, a figure), so nothing regresses.
+  const setBlock = (kind) => {
     const root = ed.current; if (!root) return;
     root.focus(); restore();
-    document.execCommand("formatBlock", false, "<blockquote>");
-    const sel = window.getSelection();
-    const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
-    root.querySelectorAll("blockquote").forEach(bq => {
-      const touched = range ? (range.intersectsNode ? range.intersectsNode(bq) : true) : true;
-      if (!touched) return;
-      if (kind === "pull") bq.classList.add("np-pull"); else bq.classList.remove("np-pull");
-    });
-    setFmtMenu(null); scanHeadings(); scheduleSave();
+    const ok = window.NpjRichBlocks && window.NpjRichBlocks.setBlockType(root, kind);
+    if (!ok) setBlockFallback(kind);
+    setFmtMenu(null); upgradeCustomEls(); scanHeadings(); scheduleSave();
   };
+  // The pre-converter execCommand behaviour, kept ONLY as a fallback for shapes the
+  // clean converter declines (so an odd selection still does something sensible).
+  const setBlockFallback = (kind) => {
+    const root = ed.current; if (!root) return;
+    if (kind === "blockquote" || kind === "pull" || kind === "callout") {
+      document.execCommand("formatBlock", false, "<blockquote>");
+      const sel = window.getSelection();
+      const range = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+      root.querySelectorAll("blockquote").forEach(bq => {
+        const touched = range ? (range.intersectsNode ? range.intersectsNode(bq) : true) : true;
+        if (!touched) return;
+        if (kind === "callout") {
+          const a = document.createElement("aside"); a.className = "np-callout";
+          while (bq.firstChild) a.appendChild(bq.firstChild); bq.parentNode.replaceChild(a, bq);
+        } else if (kind === "pull") bq.classList.add("np-pull");
+        else bq.classList.remove("np-pull");
+      });
+    } else {
+      document.execCommand("formatBlock", false, "<" + (kind === "code" ? "pre" : kind) + ">");
+    }
+  };
+  // Quotes come in two flavours that share the <blockquote> tag: a bordered BLOCK
+  // quote (default) and a large display PULL quote (class np-pull, Substack-style);
+  // a callout is a highlighted aside. All three route through the clean converter.
+  const setQuoteKind = (kind) => setBlock(kind === "pull" ? "pull" : kind === "callout" ? "callout" : "blockquote");
   // caption + credit are editable lines under the (non-editable) figure (FIG_CAPS,
   // module scope). The credit carries a hyperlink the same way a contributor bio
   // does — a name and an optional [outlet](https://…), via npjRichText at read.
@@ -1503,7 +1526,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!sel || !sel.rangeCount) return;
     const r = sel.getRangeAt(0);
     if (!r.collapsed) return;                              // a real selection — footnote that exact spot
-    const BLOCK = "p,li,h1,h2,h3,blockquote,figcaption";
+    const BLOCK = "p,li,h1,h2,h3,blockquote,aside,figcaption";
     const hasText = (el) => !!(el && (el.textContent || "").trim());
     const start = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
     let blk = start && start.closest ? start.closest(BLOCK) : null;
@@ -1740,7 +1763,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // blank block a strand leaves behind is removed only when the caret isn't in it.
   const destrandFootnotes = () => {
     const root = ed.current; if (!root) return false;
-    const BLOCK = "p,li,h1,h2,h3,blockquote,figcaption";
+    const BLOCK = "p,li,h1,h2,h3,blockquote,aside,figcaption";
     const isMark = (n) => !!n && n.nodeType === 1 && n.tagName === "SUP" && n.classList.contains("md-cite") && n.hasAttribute("data-fn");
     // a block's reading text with footnote markers (which carry only a number)
     // excluded — so a block holding nothing but markers reads as empty
@@ -2978,10 +3001,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <TB onClick={() => exec("undo")} title="Undo"><I.undo /></TB>
         <TB onClick={() => exec("redo")} title="Redo"><I.redo /></TB>
         <Sep />
-        <TB onClick={() => exec("formatBlock", "<h1>")} title="Title">H1</TB>
-        <TB onClick={() => exec("formatBlock", "<h2>")} title="Heading">H2</TB>
-        <TB onClick={() => exec("formatBlock", "<h3>")} title="Subheading">H3</TB>
-        <TB onClick={() => exec("formatBlock", "<p>")} title="Body text">¶</TB>
+        <TB onClick={() => setBlock("h1")} title="Title">H1</TB>
+        <TB onClick={() => setBlock("h2")} title="Heading">H2</TB>
+        <TB onClick={() => setBlock("h3")} title="Subheading">H3</TB>
+        <TB onClick={() => setBlock("p")} title="Body text">¶</TB>
         <Sep />
         <TB onClick={() => exec("bold")} title="Bold"><b>B</b></TB>
         <TB onClick={() => exec("italic")} title="Italic"><i>I</i></TB>
@@ -3014,6 +3037,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               </button>
               <button onMouseDown={e => e.preventDefault()} onClick={() => setQuoteKind("pull")} style={popItem}>
                 <I.quote style={{ fontSize: 18 }} /> <span><b>Pull quote</b><br/><span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>a large display callout</span></span>
+              </button>
+              <button onMouseDown={e => e.preventDefault()} onClick={() => setQuoteKind("callout")} style={popItem}>
+                <I.info style={{ fontSize: 15 }} /> <span><b>Callout</b><br/><span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>a highlighted note box</span></span>
               </button>
               <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "8px 0 5px" }}>Justify</div>
               <div style={{ display: "flex", gap: 4 }}>
@@ -3074,7 +3100,8 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {fmtMenu === "more" && (
             <div style={{ ...popStyle, left: "auto", right: 0, width: 190 }}>
               {[
-                [<I.codeBlock />, "Code block", () => { exec("formatBlock", "<pre>"); setFmtMenu(null); }],
+                [<I.codeBlock />, "Code block", () => { setBlock("code"); }],
+                [<I.info />, "Callout", () => { setBlock("callout"); }],
                 [<I.divider />, "Divider", () => { exec("insertHorizontalRule"); setFmtMenu(null); }],
                 [<I.asterisk />, "Footnote", insertFootnote],
                 [<I.penNib />, "Poetry", insertVerse],
@@ -3470,8 +3497,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         <div className="sel-tb" style={{ position: "fixed", left: sel.x, top: sel.y - 8, transform: "translate(-50%,-100%)", zIndex: 4200, background: "var(--ink)", border: "1px solid rgba(255,255,255,.22)", boxShadow: "0 10px 28px rgba(0,0,0,.55)", display: "flex", alignItems: "center", padding: 3 }}>
           <FB onClick={() => exec("bold")} title="Bold"><b>B</b></FB>
           <FB onClick={() => exec("italic")} title="Italic"><i>I</i></FB>
-          <FB onClick={() => exec("formatBlock", "<h2>")} title="Heading">H2</FB>
-          <FB onClick={() => exec("formatBlock", "<blockquote>")} title="Quote"><I.quote style={{ fontSize: 13 }} /></FB>
+          <FB onClick={() => setBlock("h2")} title="Heading">H2</FB>
+          <FB onClick={() => setBlock("blockquote")} title="Quote"><I.quote style={{ fontSize: 13 }} /></FB>
+          <FB onClick={() => setBlock("callout")} title="Callout"><I.info style={{ fontSize: 13 }} /></FB>
           <span style={{ width: 1, height: 18, background: "rgba(255,255,255,.2)", margin: "0 3px" }} />
           <FB hot={menu === "link"} onClick={() => setMenu(menu === "link" ? null : "link")} title="Add a link or jump-link"><I.link style={{ fontSize: 13 }} /> Link</FB>
           {/* citation actions only when the citation layer is on — in a clean read the

@@ -397,7 +397,7 @@
     }
     for (var i = 0; i < next.length && !done; i++) {
       var b = next[i];
-      if (b.type === "p" && b.tokens) b.tokens = fixTokens(b.tokens);
+      if ((b.type === "p" || b.type === "callout") && b.tokens) b.tokens = fixTokens(b.tokens);
       else if ((b.type === "ul" || b.type === "ol") && b.items) b.items = b.items.map(function (it) { return done ? it : fixTokens(it); });
       else if (quote && (b.type === "h2" || b.type === "h3" || b.type === "pull" || b.type === "code" || b.type === "verse") && b.text && b.text.indexOf(quote) >= 0) { b.text = b.text.replace(quote, proposed); done = true; }
     }

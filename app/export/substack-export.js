@@ -250,6 +250,13 @@
         out.push("");
         break;
       }
+      case "callout": {
+        // Substack markdown has no callout element, so a callout lands as a
+        // blockquote — the closest thing its importer keeps visually distinct.
+        const c = tokensToMd(b.tokens || [], ctx).trim();
+        if (c) out.push("> " + c.replace(/\n/g, "\n> "), "");
+        break;
+      }
       case "ul": (b.items || []).forEach(it => out.push("- " + tokensToMd(it, ctx).trim())); out.push(""); break;
       case "ol": (b.items || []).forEach((it, i) => out.push((i + 1) + ". " + tokensToMd(it, ctx).trim())); out.push(""); break;
       case "hr": out.push("---", ""); break;
@@ -351,6 +358,7 @@
         if (b.attribution) out.push("— " + b.attribution);
         out.push("");
         break;
+      case "callout": { const c = tokensToText(b.tokens || [], ctx).trim(); if (c) out.push(c, ""); break; }
       case "ul": (b.items || []).forEach(it => out.push("• " + tokensToText(it, ctx).trim())); out.push(""); break;
       case "ol": (b.items || []).forEach((it, i) => out.push((i + 1) + ". " + tokensToText(it, ctx).trim())); out.push(""); break;
       case "hr": out.push("———", ""); break;
@@ -468,6 +476,10 @@
         if (b.attribution) q += "<p>— " + esc(b.attribution) + "</p>";
         return q + "</blockquote>";
       }
+      case "callout":
+        // Substack has no callout on paste — land it as a blockquote so it stays
+        // set apart from the body (its inline formatting + citations survive).
+        return "<blockquote><p>" + (tokensToHtml(b.tokens || [], ctx) || "") + "</p></blockquote>";
       case "ul": return "<ul>" + (b.items || []).map(it => "<li>" + tokensToHtml(it, ctx) + "</li>").join("") + "</ul>";
       case "ol": return "<ol>" + (b.items || []).map(it => "<li>" + tokensToHtml(it, ctx) + "</li>").join("") + "</ol>";
       case "hr": return "<hr>";

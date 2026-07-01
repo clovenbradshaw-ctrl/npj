@@ -32,6 +32,7 @@
  *   {type:'ul'|'ol', items:[tokens[]]} · {type:'img', src, caption?}
  *   {type:'gallery', images:[{src, store?, caption?, credit?, description?, fit?, crop?}], caption?}
  *   {type:'embed', url, caption?} · {type:'code'|'verse', text}
+ *   {type:'callout', tokens:[…]}  (a highlighted aside / note box, Substack-style)
  *
  * Exposed as window.NpjArticles. No deps beyond fetch + (optionally) NpjArchiveCDN.
  * Also module.exports the pure fold/revert helpers for node tests. */
@@ -150,6 +151,7 @@
       if (b.type === "p") return (b.tokens || []).map(tokenText).join("");
       if (b.type === "h2" || b.type === "h3") return b.text || "";
       if (b.type === "pull") return (b.text || "") + (b.attribution ? " — " + b.attribution : "");
+      if (b.type === "callout") return (b.tokens || []).map(tokenText).join("");
       if (b.type === "ul" || b.type === "ol") return (b.items || []).map(it => "· " + it.map(tokenText).join("")).join("\n");
       if (b.type === "footnotes") return (b.notes || []).map(n => n && n.text || "").filter(Boolean).join("\n");
       if (b.type === "img") return b.caption || "";
@@ -975,6 +977,17 @@
         });
         return;
       }
+      // A callout — a highlighted aside / note box (Substack-style). Keyed by the
+      // np-callout class rather than the tag, so it round-trips whether it rode in
+      // as an <aside> (blocksToHtml's shape) or a <div>/<blockquote> a paste left.
+      // It carries rich inline content (bold, links, even citations), so it folds
+      // through inlineTokens exactly like a paragraph — the reader renders it as a
+      // live block with its box styling.
+      if (node.classList && node.classList.contains("np-callout")) {
+        const toks = inlineTokens(node);
+        if (hasInk(toks)) blocks.push({ type: "callout", tokens: toks });
+        return;
+      }
       if (tag === "h1") { if (!headline) headline = text; else blocks.push({ type: "h2", text }); return; }
       if (tag === "h2") { if (text) blocks.push({ type: "h2", text }); return; }
       if (tag === "h3") { if (text) blocks.push({ type: "h3", text }); return; }
@@ -1301,6 +1314,10 @@
           : esc(b.text).replace(/\n/g, "<br/>") + tokensToHtml(b.marks || []);
         return "<blockquote" + cls + sty + ">" + inner + "</blockquote>";
       }
+      // a callout round-trips as an <aside class="np-callout"> holding its inline
+      // tokens (so bold/links/citations survive re-editing). An empty callout keeps
+      // a <br/> so it stays selectable in the contenteditable.
+      if (b.type === "callout") return '<aside class="np-callout">' + (tokensToHtml(b.tokens) || "<br/>") + "</aside>";
       if (b.type === "ul" || b.type === "ol") return "<" + b.type + ">" + (b.items || []).map(it => "<li>" + tokensToHtml(it) + "</li>").join("") + "</" + b.type + ">";
       if (b.type === "hr") return "<hr/>";
       if (b.type === "code") return "<pre>" + esc(b.text) + "</pre>";
