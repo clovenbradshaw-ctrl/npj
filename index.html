@@ -81,6 +81,9 @@
 <!-- media CDN: resolves archive.org links to direct image URLs for <image-slot>,
      and (pageMeta) reads a source's identity off the CORS-open archived HTML -->
 <script src="app/sources/archive-cdn.js"></script>
+<!-- html import: pulls the outbound URLs out of an imported HTML file so the
+     Newsroom can mint a web source for each link the room hasn't absorbed. No model. -->
+<script src="app/sources/html-urls.js"></script>
 <!-- expose hooks globally so every babel file uses them bare without colliding -->
 <script>
   window.useState = React.useState;
