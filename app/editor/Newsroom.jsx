@@ -1257,8 +1257,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (!text) return;
     if (/\n/.test(text)) escapeBlock(); // block-level paste never lands inside a headline or the dek
     notePaste(text.length, { kind: "paste" }, () => window.NpjPlainText.insert(text));
+    ingestProseUrls(text);   // any URL pasted into the prose becomes an archive-ready source
     scanHeadings(); scheduleSave();
   };
+  // Typed / autolinked URLs settle when the caret leaves the prose — scan the whole
+  // body on blur and ingest any URL the room hasn't absorbed (paste, drop and the
+  // link tool are caught inline; this is the safety net for a hand-typed link).
+  // innerHTML so it sees both bare URLs and real <a href> targets; in-page jumplinks,
+  // image-slot media and embeds aren't hrefs, so they're never mistaken for sources.
+  const onEditorBlur = () => { if (ed.current && window.NpjHtmlUrls) ingestProseUrls(ed.current.innerHTML || ""); };
   const caretToPoint = (e) => {
     let r = null;
     if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(e.clientX, e.clientY);
@@ -1277,6 +1284,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     caretToPoint(e);
     if (/\n/.test(text)) escapeBlock();
     notePaste(text.length, { kind: "drop" }, () => window.NpjPlainText.insert(text));
+    ingestProseUrls(text);   // any URL dropped into the prose becomes an archive-ready source
     scanHeadings(); scheduleSave();
   };
 
@@ -2432,7 +2440,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       }).catch(() => setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false } : x)));
     }
   };
-  const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } setLinkUrl(""); setMenu(null); setSel(null); };
+  const applyLink = () => { const u = linkUrl.trim(); if (!u) return; restore(); document.execCommand("createLink", false, u); const sel2 = window.getSelection(); if (sel2.anchorNode) { const a = sel2.anchorNode.parentElement && sel2.anchorNode.parentElement.closest("a"); if (a) { a.target = "_blank"; a.rel = "noopener"; } } ingestProseUrls(u); setLinkUrl(""); setMenu(null); setSel(null); };
   const insertJump = (id, text) => { restore(); document.execCommand("insertHTML", false, `<a href="#${id}" class="jumplink">${text}</a>&nbsp;`); setMenu(null); setSel(null); };
 
   // ---- sources ingestion ----
@@ -2443,7 +2451,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // and the grounding workspace's in-modal "add a source" — a missing source can
   // be pulled in from either place with identical behaviour.
   const ingestUrls = (raw) => {
-    const urls = String(raw || "").split(/[\s,]+/).map(u => u.trim()).filter(u => /^https?:\/\//.test(u));
+    // accept a pre-split list (HTML-import hands us clean URLs, some of which
+    // legitimately contain commas) or a pasted blob to split on whitespace/commas
+    const urls = (Array.isArray(raw) ? raw : String(raw || "").split(/[\s,]+/)).map(u => String(u).trim()).filter(u => /^https?:\/\//.test(u));
     if (!urls.length) return []; setBusy(true);
     const made = urls.map((u, i) => {
       const key = "web-" + Date.now().toString(36) + i;
@@ -2470,6 +2480,44 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return made.map(m => m.key);
   };
   const addUrl = () => { if (ingestUrls(urlInput).length) setUrlInput(""); };
+  // Every URL the room has already absorbed — the original + archived URL of every
+  // source on the shelf — normalized, so the HTML importer knows what NOT to re-add.
+  const absorbedUrls = () => {
+    const H = window.NpjHtmlUrls; const have = {}; const add = (u) => { const k = H ? H.normUrl(u) : String(u || "").trim().toLowerCase(); if (k) have[k] = 1; };
+    Object.keys(window.NPJ.SOURCES || {}).forEach(k => { const r = window.NPJ.SOURCES[k]; if (!r) return; if (r.original_url) add(r.original_url); if (r.archive_url) add(r.archive_url); });
+    return have;
+  };
+  // Filter a list of candidate URLs to the ones the room hasn't absorbed yet, then
+  // ingest them as web sources (mint + background snapshot to archive.org). Shared
+  // by the HTML importer and the prose-URL catcher, so a URL captured either way
+  // lands ready to archive, and the same one twice is never re-added.
+  const ingestNewUrls = (urls) => {
+    const H = window.NpjHtmlUrls; const have = absorbedUrls(); const seen = {}; const fresh = [];
+    (urls || []).forEach(u => {
+      const k = H ? H.normUrl(u) : String(u || "").trim().toLowerCase();
+      if (k && !have[k] && !seen[k]) { seen[k] = 1; fresh.push(u); }
+    });
+    return fresh.length ? ingestUrls(fresh) : [];
+  };
+  // Import an HTML source → its links are sources too. Pull every outbound URL out
+  // of the imported HTML, drop the ones the room already holds, and ingest the rest
+  // as web sources — each snapshots to archive.org in the background, so an imported
+  // reading list / saved article lands with its citations ready to archive.
+  const ingestHtmlLinks = (recs) => {
+    const H = window.NpjHtmlUrls; if (!H) return [];
+    const urls = [];
+    (recs || []).forEach(rec => {
+      if (rec && H.isHtml(rec.filename || rec.title, rec.mime, rec.text)) urls.push.apply(urls, H.extractUrls(rec.text || ""));
+    });
+    return ingestNewUrls(urls);
+  };
+  // Any URL typed, pasted, dropped or linked into the prose is a source too. Read
+  // the bare URLs out of a chunk of editor text and ingest the new ones — same
+  // archive-ready web source the HTML importer mints, just caught as you write.
+  const ingestProseUrls = (text) => {
+    const H = window.NpjHtmlUrls; if (!H) return [];
+    return ingestNewUrls(H.extractUrls(String(text || "")));
+  };
   // a conversation source (interview, named or anonymous) — built by the
   // composer, registered like any other source so the bind + pin flow works on
   // its notes. No URL to snapshot, so it never enters the archive/PII gate.
@@ -2573,6 +2621,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       made.forEach(m => scanSource(m.key));
       setSources(s => [...s]);
       if (!quiet && made[0]) setRedactTarget(made[0].key);
+      // an imported HTML document carries links — mint a web source for each URL
+      // the room hasn't absorbed yet, ready to be put on archive.org (its own text
+      // is already on record above, so it never re-ingests itself).
+      ingestHtmlLinks(made.map(m => window.NPJ.SOURCES[m.key]).filter(Boolean));
       scheduleSave();
     });
     // Screenshots & scans carry no machine-readable text. OCR them (lazy
@@ -3185,7 +3237,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               </div>
             </div>
             <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable={!amCommenter} suppressContentEditableWarning onInput={amCommenter ? undefined : (e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
-              onKeyDown={amCommenter ? undefined : onEditorKeyDown} onFocus={amCommenter ? undefined : ensureParaSep}
+              onKeyDown={amCommenter ? undefined : onEditorKeyDown} onFocus={amCommenter ? undefined : ensureParaSep} onBlur={amCommenter ? undefined : onEditorBlur}
               onMouseOver={amCommenter ? undefined : onBodyOver} onMouseLeave={amCommenter ? undefined : onBodyLeave} onMouseMove={amCommenter ? undefined : onEdMouseMove}
               onPaste={amCommenter ? undefined : onPaste} onDrop={amCommenter ? undefined : onDropText}
               onDragStart={amCommenter ? undefined : () => { dragFromSelf.current = true; }} onDragEnd={amCommenter ? undefined : () => { dragFromSelf.current = false; }}
