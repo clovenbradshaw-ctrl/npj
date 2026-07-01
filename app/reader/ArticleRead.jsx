@@ -831,13 +831,21 @@ function ArticleRead(props) {
   }, [sourceList, claimById]);
   // scroll to a claim span in the body and flash it
   const jumpToClaim = useCallback((id) => {
-    setHover(null); setActiveSrc(null);
+    // Only dismiss the panel on a phone, where the citation opens as a bottom
+    // sheet that COVERS the article — closing it lets the reader see where we
+    // jumped, and a fixed sheet doesn't reflow the column, so the scroll stays
+    // true. On a desktop the panel is a docked drawer that STAYS PUT (the whole
+    // point: hop between the passages a source backs). Closing it there would
+    // animate the reading column's reserved gutter away (paddingRight, 0.28s)
+    // while the smooth scroll is running, re-wrapping the prose and landing the
+    // jump in the wrong place — so leave it open and just scroll + flash.
+    if (isPhone) { setHover(null); setActiveSrc(null); }
     const el = document.getElementById("claim-" + id);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.remove("claim-flash"); void el.offsetWidth; el.classList.add("claim-flash");
     setTimeout(() => el.classList.remove("claim-flash"), 1800);
-  }, []);
+  }, [isPhone]);
   // the passages a source backs, rendered inside the in-app viewer — clicking one
   // closes the sheet and jumps to that exact span in the story (it stays on the
   // page; nothing opens a new tab)
