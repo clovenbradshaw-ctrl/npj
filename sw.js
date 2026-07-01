@@ -14,7 +14,7 @@
  */
 // app HTML/CSS/JSX — BUMP this after a deploy to force clients past the
 // stale-while-revalidate copy and fetch the new code on their next load.
-var SHELL = "npj-shell-v14";
+var SHELL = "npj-shell-v15";
 // pinned React/Babel live in their own cache so a SHELL bump never re-downloads
 // the ~3 MB compiler — they're immutable, so they survive every shell version.
 var VENDOR = "npj-vendor-v1";
