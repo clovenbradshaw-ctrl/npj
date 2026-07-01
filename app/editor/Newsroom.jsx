@@ -1719,6 +1719,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const root = ed.current; if (!root) return;
     root.innerHTML = htmlDraft;
     reconcileAfterReplace();
+    // pasting an HTML document into the source view is an "import" too — mint a web
+    // source for every link it carries that the room hasn't absorbed. Setting
+    // innerHTML fires no paste/blur, so ingest the applied markup explicitly.
+    ingestProseUrls(htmlDraft);
     setHtmlMode(false); setHtmlMsg("");
   };
   // leaving prose for a grounding surface drops the source panel so it can't
