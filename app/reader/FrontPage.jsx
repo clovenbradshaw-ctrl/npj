@@ -697,15 +697,18 @@ function FrontLineup({ items, onOpen }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
   const front = layout.front || {};
-  // Admin curation: an explicit slug order (the hotswap) wins; otherwise the
-  // newest-first order the record came in with.
+  // The cover is ALWAYS the newest live piece — `items` arrives newest-first
+  // (see FrontPage), so this never depends on admin curation. A scheduled piece
+  // is future-dated (it can sort first in that raw order) but isn't live yet,
+  // so it can't claim the cover; prefer a released piece and fall back to a
+  // scheduled one only when there's nothing else (the admin preview). Without
+  // this, a hotswap pin set for an older piece would keep it on the cover
+  // forever, even after a genuinely newer story publishes.
+  const lead = items.find(a => a.status !== "unpublished" && !a._scheduled)
+    || items.find(a => a.status !== "unpublished") || items[0];
+  // Admin curation (the hotswap) still governs how everything ELSE lines up —
+  // the rail vs. the overflow feed — just never who's on the cover.
   const ordered = window.orderFrontItems(items, front);
-  // A scheduled piece is future-dated, so it sorts to the front — but it isn't
-  // live yet, so it shouldn't claim the cover. Prefer a released piece for the
-  // lead; fall back to a scheduled one only when there's nothing else (the admin
-  // preview). An explicit hotswap order in orderFrontItems still wins.
-  const lead = ordered.find(a => a.status !== "unpublished" && !a._scheduled)
-    || ordered.find(a => a.status !== "unpublished") || ordered[0];
   const rest = ordered.filter(a => a !== lead);
   // The rail holds the freshest few beside the cover; the cap keeps it from
   // towering over the cover. Everything past it drops into the overflow grid.
