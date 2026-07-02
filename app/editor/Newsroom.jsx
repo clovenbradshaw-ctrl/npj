@@ -459,6 +459,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [commenters, setCommenters] = useState({});   // project members invited comment/suggest-only (mxid → {by,ts})
   const [invite, setInvite] = useState(false);
   const [inviteVal, setInviteVal] = useState("");
+  const [inviteRole, setInviteRole] = useState("editor"); // role for the next invite: "editor" | "commenter"
   const [inviteMsg, setInviteMsg] = useState("");
   const [projects, setProjects] = useState(null);    // existing projects, for the picker
   const [projPick, setProjPick] = useState("");      // "" = start a new project for this doc
@@ -2718,11 +2719,19 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         setRoom(rm);
       }
       await window.MatrixAuth.invite(rm.roomId, id.mxid);
-      // Default tier: a commenter (Google-Docs style) — they can comment and
-      // suggest edits, but not edit or publish directly, until promoted below.
-      try { if (window.MatrixAuth.setCommenter) { await window.MatrixAuth.setCommenter(rm.roomId, id.mxid); setCommenters(m => ({ ...m, [id.mxid]: { by: session.user_id, ts: new Date().toISOString() } })); } } catch (e) {}
+      // Apply the chosen tier. A commenter (Google-Docs style) can comment and
+      // suggest edits but not edit or publish; an editor can edit and draft
+      // directly. Only commenters are recorded — an editor is the plain member.
+      if (inviteRole === "commenter") {
+        try { if (window.MatrixAuth.setCommenter) { await window.MatrixAuth.setCommenter(rm.roomId, id.mxid); setCommenters(m => ({ ...m, [id.mxid]: { by: session.user_id, ts: new Date().toISOString() } })); } } catch (e) {}
+      } else {
+        setCommenters(m => { const n = { ...m }; delete n[id.mxid]; return n; });
+      }
       setCollabs(c => c.includes(id.mxid) ? c : [...c, id.mxid]);
-      setInviteVal(""); setInviteMsg("Invited " + id.mxid + " as a commenter — they can suggest edits and comment on every document in the project. Promote them to editor below when you're ready.");
+      setInviteVal("");
+      setInviteMsg(inviteRole === "commenter"
+        ? "Invited " + id.mxid + " as a commenter — they can suggest edits and comment on every document in the project. Promote them to editor below when you're ready."
+        : "Invited " + id.mxid + " as an editor — they can edit, comment and draft directly on every document in the project.");
     } catch (e) { setInviteMsg("Invite failed: " + (e.message || "try again")); }
   };
   // Promote a commenter to a full editor (drop them from the commenters set), or
@@ -2945,6 +2954,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 <input value={inviteVal} onChange={e => setInviteVal(e.target.value)} onKeyDown={e => e.key === "Enter" && doInvite()} placeholder="@name:server" className="np-mono" style={{ flex: 1, border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "7px 8px", fontSize: 12, outline: "none" }} />
                 <button className="btn btn-sm btn-primary" onClick={doInvite}>Invite</button>
               </div>
+              {/* what kind of user this invitee should be */}
+              <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                {[["editor", "Editor", "Edit & draft directly"],
+                  ["commenter", "Commenter", "Comment & suggest only"]].map(([val, label, ti]) => (
+                  <label key={val} title={ti} style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, cursor: "pointer", border: "1.5px solid " + (inviteRole === val ? "var(--ink)" : "var(--rule-strong)"), background: inviteRole === val ? "color-mix(in srgb, var(--yellow) 35%, transparent)" : "transparent", padding: "5px 7px" }}>
+                    <input type="radio" name="npj-invite-role" checked={inviteRole === val} onChange={() => setInviteRole(val)} style={{ accentColor: "var(--ink)", flex: "0 0 auto" }} />
+                    <span className="np-cond" style={{ fontWeight: 700, fontSize: 11.5 }}>{label}</span>
+                  </label>
+                ))}
+              </div>
               {inviteMsg && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.4 }}>{inviteMsg}</div>}
               {/* who's on the project + their tier. New invitees default to
                   commenter (comment/suggest only); promote to editor here. */}
@@ -2982,7 +3001,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   }
                   return rm.roomId;
                 }}
-                onInvited={(mx) => { setCollabs(c => c.includes(mx) ? c : [...c, mx]); setCommenters(m => m[mx] ? m : { ...m, [mx]: { by: session && session.user_id, ts: new Date().toISOString() } }); }} />
+                onInvited={(mx, name, role) => { setCollabs(c => c.includes(mx) ? c : [...c, mx]); setCommenters(m => { const n = { ...m }; if (role === "commenter") n[mx] = { by: session && session.user_id, ts: new Date().toISOString() }; else delete n[mx]; return n; }); }} />
               {room && room.alias && <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginTop: 5 }}>{room.alias}</div>}
             </div>
           )}
