@@ -78,3 +78,42 @@ test("cleanOcrText is total — null/undefined/empty never throw", () => {
   assert.equal(SV.cleanOcrText(undefined), "");
   assert.equal(SV.cleanOcrText("   \n  "), "");
 });
+
+test("docLabel parses a date-prefixed, underscore-slugged filename", () => {
+  const d = SV.docLabel({ id: "doc-1", mime: "application/pdf", filename: "2026.6.29_Policing_Public_Safety.pdf", outlet: "uploaded document" });
+  assert.equal(d.name, "Policing Public Safety");   // de-slugged topic, no date, no extension
+  assert.equal(d.date, "Jun 29, 2026");             // the document's own date, off the front
+  assert.equal(d.kind, "PDF");
+});
+
+test("docLabel handles the other common date shapes", () => {
+  assert.equal(SV.docLabel({ filename: "2026-06-29-council-minutes.docx" }).date, "Jun 29, 2026");
+  assert.equal(SV.docLabel({ filename: "20260629_report.txt" }).date, "Jun 29, 2026");
+  assert.equal(SV.docLabel({ filename: "2026-06-29-council-minutes.docx" }).name, "council minutes");
+});
+
+test("docLabel leaves an undated filename alone (no false date)", () => {
+  const d = SV.docLabel({ mime: "image/png", filename: "IMG_20260629_1230.jpg" });
+  assert.equal(d.date, "");                          // the date isn't at the front — don't guess
+  assert.equal(d.name, "IMG 20260629 1230");
+  assert.equal(d.kind, "Image");
+});
+
+test("docLabel rejects an out-of-range date and keeps the words", () => {
+  const d = SV.docLabel({ filename: "2026.13.40_notes.txt" });
+  assert.equal(d.date, "");
+  assert.equal(d.name, "2026 13 40 notes");
+});
+
+test("docLabel falls back to a generic name for a date-only filename", () => {
+  const d = SV.docLabel({ mime: "application/pdf", filename: "2026.6.29.pdf" });
+  assert.equal(d.name, "Uploaded document");
+  assert.equal(d.date, "Jun 29, 2026");
+});
+
+test("docLabel is total — an empty record never throws", () => {
+  const d = SV.docLabel();
+  assert.equal(d.name, "Uploaded document");
+  assert.equal(d.date, "");
+  assert.equal(d.kind, "File");
+});

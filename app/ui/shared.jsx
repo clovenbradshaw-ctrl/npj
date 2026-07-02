@@ -431,6 +431,11 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
   // vouched for it (ocrShow); the document itself, shown above or behind "View
   // document", is the receipt. Web/PDF/text passages show exactly as before.
   const showCited = !!cited && (!SV || !SV.citedPassageVisible || SV.citedPassageVisible(s));
+  // An uploaded document is titled by its raw filename ("2026.6.29_Policing_
+  // Public_Safety.pdf"). Parse it into a readable name, its own date and a kind
+  // label so the header answers WHAT / WHEN at a glance — instead of stacking an
+  // internal "doc-…" id over a filename, which told the reader nothing.
+  const docId = isUpload && SV && SV.docLabel ? SV.docLabel(s) : null;
   return (
     <div style={{ fontFamily: "var(--serif)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -450,9 +455,23 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
         )}
       </div>
       <div style={{ padding: "10px 12px 12px" }}>
-        <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 4 }}>{s.id}</div>
-        <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
-        <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
+        {docId ? (
+          <>
+            <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 17, lineHeight: 1.14, marginBottom: 5 }}>{docId.name}</div>
+            <div className="np-mono" style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 7, fontSize: 10, color: "var(--ink-soft)", marginBottom: 5 }}>
+              <span style={{ padding: "1px 6px", borderRadius: 3, background: "var(--paper-2)", border: "1px solid var(--rule)", color: "var(--ink)", letterSpacing: ".04em" }}>{docId.kind}</span>
+              {docId.date && <span style={{ color: "var(--ink)", display: "inline-flex", alignItems: "center", gap: 3 }}><I.clock style={{ fontSize: 11 }} /> {docId.date}</span>}
+              <span>{s.outlet}</span>
+            </div>
+            {s.filename && <div className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)", opacity: .7, marginBottom: 9, wordBreak: "break-all" }} title="original filename">{s.filename}</div>}
+          </>
+        ) : (
+          <>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 4 }}>{s.id}</div>
+            <div style={{ fontFamily: "var(--cond)", fontWeight: 600, fontSize: 16, lineHeight: 1.12, marginBottom: 3 }}>{s.title}</div>
+            <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 9 }}>{s.outlet}</div>
+          </>
+        )}
         {showFile && <SourceFilePreview rec={s} onExpand={expand} />}
         {showCited ? (
           <div style={{ marginBottom: 10 }}>
@@ -468,7 +487,7 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
           fontFamily: "var(--mono)", color: "var(--ink-soft)", borderTop: "1px solid var(--rule)", paddingTop: 8 }}>
           {iv
             ? <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.chat style={{ fontSize: 12 }} /> {NI.metaLine(s)}</span>
-            : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.clock style={{ fontSize: 12 }} /> retrieved {s.retrieved}</span>}
+            : <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><I.clock style={{ fontSize: 12 }} /> {docId ? "uploaded" : "retrieved"} {s.retrieved}</span>}
         </div>
         {iv ? (
           (talk.reason || talk.reporter) && (
