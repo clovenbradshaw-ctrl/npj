@@ -530,27 +530,13 @@ function MainStage({ stage, onClose, onJumpNote }) {
 // rebuilds the player from it — a YouTube/Vimeo iframe, a native <video> or
 // <audio> for direct media files, or (for anything we don't recognize) the
 // link card, since the committed artifact is always the URL itself.
-function EmbedFigure({ url, caption, height, reload, previews = true }) {
+// An embed is body media the author committed into the piece — same standing
+// as an image or gallery — so it renders inline at EVERY transparency level.
+// (Clean used to collapse it to a "Show preview" chip, which hid article
+// content behind a control that's about the grounding layer, not the story.)
+function EmbedFigure({ url, caption, height, reload }) {
   const u = String(url || "");
   let host = ""; try { host = new URL(u).hostname.replace(/^www\./, ""); } catch (e) {}
-  // In the Clean transparency setting the inline preview collapses to a citation
-  // chip — the committed artifact is the URL, so we name what it points to and
-  // let the reader open the player on demand. Standard/Full embed it inline.
-  const [forceShow, setForceShow] = useState(false);
-  if (!previews && !forceShow) {
-    return (
-      <div style={{ border: "1.5px solid var(--ink)", margin: "14px 0", overflow: "hidden" }}>
-        <button type="button" onClick={() => setForceShow(true)} className="np-mono"
-          title="Show this embed inline"
-          style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", textAlign: "left",
-            padding: "13px 16px", cursor: "pointer", border: 0, background: "var(--card)", color: "var(--ink)",
-            fontSize: 12, letterSpacing: ".05em", textTransform: "uppercase", fontWeight: 600 }}>
-          <I.caretRight style={{ fontSize: 12 }} /> Embed · {caption || host || "media"}
-          <span style={{ marginLeft: "auto", padding: "5px 9px", background: "var(--yellow)", border: "1.5px solid var(--ink)", fontWeight: 700 }}>Show preview</span>
-        </button>
-      </div>
-    );
-  }
   // one resolver (window.NpjEmbed) maps the stored permalink to a player, the
   // same one the composer used — YouTube/Vimeo (16:9), Google Drive/Docs &
   // archive.org files (a fixed-height frame), or a direct <video>/<audio>.
@@ -1300,7 +1286,7 @@ function ArticleRead(props) {
           if (!imgs.length) return null;
           return <Carousel key={i} images={imgs} caption={b.caption} style={wideFig(26, 26)} />;
         }
-        if (b.type === "embed") return <EmbedFigure key={i + ":" + reloadTick} url={b.url} caption={b.caption} height={b.height} reload={reloadTick} previews={previews} />;
+        if (b.type === "embed") return <EmbedFigure key={i + ":" + reloadTick} url={b.url} caption={b.caption} height={b.height} reload={reloadTick} />;
         if (b.type === "ul" || b.type === "ol") {
           const Tag = b.type;
           return (
