@@ -44,12 +44,13 @@ async function copyText(text) {
                  with a labelled workspace before the room state syncs
      ensureRoom— async () => roomId, used when the room isn't created yet
                  (the Newsroom only spins up a project on first invite)
-     onInvited — (mxid, name) => void, so the caller can show a pending chip */
+     onInvited — (mxid, name, role) => void, so the caller can show a pending chip */
 function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [name, setName] = useState("");      // who the inviter thinks this guest is
+  const [role, setRole] = useState("editor"); // "editor" (full edit) | "commenter" (comment/suggest only)
   const [needToken, setNeedToken] = useState(false);
   const [token, setToken] = useState("");
   const [link, setLink] = useState(null);   // { url, mxid, name }
@@ -73,12 +74,13 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
         try { await window.MatrixAuth.invite(r, acct.mxid); } catch (e) {}
         // record who this guest is for, on the room, for every member to see
         try { await window.MatrixAuth.setGuestName(r, acct.mxid, who, me.user_id); } catch (e) {}
-        // default tier: a commenter — comment + suggest only, until promoted
-        try { if (window.MatrixAuth.setCommenter) await window.MatrixAuth.setCommenter(r, acct.mxid, me.user_id); } catch (e) {}
-        onInvited && onInvited(acct.mxid, who);
+        // apply the chosen tier: a commenter can comment + suggest only; an editor
+        // (the default) can edit and draft directly. Only commenters are recorded.
+        if (role === "commenter") { try { if (window.MatrixAuth.setCommenter) await window.MatrixAuth.setCommenter(r, acct.mxid, me.user_id); } catch (e) {} }
+        onInvited && onInvited(acct.mxid, who, role);
       }
       const url = window.MatrixAuth.buildInviteLink({ v: 1, hs: acct.domain, u: acct.localpart, p: acct.password, r: r || undefined, rt: roomTitle || undefined, n: who, g: 1, by: me.user_id });
-      setLink({ url, mxid: acct.mxid, name: who }); setNeedToken(false);
+      setLink({ url, mxid: acct.mxid, name: who, role }); setNeedToken(false);
     } catch (e) {
       if (e && e.code === "uia" && /registration token/i.test(e.message || "")) { setNeedToken(true); setErr(e.message); }
       else setErr((e && e.message) || "Couldn't create the guest account.");
@@ -105,11 +107,24 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
       {!link && (
         <>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 8, lineHeight: 1.45 }}>
-            Mints a <strong>guest account</strong> on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, confirm their name and set a password — no sign-up. They join as a <strong>commenter</strong>: they can comment and suggest edits inside this project, but can't edit or publish directly until you promote them.
+            Mints a <strong>guest account</strong> on <strong>{domain || "your homeserver"}</strong> and gives you one link. They click it, confirm their name and set a password — no sign-up. Pick what they can do below — you can change it later.
           </div>
           <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 4, fontSize: 9.5 }}>Who's this guest?</label>
           <input value={name} onChange={e => { setName(e.target.value); setErr(""); }} onKeyDown={e => e.key === "Enter" && create()} placeholder="e.g. Sam Rivera (City Hall source)" className="np-mono"
-            style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 6 }} />
+            style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 8 }} />
+          <label className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "block", marginBottom: 4, fontSize: 9.5 }}>What kind of guest?</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+            {[["editor", "Editor", "Edit and draft directly, comment, and chat."],
+              ["commenter", "Commenter", "Comment and suggest edits only — can't change the text."]].map(([val, label, desc]) => (
+              <label key={val} style={{ display: "flex", alignItems: "flex-start", gap: 6, cursor: "pointer", border: "1.5px solid " + (role === val ? "var(--ink)" : "var(--rule-strong)"), background: role === val ? "color-mix(in srgb, var(--yellow) 35%, transparent)" : "transparent", padding: "5px 7px" }}>
+                <input type="radio" name="npj-guest-role" checked={role === val} onChange={() => setRole(val)} style={{ marginTop: 2, accentColor: "var(--ink)", flex: "0 0 auto" }} />
+                <span style={{ minWidth: 0 }}>
+                  <span className="np-cond" style={{ fontWeight: 700, fontSize: 11.5, display: "block" }}>{label}</span>
+                  <span className="np-mono" style={{ fontSize: 9, color: "var(--ink-soft)", lineHeight: 1.35 }}>{desc}</span>
+                </span>
+              </label>
+            ))}
+          </div>
           {needToken && (
             <input value={token} onChange={e => setToken(e.target.value)} placeholder="registration token" className="np-mono"
               style={{ width: "100%", border: "1.5px solid var(--ink)", background: "var(--paper)", padding: "6px 8px", fontSize: 11.5, outline: "none", marginBottom: 6 }} />
@@ -123,7 +138,7 @@ function NewAccountInvite({ roomId, roomTitle, ensureRoom, onInvited }) {
       {link && (
         <>
           <div className="np-mono" style={{ fontSize: 10, color: "var(--verified)", marginBottom: 6, lineHeight: 1.4 }}>
-            Guest account for <strong>{link.name}</strong> created (<strong>{link.mxid}</strong>){roomId || ensureRoom ? " · invited to this project" : ""}. Send them this link:
+            Guest account for <strong>{link.name}</strong> created (<strong>{link.mxid}</strong>){roomId || ensureRoom ? <> · invited as {link.role === "commenter" ? "a commenter" : "an editor"}</> : ""}. Send them this link:
           </div>
           <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
             <input readOnly value={link.url} onFocus={e => e.target.select()} className="np-mono"
