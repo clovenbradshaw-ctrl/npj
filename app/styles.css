@@ -941,6 +941,46 @@ a { color: inherit; }
 @media (min-width: 761px) { .npj-nav-cols { flex-shrink: 0; } }
 
 /* ============================================================
+   Front page: cover (2/3) + rail (1/3) + overflow grid
+   The lineup is a two-column grid — cover story left, a rail of
+   compact briefs right. align-items:start lets the rail size to
+   its own contents; align-self:stretch on the rail makes its
+   left rule run the full height of the cover, so the space below
+   the last brief reads as deliberate headroom for more stories.
+   Collapses to a single stacked column on phones (below).
+   ============================================================ */
+.npj-front-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 44px;
+  align-items: start;
+}
+.npj-front-main { min-width: 0; }
+.npj-front-side {
+  min-width: 0;
+  align-self: stretch;
+  border-left: 1.5px solid var(--ink);
+  padding-left: 28px;
+}
+.npj-side-head {
+  padding-bottom: 12px;
+  margin-bottom: 2px;
+  border-bottom: 2.5px solid var(--ink);
+}
+.npj-side-item { padding: 20px 0; border-top: 1px solid var(--rule); }
+.npj-side-item:first-of-type { border-top: none; padding-top: 18px; }
+.npj-feed-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 32px 36px;
+}
+.npj-feed-item { min-width: 0; }
+/* Mid-width desktops/tablets: two overflow columns read better than three. */
+@media (max-width: 1080px) and (min-width: 761px) {
+  .npj-feed-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ============================================================
    Responsive layer
    The prototype shipped desktop-only (no media queries at all).
    These make the public site AND the newsroom usable on phones.
@@ -973,11 +1013,20 @@ a { color: inherit; }
   .npj-nav-spacer { display: none !important; }
   .npj-footer-inner { padding: 18px 16px !important; }
 
-  /* front page */
+  /* front page — the cover + rail + overflow grid all collapse to one column */
   .npj-cover { gap: 24px !important; }
   .npj-cover-h { font-size: 40px !important; }
-  .npj-row2 { grid-template-columns: 1fr !important; }
-  .npj-row2 > div { border-right: none !important; padding: 20px 0 !important; border-top: 1px solid var(--rule); }
+  .npj-front-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
+  .npj-front-side {
+    border-left: none !important;
+    padding-left: 0 !important;
+    margin-top: 30px !important;
+    border-top: 2.5px solid var(--ink) !important;
+  }
+  .npj-side-head { border-bottom: none !important; padding-bottom: 0 !important; margin: 14px 0 2px !important; }
+  .npj-feed-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
+  .npj-feed-item { padding: 22px 0 !important; border-top: 1px solid var(--rule); }
+  .npj-feed-item:first-child { border-top: none !important; }
   .npj-more-row { grid-template-columns: 100px 1fr !important; }
   .npj-more-row > span:last-child { display: none !important; }
   .npj-empty-h { font-size: 40px !important; }

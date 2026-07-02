@@ -1,10 +1,11 @@
 /* NPJ masthead + front page — revamped layout.
    The masthead is a two-piece chrome: a yellow header band (logo + taglines +
    utility links) and a dark section nav bar. On desktop the whole front page is
-   a centered 2/3-width column: a one-up cover story, a 3-across row, then the
-   rest as a single vertical feed. Each piece renders through its admin-chosen
-   layout template (FrontCard); the lineup order + templates come from
-   layout.front (see app/layout.jsx, app/AdminEditor.jsx). */
+   a centered 2/3-width column, and inside it a two-column grid: the cover story
+   owns the left 2/3, the next few stories stack as compact briefs in a 1/3 rail
+   on the right, and any overflow spills into a full-width grid below. Each piece
+   renders through its admin-chosen layout template (FrontCard); the lineup order
+   + templates come from layout.front (see app/layout.jsx, app/AdminEditor.jsx). */
 
 // Desktop front-page shell: a centered column 2/3 of the screen wide (capped so
 // it never runs away on ultra-wide displays). On phones every container goes
@@ -426,7 +427,7 @@ function TagRow({ tags, small }) {
    is a FRONT_CARD_TEMPLATES key (image-top / image-left / overlay / …) that
    decides where the photo sits relative to the title + subtitle. The same card
    renders every placement, so the admin's pick and the public page never drift. */
-function FrontCard({ item, template, variant, onOpen }) {
+function FrontCard({ item, template, variant, onOpen, stack }) {
   const mobile = window.useIsMobile();
   const lead = variant === "lead";
   const T = (window.FRONT_CARD_TEMPLATES && window.FRONT_CARD_TEMPLATES[template]) || { img: lead ? "below" : "top" };
@@ -593,7 +594,10 @@ function FrontCard({ item, template, variant, onOpen }) {
   // height (the photo is the height authority; the text is clipped to it with a
   // fade so an overlong standfirst reads as "continued", not cut off). On phones
   // and in secondary cards the photo stays below the text as before.
-  const useTwoColCover = lead && place === "below" && hasPhoto && !mobile;
+  // `stack` (set when the cover shares the row with the 1/3 rail) keeps the cover
+  // as a single stacked column — headline, photo, standfirst — instead of splitting
+  // text|photo, which would be too tight in the narrower 2/3 lane.
+  const useTwoColCover = lead && place === "below" && hasPhoto && !mobile && !stack;
   if (useTwoColCover) {
     return (
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 36, alignItems: "stretch" }}>
@@ -638,9 +642,51 @@ function FrontCard({ item, template, variant, onOpen }) {
   );
 }
 
-/* ---- Front-page lineup ---- */
+/* A compact "brief" for the 1/3 rail beside the cover. Deliberately lighter than
+   a full FrontCard — a small photo, a kicker, a tight headline and the date — so
+   a handful stack in the rail without competing with the cover story. Clicking
+   the photo or the headline opens the piece; badges (unpublished / scheduled)
+   carry through so the admin still sees a brief's state at a glance. */
+function SideCard({ item, onOpen }) {
+  const open = () => onOpen && onOpen(item.slug);
+  const hasPhoto = !!(item.image && item.image.src && window.MediaImg);
+  const kicker = (item.tags || [])[0] || item.kicker || "Latest";
+  return (
+    <article>
+      {hasPhoto && (
+        <button onClick={open} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", marginBottom: 12 }}>
+          <window.MediaImg srcs={[item.image.store, item.image.src]} alt={item.image.description || item.image.caption || item.headline || ""}
+            fit={item.image.fit} crop={item.image.crop}
+            style={{ width: "100%", height: 150, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
+        </button>
+      )}
+      <div className="np-mono" style={{ fontWeight: 600, fontSize: 11, letterSpacing: ".14em", textTransform: "uppercase",
+        color: "var(--ink-soft)", marginBottom: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        {kicker}
+        {item.status === "unpublished" && <UnpubBadge small />}
+        {item._scheduled && <SchedBadge small when={item.releaseAt} />}
+      </div>
+      <h3 onClick={open} style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 22, lineHeight: 1.05,
+        textTransform: "uppercase", margin: "0 0 8px", cursor: "pointer", color: "var(--ink)" }}>
+        {item.headline}
+      </h3>
+      {item.dek && <p style={{ fontFamily: "var(--serif)", fontSize: 15, lineHeight: 1.45, margin: "0 0 8px", color: "var(--ink-soft)" }}>{item.dek}</p>}
+      {item.published && <div className="np-mono" style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>{shortDate(item.published)}</div>}
+    </article>
+  );
+}
+
+/* ---- Front-page lineup ----
+   The page is a two-column masthead-width grid: the cover story owns the left
+   2/3, and the next few stories stack in a 1/3 rail on the right. The rail sizes
+   to its contents and hangs from the top, so with only a story or two the empty
+   space beneath it is deliberate headroom — room for the lineup to grow, not a
+   gap to fill. Once the rail is full, further stories spill into a full-width
+   grid below both columns. On phones the whole thing collapses to one column:
+   cover, then rail briefs, then the overflow grid, top to bottom. */
 function FrontLineup({ items, onOpen }) {
   const { layout } = React.useContext(window.LayoutCtx);
+  const mobile = window.useIsMobile();
   const front = layout.front || {};
   // Admin curation: an explicit slug order (the hotswap) wins; otherwise the
   // newest-first order the record came in with.
@@ -652,49 +698,59 @@ function FrontLineup({ items, onOpen }) {
   const lead = ordered.find(a => a.status !== "unpublished" && !a._scheduled)
     || ordered.find(a => a.status !== "unpublished") || ordered[0];
   const rest = ordered.filter(a => a !== lead);
-  const row2 = rest.slice(0, 3);   // the 3-across row
-  const feed = rest.slice(3);      // everything else — a vertical feed
+  // The rail holds the freshest few beside the cover; the cap keeps it from
+  // towering over the cover. Everything past it drops into the overflow grid.
+  const RAIL_MAX = 4;
+  const rail = rest.slice(0, RAIL_MAX);
+  const feed = rest.slice(RAIL_MAX);
+  const hasRail = rail.length > 0;
   const tpl = (slug, pos) => window.cardTemplateFor(layout, slug, pos);
-  // Feed rows read best as side-by-side (photo + text) cards; an explicit
-  // per-article template override still wins.
-  const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-left";
+  // Overflow cards read best as photo-topped grid cards; an explicit per-article
+  // template override still wins.
+  const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-top";
 
   return (
     <>
-      {/* Cover story — laid out by its template (admin-chosen or inherited) */}
-      {lead && (
-        <section className="npj-cover" style={{ paddingBottom: 44 }}>
-          <FrontCard item={lead} variant="lead" template={tpl(lead.slug, "lead")} onOpen={onOpen} />
-        </section>
-      )}
+      <div className={hasRail ? "npj-front-grid" : undefined}>
+        {/* Cover story — the left 2/3. With a rail beside it the cover stacks
+            (headline → photo → standfirst) so it holds the lane cleanly; on its
+            own it keeps its full-width two-column treatment. Laid out by its
+            template (admin-chosen or inherited). */}
+        {lead && (
+          <section className="npj-cover npj-front-main" style={{ paddingBottom: hasRail ? 0 : 44 }}>
+            <FrontCard item={lead} variant="lead" template={tpl(lead.slug, "lead")} stack={hasRail && !mobile} onOpen={onOpen} />
+          </section>
+        )}
 
-      {/* Second row — up to 3 cards in a column grid */}
-      {row2.length > 0 && (
-        <section className="npj-row2" style={{ borderTop: "2.5px solid var(--ink)", display: "grid", gridTemplateColumns: `repeat(${Math.min(row2.length, 3)}, 1fr)` }}>
-          {row2.map((s, i) => {
-            const isLast = i === row2.length - 1;
-            return (
-              <div key={s.slug || i} style={{ padding: "26px " + (isLast ? "0" : "36px") + " 34px " + (i === 0 ? "0" : "36px"), borderRight: isLast ? "none" : "1.5px solid var(--ink)" }}>
-                <FrontCard item={s} variant="card" template={tpl(s.slug, "card")} onOpen={onOpen} />
+        {/* The 1/3 rail — the next few stories as compact briefs. */}
+        {hasRail && (
+          <aside className="npj-front-side">
+            <div className="np-eyebrow npj-side-head" style={{ color: "var(--ink-soft)" }}>More stories</div>
+            {rail.map((s, i) => (
+              <div key={s.slug || i} className="npj-side-item">
+                <SideCard item={s} onOpen={onOpen} />
               </div>
-            );
-          })}
-        </section>
-      )}
+            ))}
+          </aside>
+        )}
+      </div>
 
-      {/* The rest — a single vertical feed of side-by-side cards */}
+      {/* Overflow — a full-width grid that appears only once the rail is full.
+          This is the "when there's more" spillover the front page grows into. */}
       {feed.length > 0 && (
-        <section style={{ borderTop: "2.5px solid var(--ink)", paddingTop: 8 }}>
-          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "12px 0 2px" }}>More from the newsroom</div>
-          {feed.map((s, i) => (
-            <div key={s.slug || i} style={{ padding: "22px 0", borderTop: i === 0 ? "none" : "1px solid var(--rule)" }}>
-              <FrontCard item={s} variant="card" template={feedTpl(s.slug)} onOpen={onOpen} />
-            </div>
-          ))}
+        <section className="npj-feed" style={{ borderTop: "2.5px solid var(--ink)", marginTop: hasRail ? 40 : 0, paddingTop: 8 }}>
+          <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "12px 0 18px" }}>More from the newsroom</div>
+          <div className="npj-feed-grid">
+            {feed.map((s, i) => (
+              <div key={s.slug || i} className="npj-feed-item">
+                <FrontCard item={s} variant="card" template={feedTpl(s.slug)} onOpen={onOpen} />
+              </div>
+            ))}
+          </div>
         </section>
       )}
     </>
   );
 }
 
-Object.assign(window, { Masthead, FrontPage, FrontCard, Placeholder, TagRow, dedupeArticles });
+Object.assign(window, { Masthead, FrontPage, FrontCard, SideCard, Placeholder, TagRow, dedupeArticles });
