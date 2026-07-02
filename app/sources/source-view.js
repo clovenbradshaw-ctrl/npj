@@ -129,6 +129,43 @@
   // shows. Pure — unit-tested in tests/source-view.test.js.
   function citedPassageVisible(rec) { return kindOf(rec) !== 'image' || !!(rec && rec.ocrShow); }
 
+  /* ---------------- human identity of an uploaded file ----------------
+     An uploaded document lands titled by its raw filename — the newsroom sees
+     things like "2026.6.29_Policing_Public_Safety.pdf": a date jammed against an
+     underscore/dot-separated topic and an extension. The card can't tell you WHAT
+     the document is or WHEN it's from when that's shown verbatim. docLabel teases
+     the pieces apart, mechanically (no model):
+       · name — the topic, de-slugged into words ("Policing Public Safety")
+       · date — the document's own date, read off the front of the filename
+                 ("Jun 29, 2026"), '' when the name carries none
+       · kind — the coarse type label ("PDF", "Image", …)
+     Pure — unit-tested in tests/source-view.test.js. */
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  // A leading date token in a filename: 2026.6.29 / 2026-06-29 / 2026_6_29 (a
+  // consistent separator), or the compact 20260629. Either way it must be
+  // followed by a non-digit (or end), so "2020report" isn't read as a year.
+  function leadingDate(base) {
+    base = str(base);
+    var m = base.match(/^\s*(\d{4})[.\-_](\d{1,2})[.\-_](\d{1,2})(?=\D|$)/)
+         || base.match(/^\s*(\d{4})(\d{2})(\d{2})(?=\D|$)/);
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3];
+    if (mo < 1 || mo > 12 || d < 1 || d > 31 || !MONTHS[mo - 1]) return null;
+    return { raw: m[0], text: MONTHS[mo - 1] + ' ' + d + ', ' + y };
+  }
+  // separators (dots, dashes, underscores, plus) → spaces; collapse
+  function deSlug(s) { return str(s).replace(/[.\-_+]+/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function docLabel(rec) {
+    rec = rec || {};
+    var fname = str(rec.filename || rec.title || '');
+    var base = fname.replace(/\.[a-z0-9]{1,6}$/i, '');   // drop the extension first
+    var dt = leadingDate(base);
+    var rest = dt ? base.slice(dt.raw.length) : base;    // the topic, minus any date prefix
+    var name = deSlug(rest);
+    if (!name) name = dt ? 'Uploaded document' : (deSlug(base) || fname || 'Uploaded document');
+    return { name: name, date: dt ? dt.text : '', kind: kindLabel(rec) };
+  }
+
   /* ---------------- a renderable URL ---------------- */
   // Resolve to something an <img>/<iframe> can load right now. Best-effort —
   // returns the raw url on failure rather than throwing.
@@ -602,7 +639,7 @@
     recKey: recKey,
     registerBlob: registerBlob, blobUrl: blobUrl, getBlob: getBlob, hasBlob: hasBlob,
     kindOf: kindOf, detectKind: detectKind, kindPinned: kindPinned, ADAPT_KINDS: ADAPT_KINDS,
-    kindLabel: kindLabel, isViewable: isViewable, hasFile: hasFile,
+    kindLabel: kindLabel, docLabel: docLabel, isViewable: isViewable, hasFile: hasFile,
     ocrEligible: ocrEligible, ocrEnabled: ocrEnabled, citedPassageVisible: citedPassageVisible,
     displayUrl: displayUrl, bytesFor: bytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
