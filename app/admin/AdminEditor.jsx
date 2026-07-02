@@ -86,10 +86,17 @@ function AdminEditor() {
   const FRONT = (window.NPJ && window.NPJ.FRONT) || {};
   const frontPool = [].concat(FRONT.lead ? [FRONT.lead] : [], Array.isArray(FRONT.secondary) ? FRONT.secondary : [])
     .filter(a => a && a.slug && a.status !== "unpublished");
-  const frontOrdered = window.orderFrontItems(frontPool, front);
+  // The cover is pinned to the newest published piece (frontPool arrives
+  // newest-first) — matches the public front page, which ignores front.order
+  // for the lead slot so a stale pin can never outlive a genuinely newer story.
+  // Only the rest of the lineup (rail + feed) is admin-orderable.
+  const frontLead = frontPool[0] || null;
+  const frontOrdered = frontLead ? [frontLead, ...window.orderFrontItems(frontPool.slice(1), front)] : [];
   const slotLabel = (i) => i === 0 ? "Cover" : i <= 3 ? "Row · " + i : "Feed · " + (i - 3);
-  // hotswap: persist the FULL current order with the one move applied
-  const reorderFront = (i, d) => setFront({ order: move(frontOrdered.map(x => x.slug), i, d) });
+  // hotswap: persist the FULL current order with the one move applied. The
+  // cover (i === 0) can't move — it's not user-orderable — and slot 1 can't
+  // move up into it, so front.order[0] is always harmlessly the true cover.
+  const reorderFront = (i, d) => { if (i === 0 || (i === 1 && d < 0)) return; setFront({ order: move(frontOrdered.map(x => x.slug), i, d) }); };
   const setCard = (slug, name) => {
     const cards = { ...(front.cards || {}) };
     if (!name) delete cards[slug]; else cards[slug] = name;
@@ -191,7 +198,7 @@ function AdminEditor() {
             {/* Front-page lineup — hotswap positions + a layout template per piece */}
             <Section label="Front page lineup">
               <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
-                Reorder to <b style={{ color: AE.text }}>hotswap</b> which piece is the cover, the 3-across row, or the vertical feed. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
+                Reorder to <b style={{ color: AE.text }}>hotswap</b> the 3-across row and the vertical feed. The cover always shows the newest published piece and can't be pinned. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 9 }}>
                 <span className="np-mono" style={{ fontSize: 10, color: AE.soft, flex: "0 0 auto" }}>Template</span>
@@ -213,8 +220,12 @@ function AdminEditor() {
                     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
                       <span className="np-mono" style={{ fontSize: 9, color: i === 0 ? "#16140f" : AE.text, background: i === 0 ? "var(--yellow)" : "transparent", border: "1px solid " + (i === 0 ? "var(--yellow)" : AE.line), padding: "2px 5px", whiteSpace: "nowrap", flex: "0 0 auto" }}>{slotLabel(i)}</span>
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 13, color: AE.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.headline}>{a.headline || a.slug}</span>
-                      <MiniBtn onClick={() => reorderFront(i, -1)} title="Move up">↑</MiniBtn>
-                      <MiniBtn onClick={() => reorderFront(i, 1)} title="Move down">↓</MiniBtn>
+                      {i === 0
+                        ? <span className="np-mono" style={{ fontSize: 9, color: AE.soft, flex: "0 0 auto" }}>newest — not orderable</span>
+                        : (<React.Fragment>
+                            {i > 1 && <MiniBtn onClick={() => reorderFront(i, -1)} title="Move up">↑</MiniBtn>}
+                            <MiniBtn onClick={() => reorderFront(i, 1)} title="Move down">↓</MiniBtn>
+                          </React.Fragment>)}
                     </div>
                     <select value={override} onChange={(e) => setCard(a.slug, e.target.value)} style={{ ...selStyle, width: "100%", marginTop: 6, padding: "4px 6px" }}>
                       <option value="">Template default · {effLabel}</option>
