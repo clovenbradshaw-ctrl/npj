@@ -513,10 +513,17 @@ function FrontCard({ item, template, variant, onOpen, stack }) {
     : (lead ? 260 : 160); // left / right
   const Photo = ({ h, dark }) => {
     if (!hasPhoto) return h ? <Placeholder label="photo" h={h} dark={dark} /> : null;
+    // A fixed-height frame (secondary cards, overlays, the row thumbnails) always
+    // fills — zoomed/cropped to cover — so a "show whole image" (contain) photo
+    // doesn't strand itself in a letterboxed box. We drop the author's fit/crop
+    // in that case and let the plain <img objectFit:cover> path fill the frame.
+    // Only the cover story's auto-height photo (h == null) keeps the author's
+    // fit/crop and shows the whole frame at its natural ratio.
+    const fill = !!h;
     return (
       <button onClick={open} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer" }}>
         <window.MediaImg srcs={[item.image.store, item.image.src]} alt={item.image.description || item.image.caption || item.headline || ""}
-          fit={item.image.fit} crop={item.image.crop}
+          {...(fill ? {} : { fit: item.image.fit, crop: item.image.crop })}
           style={{ width: "100%", height: h ? h : "auto", objectFit: h ? "cover" : undefined, display: "block", border: "1.5px solid var(--ink)" }} />
       </button>
     );
@@ -655,8 +662,10 @@ function SideCard({ item, onOpen }) {
     <article>
       {hasPhoto && (
         <button onClick={open} style={{ display: "block", width: "100%", background: "none", border: 0, padding: 0, cursor: "pointer", marginBottom: 12 }}>
+          {/* A brief's photo always fills its frame (zoomed/cropped to cover),
+              never letterboxed — so we skip the author's fit/crop and let the
+              plain <img objectFit:cover> path do the fill. */}
           <window.MediaImg srcs={[item.image.store, item.image.src]} alt={item.image.description || item.image.caption || item.headline || ""}
-            fit={item.image.fit} crop={item.image.crop}
             style={{ width: "100%", height: 150, objectFit: "cover", display: "block", border: "1.5px solid var(--ink)" }} />
         </button>
       )}
