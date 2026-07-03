@@ -354,7 +354,7 @@ function App() {
   // read hits the network) — hold a loading flag so the reader route shows a
   // spinner instead of a blank page while the log streams in
   const [articleLoading, setArticleLoading] = useState(false);
-  // #article;read=<slug> deep link — resolved on mount, and it must hold the
+  // #article&read=<slug> deep link — resolved on mount, and it must hold the
   // "no article → go home" guard open while the log is being fetched
   const pendingRead = useRef((() => {
     const part = hp.find(p => /^read=/.test(p));
@@ -517,7 +517,10 @@ function App() {
   useEffect(() => { if (route === "article" && !window.NPJ.ARTICLE && !pendingRead.current && !articleLoading) setRoute("home"); }, [route, articleLoading]);
 
   // keep the URL hash in sync so a refresh restores the view — including which
-  // article is open (#article;read=<slug> is also the canonical share link)
+  // article is open (#article&read=<slug> is also the canonical share link).
+  // Parts are joined with "&", never ";": messaging and mail apps stop
+  // auto-linking a URL at a semicolon, so shared links were getting cut off at
+  // "#article". The parser above still splits on ";" for links already in the wild.
   useEffect(() => {
     if (route === "home") { history.replaceState(null, "", location.pathname + location.search); return; }
     const f = [route];
@@ -528,7 +531,7 @@ function App() {
       if (entityOpen) f.push("figures");
     }
     if (route === "newsroom" && draftId && draftId !== "working") f.push("doc=" + encodeURIComponent(draftId));
-    history.replaceState(null, "", "#" + f.join(";"));
+    history.replaceState(null, "", "#" + f.join("&"));
   }, [route, audit, showSugg, entityOpen, draftId, articleRev]);
 
   const goHome = () => { setRoute("home"); window.scrollTo(0, 0); };

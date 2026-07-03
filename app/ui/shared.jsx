@@ -119,7 +119,10 @@ window.NpjPlainText = {
    per document, articles/<slug>.jsonl): the raw URL serves the bytes, the blob
    URL opens the file in the GitHub UI. */
 function npjSiteBase() { return location.origin + location.pathname.replace(/index\.html?$/i, "").replace(/\/?$/, "/"); }
-function npjArticleUrl(slug) { return npjSiteBase() + "#article;read=" + encodeURIComponent(slug); }
+// "&" between hash parts, never ";" — chat and mail apps stop auto-linking a
+// pasted URL at a semicolon, which cut shared links off at "#article". The
+// router parses ";" too, so links minted before this keep working.
+function npjArticleUrl(slug) { return npjSiteBase() + "#article&read=" + encodeURIComponent(slug); }
 function npjArticleRawUrl(slug) {
   return (window.NpjArticles && window.NpjArticles.rawUrl)
     ? window.NpjArticles.rawUrl(slug)
