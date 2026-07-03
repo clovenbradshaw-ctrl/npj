@@ -71,7 +71,7 @@ in the log (and in git history).
 The front page lists the record straight from GitHub (**one git-tree call** over
 `articles/*.jsonl` — the directory *is* the index; there is no separate
 manifest), the reader folds a document's log into the formatted article
-(`#article;read=<slug>` is the share link, served from the GitHub raw CDN), and
+(`#article&read=<slug>` is the share link, served from the GitHub raw CDN), and
 the version badge opens a word-level diff between any two events. **Edit after
 publish** is gated to the admin and the article's `assignees` (the publisher by
 default). *(Only the article text + line-up live in GitHub; photos still freeze

@@ -281,7 +281,7 @@ function nrNormalizeEmbeds(root) {
 function slugify(s) { return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, ""); }
 
 // A published piece is anchored by a permanent GUID, not its headline: the
-// share URL is #article;read=<guid> and the file is articles/<guid>.jsonl, so
+// share URL is #article&read=<guid> and the file is articles/<guid>.jsonl, so
 // the link never changes when the title is later edited. A v4 UUID is lowercase
 // hex + single hyphens, so it survives slugify() untouched (the read path
 // slugifies every slug it resolves). genGuid prefers crypto.randomUUID, falls
@@ -3783,7 +3783,7 @@ function Spinner() { return <span style={{ width: 11, height: 11, border: "2px s
    checkmark is ever painted on something that didn't succeed. */
 function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, title, session, getContent, customSlug, onSlug, draftId, initialByline, initialEditors }) {
   // The published stub is a permanent GUID, minted once and frozen — the share
-  // URL is #article;read=<guid>, so the link never changes when the headline is
+  // URL is #article&read=<guid>, so the link never changes when the headline is
   // edited later. Reuse the draft's already-assigned GUID; mint one the first
   // time a piece reaches the gate and persist it onto the draft (via onSlug) so
   // it survives reopening the gate and a reload.
