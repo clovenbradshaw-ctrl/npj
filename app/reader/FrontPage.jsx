@@ -697,13 +697,14 @@ function FrontLineup({ items, onOpen }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
   const front = layout.front || {};
-  // The cover is ALWAYS the newest live piece — `items` arrives newest-first
-  // (see FrontPage), so this never depends on admin curation. A scheduled piece
-  // is future-dated (it can sort first in that raw order) but isn't live yet,
+  // The cover is ALWAYS the most-recently-touched live piece — `items` arrives
+  // ordered by last update (see byNewest), so a freshly edited older story takes
+  // the cover, and this never depends on admin curation. A scheduled piece is
+  // future-dated (it can sort first in that raw order) but isn't live yet,
   // so it can't claim the cover; prefer a released piece and fall back to a
   // scheduled one only when there's nothing else (the admin preview). Without
   // this, a hotswap pin set for an older piece would keep it on the cover
-  // forever, even after a genuinely newer story publishes.
+  // forever, even after a genuinely newer story publishes or is updated.
   const lead = items.find(a => a.status !== "unpublished" && !a._scheduled)
     || items.find(a => a.status !== "unpublished") || items[0];
   // Admin curation (the hotswap) still governs how everything ELSE lines up —
