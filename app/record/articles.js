@@ -622,9 +622,18 @@
     return texts.filter(t => t != null).join("\n");
   }
 
+  // Front-page order is by the most recent TOUCH — the later of `updated` (the
+  // newest version's date) and `published` (the first) — so a freshly edited
+  // older piece bumps back up to the hero, not just brand-new publishes. Both
+  // stamps are YYYY-MM-DD, so a lexical compare is a chronological one; a piece
+  // with no `updated` falls back to `published`. `published` breaks exact ties.
   function byNewest(a, b) {
-    return String(b.published || "").localeCompare(String(a.published || "")) ||
-           String(b.updated || "").localeCompare(String(a.updated || ""));
+    const touched = (x) => {
+      const p = String(x.published || ""), u = String(x.updated || "");
+      return u > p ? u : p;
+    };
+    return touched(b).localeCompare(touched(a)) ||
+           String(b.published || "").localeCompare(String(a.published || ""));
   }
 
   /* List + fold every document into the front-page metas. Cached by blob sha, so

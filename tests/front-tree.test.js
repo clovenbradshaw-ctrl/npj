@@ -78,6 +78,37 @@ test("listArticles folds the git-tree + raw bodies into sorted front-page metas"
   } finally { restore(); }
 });
 
+// genesisLine/editLine stamp `ts` with "now"; re-stamp it so a test can pin a
+// piece's publish and edit instants and make the ordering deterministic.
+function withTs(line, ts) { const e = JSON.parse(line); e.ts = ts; return JSON.stringify(e); }
+
+test("listArticles orders by most recent update — a re-edited older piece leads", async () => {
+  // "edited-old" was published back in May but re-edited on Jul 2; "fresh" was
+  // published Jun 20 and never touched since. By publish date alone "fresh" wins,
+  // but the front page orders by last touch, so the freshly edited piece leads.
+  const editedOld =
+    withTs(A.genesisLine({
+      slug: "edited-old", headline: "Edited old piece", dek: "A subtitle", column: "Investigations",
+      tags: ["bench"], authors: ["@a:h"], published: "2026-05-01",
+      body: [{ type: "p", tokens: ["Lorem ipsum dolor sit amet."] }]
+    }, "@a:h"), "2026-05-01T12:00:00.000Z") + "\n" +
+    withTs(A.editLine("edited-old", { dek: "A freshly tightened subtitle" }, "@a:h", "re-edit"),
+      "2026-07-02T12:00:00.000Z") + "\n";
+  const fresh = withTs(A.genesisLine({
+    slug: "fresh", headline: "Fresh publish", dek: "A subtitle", column: "Investigations",
+    tags: ["bench"], authors: ["@a:h"], published: "2026-06-20",
+    body: [{ type: "p", tokens: ["Lorem ipsum dolor sit amet."] }]
+  }, "@a:h"), "2026-06-20T12:00:00.000Z") + "\n";
+  const restore = stubGitHub({ "edited-old": editedOld, "fresh": fresh });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 2, "both documents listed");
+    assert.equal(metas[0].slug, "edited-old", "the re-edited older piece takes the hero");
+    assert.equal(metas[0].updated, "2026-07-02", "sorted on its newest version's date");
+    assert.equal(metas[1].slug, "fresh", "the untouched newer publish falls in behind it");
+  } finally { restore(); }
+});
+
 test("a guid folder with no flat anchor renders — its INS event file IS the genesis", async () => {
   // Every article now lives in its own folder named by its guid; the publish
   // lands inside the folder, with no sibling articles/<guid>.jsonl anchor. The

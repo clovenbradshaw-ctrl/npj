@@ -86,9 +86,10 @@ function AdminEditor() {
   const FRONT = (window.NPJ && window.NPJ.FRONT) || {};
   const frontPool = [].concat(FRONT.lead ? [FRONT.lead] : [], Array.isArray(FRONT.secondary) ? FRONT.secondary : [])
     .filter(a => a && a.slug && a.status !== "unpublished");
-  // The cover is pinned to the newest published piece (frontPool arrives
-  // newest-first) — matches the public front page, which ignores front.order
-  // for the lead slot so a stale pin can never outlive a genuinely newer story.
+  // The cover is pinned to the most-recently-updated piece (frontPool arrives
+  // ordered by last touch) — matches the public front page, which ignores
+  // front.order for the lead slot so a stale pin can never outlive a genuinely
+  // newer (or freshly re-edited) story.
   // Only the rest of the lineup (rail + feed) is admin-orderable.
   const frontLead = frontPool[0] || null;
   const frontOrdered = frontLead ? [frontLead, ...window.orderFrontItems(frontPool.slice(1), front)] : [];
@@ -198,7 +199,7 @@ function AdminEditor() {
             {/* Front-page lineup — hotswap positions + a layout template per piece */}
             <Section label="Front page lineup">
               <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
-                Reorder to <b style={{ color: AE.text }}>hotswap</b> the 3-across row and the vertical feed. The cover always shows the newest published piece and can't be pinned. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ newest first.
+                Reorder to <b style={{ color: AE.text }}>hotswap</b> the 3-across row and the vertical feed. The cover always shows the most recently updated piece and can't be pinned. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ most recently updated first.
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 9 }}>
                 <span className="np-mono" style={{ fontSize: 10, color: AE.soft, flex: "0 0 auto" }}>Template</span>
