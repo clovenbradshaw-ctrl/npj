@@ -130,6 +130,10 @@
 <!-- the published record: per-document folders of timestamped version files
      (articles/<slug>/) — list, fold, publish, commit edits as new versions -->
 <script src="app/record/articles.js"></script>
+<!-- word-level (LCS) diff behind the edit-history pane; normalizes its own
+     output so a replaced word never renders as "wasappears". Pure, no deps —
+     consumed by versions.jsx and guarded by node --test. -->
+<script src="app/record/versions-diff.js"></script>
 <!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
      the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
 <script src="app/feedback/feedback.js"></script>

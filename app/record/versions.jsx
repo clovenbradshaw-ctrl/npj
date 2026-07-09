@@ -10,37 +10,13 @@
    current version. Diffs are word-level (LCS), rendered inline: additions are
    underlined green, deletions struck red. Mechanical, no model. */
 
-/* ---- word-level diff (LCS over tokens, punctuation-aware) ---- */
-function diffTokens(s) {
-  // keep whitespace as its own tokens so reflow is faithful
-  return String(s == null ? "" : s).split(/(\s+)/).filter(t => t.length);
-}
-function diffWords(aStr, bStr) {
-  const a = diffTokens(aStr), b = diffTokens(bStr);
-  const n = a.length, m = b.length;
-  // LCS table
-  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-  for (let i = n - 1; i >= 0; i--)
-    for (let j = m - 1; j >= 0; j--)
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-  const out = [];
-  let i = 0, j = 0;
-  const push = (type, text) => { const last = out[out.length - 1]; if (last && last.type === type) last.text += text; else out.push({ type, text }); };
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { push("same", a[i]); i++; j++; }
-    else if (dp[i + 1][j] >= dp[i][j + 1]) { push("del", a[i]); i++; }
-    else { push("add", b[j]); j++; }
-  }
-  while (i < n) { push("del", a[i]); i++; }
-  while (j < m) { push("add", b[j]); j++; }
-  return out;
-}
-
-function diffStats(parts) {
-  let add = 0, del = 0;
-  parts.forEach(p => { const w = (p.text.trim().match(/\S+/g) || []).length; if (p.type === "add") add += w; else if (p.type === "del") del += w; });
-  return { add, del };
-}
+/* ---- word-level diff ----
+   The LCS token math + its whitespace repair live in app/record/versions-diff.js
+   (a plain module, so `node --test` can guard it); this renderer just consumes
+   the parts. diffWords already normalizes its output — a replaced word keeps a
+   space between its deletion and its insertion, so nothing renders as
+   "wasappears" and no struck run drags an edge space into "theMNPD". */
+const { diffWords, diffStats } = window.NpjVersionDiff;
 
 /* render ONE token-diff part — addition underlined green, deletion struck red */
 function renderPart(p, i) {
@@ -347,7 +323,7 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
             <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "11px 13px", marginBottom: 18 }}>
               <div className="np-mono" style={{ fontSize: 12, fontWeight: 600 }}>⊛ v.{vB.sha} · current</div>
               <VersionMeta v={vB} size={10} />
-              {vB.message && <div style={{ fontFamily: "var(--serif)", fontSize: 13, marginTop: 5, lineHeight: 1.4 }}>{vB.message}</div>}
+              {vB.message && <div style={{ fontFamily: "var(--serif)", fontSize: 13, marginTop: 5, lineHeight: 1.4, overflowWrap: "anywhere" }}>{vB.message}</div>}
             </div>
             <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginBottom: 12 }}>
               First and only version — no edits since publishing. A diff appears once this piece is revised.
@@ -377,7 +353,7 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
                   style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", cursor: "pointer", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
                   <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>⊛ v.{v.sha}{i === 0 ? " · current" : ""}</div>
                   <VersionMeta v={v} />
-                  {(v.note || v.op === "INS") && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35 }}>{v.note || "Published"}</div>}
+                  {(v.note || v.op === "INS") && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35, overflowWrap: "anywhere" }}>{v.note || "Published"}</div>}
                   {/* what changed from the version before this one, in plain words */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
                     {changeChips(list[i + 1], v).map((c, ci) => <Chip key={ci} tone={c.tone}>{c.label}</Chip>)}
