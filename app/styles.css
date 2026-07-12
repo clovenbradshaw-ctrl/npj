@@ -253,6 +253,16 @@ a { color: inherit; }
 }
 .cite-span:hover { background: var(--paper-2); }
 .cite-span[data-current="1"] { background: rgba(255,236,1,0.35); }
+/* a passage as a TWO-WAY pivot: the snippet jumps to the story, "in source"
+   opens the document itself at that exact span */
+.cite-span-row { display: flex; align-items: stretch; border-top: 1px solid var(--rule); }
+.cite-span-row .cite-span { border-top: 0; flex: 1; min-width: 0; }
+.cite-span-src {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  border: 0; border-left: 1px solid var(--rule); background: transparent; color: var(--data);
+  padding: 0 9px; font-size: 10px; letter-spacing: .02em; white-space: nowrap;
+}
+.cite-span-src:hover { background: rgba(255,236,1,0.4); }
 
 /* ---- source hover card ---- */
 .srccard {
@@ -381,6 +391,34 @@ a { color: inherit; }
    jump back into the story (stays on the page, no new tab) */
 .srclb-cited { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--ink); }
 
+/* the filmstrip — every source as a thumbnail along the foot of the browser, so
+   the whole set is in view and any one is a click away (not just ‹ › paging) */
+.srclb-strip {
+  flex: 0 0 auto; display: flex; gap: 8px; align-items: center;
+  padding: 9px 12px; border-top: 1.5px solid var(--ink); background: var(--paper-2);
+  overflow-x: auto; overflow-y: hidden;
+}
+.srclb-thumb {
+  position: relative; flex: 0 0 auto; padding: 0; border: 0; background: none; cursor: pointer;
+  opacity: .62; transition: opacity .12s ease, transform .12s ease; line-height: 0;
+}
+.srclb-thumb:hover { opacity: .9; }
+.srclb-thumb.is-on { opacity: 1; }
+.srclb-thumb.is-on .srcthumb { outline: 2.5px solid var(--yellow-deep); outline-offset: 1px; }
+.srclb-thumb-n {
+  position: absolute; top: -5px; left: -5px; min-width: 15px; height: 15px; padding: 0 3px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--ink); color: var(--paper); font-size: 9px; font-weight: 700; border-radius: 8px; line-height: 1;
+}
+@media (max-width: 760px) { .srclb-strip { padding: 7px 10px; } }
+
+/* the cited passage, marked + scrolled to when a source is opened "at" a span */
+.src-locate {
+  background: color-mix(in srgb, var(--yellow) 62%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--yellow) 62%, transparent);
+  border-radius: 1px; color: inherit; scroll-margin: 40px 0;
+}
+
 /* ---- the Sources explorer (the receipts, made browsable) ----
    A faceted footer: filter chips by kind, a search over titles + quoted passages,
    a sort, and cards that open each source full-size IN THE APP. */
@@ -422,11 +460,25 @@ a { color: inherit; }
 }
 @media (max-width: 720px) { .srcx-list { columns: 1; } }
 .srcx-open {
-  display: flex; gap: 9px; align-items: flex-start; text-align: left; width: 100%;
+  display: flex; gap: 11px; align-items: flex-start; text-align: left; width: 100%;
   background: none; border: 0; padding: 11px 11px 10px; cursor: pointer; font: inherit; color: var(--ink);
 }
 .srcx-open:hover { background: var(--paper-2); }
-.srcx-num { flex: 0 0 auto; line-height: 1; margin-left: 0; }
+/* the thumbnail carries the source's number as a corner badge — a picture you can
+   scan, not a bare numeral */
+.srcx-thumbwrap { position: relative; flex: 0 0 auto; }
+.srcx-num {
+  position: absolute; top: -7px; left: -7px; flex: 0 0 auto; line-height: 1; margin: 0;
+  box-shadow: 0 1px 3px rgba(8,7,5,.3);
+}
+/* the hero entry into the source browser */
+.srcx-browse {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: 0 0 auto;
+  border: 1.5px solid var(--ink); background: var(--yellow); color: var(--ink);
+  padding: 6px 13px; font-family: var(--cond); font-weight: 700; font-size: 13px;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+.srcx-browse:hover { background: var(--ink); color: var(--yellow); }
 .srcx-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .srcx-title {
   font-family: var(--cond); font-weight: 600; font-size: 15px; line-height: 1.14; color: var(--ink);

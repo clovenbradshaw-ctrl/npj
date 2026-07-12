@@ -395,6 +395,59 @@ function SourceFilePreview({ rec, onExpand }) {
   );
 }
 
+/* ---------- a compact source thumbnail ----------
+   A source, at a glance — the point of "seeing" the sources rather than reading a
+   list of titles. An uploaded image/scan shows its actual bytes (resolved through
+   NpjSourceView.displayUrl); everything else — a PDF, a web capture, an interview,
+   a dataset, a text file — gets an honest kind tile (a big icon + a short label on
+   the document mat) so every source is a picture you can scan, tab through, and
+   pivot from. Presentational + self-contained: hand it a source record and a size.
+   Reused by the Sources gallery footer and the full-screen source browser's
+   filmstrip. */
+function SourceThumb({ rec, size = 74, style }) {
+  const SV = window.NpjSourceView;
+  const NI = window.NpjInterview;
+  const iv = !!(NI && NI.isInterview(rec));
+  const kind = SV && SV.kindOf ? SV.kindOf(rec) : "unknown";
+  const hasFile = !!(SV && SV.hasFile && SV.hasFile(rec));
+  const isImg = !iv && kind === "image" && hasFile;
+  const [url, setUrl] = useState(null);
+  const [broken, setBroken] = useState(false);
+  useEffect(() => {
+    let alive = true; setUrl(null); setBroken(false);
+    if (!isImg || !SV || !SV.displayUrl) return;
+    SV.displayUrl(rec).then(u => { if (alive) setUrl(u || null); }).catch(() => {});
+    return () => { alive = false; };
+  }, [rec && (rec.id || rec.key), isImg]); // eslint-disable-line
+  const mat = { background: "repeating-conic-gradient(#e9e4d6 0% 25%, #f3eee1 0% 50%) 50% / 14px 14px" };
+  const box = { position: "relative", width: size, height: size, flex: "0 0 auto",
+    border: "1.5px solid var(--ink)", overflow: "hidden", ...style };
+  if (isImg && url && !broken) {
+    return (
+      <span className="srcthumb" style={{ ...box, ...mat, lineHeight: 0 }}>
+        <img src={url} alt="" onError={() => setBroken(true)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+      </span>
+    );
+  }
+  // kind tile — a big icon over a short label on the document mat
+  const tile = iv ? { Icon: I.chat, label: "Interview" }
+    : kind === "pdf" ? { Icon: I.doc, label: "PDF" }
+    : kind === "text" ? { Icon: I.doc, label: "Text" }
+    : kind === "image" ? { Icon: I.images, label: "Image" }
+    : rec && rec.type === "data" ? { Icon: I.data, label: "Data" }
+    : (rec && (rec.archive_url || rec.original_url)) ? { Icon: I.link, label: "Web" }
+    : { Icon: I.doc, label: "Doc" };
+  const Icon = tile.Icon;
+  return (
+    <span className="srcthumb" style={{ ...box, background: "var(--paper-2)",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 3 }}>
+      <Icon style={{ fontSize: Math.round(size * 0.34), color: "var(--ink-soft)" }} />
+      <span className="np-mono" style={{ fontSize: 8.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--ink-soft)" }}>{tile.label}</span>
+    </span>
+  );
+}
+
 /* ---------- the source hover/click card ---------- */
 function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
   const s = window.NPJ.SOURCES[srcKey];
@@ -423,7 +476,10 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
   // "View document" action below still opens that same full-screen view.
   const viewable = !iv && isUpload && !!(SV && SV.isViewable && SV.isViewable(s));
   const canExpand = viewable && typeof onExpand === "function";
-  const expand = canExpand ? () => onExpand(srcKey) : undefined;
+  // opening the document from a citation lands on the exact pinned passage — but
+  // only pass it when the passage is presentable (an image's raw OCR is hidden
+  // unless the author vouched for it, so we don't seed a noisy "look for" banner)
+  const expand = canExpand ? () => onExpand(srcKey, showCited ? cited : "") : undefined;
   const showFile = !!preview && viewable;
   // When the inline preview isn't shown (the live reader), surface an explicit
   // action to open the document full screen — the inline thumbnail is the
@@ -535,7 +591,7 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
    locks the page scroll while open, and restores it on close. SourceViewer lives
    in the READ bundle (loaded before the reader renders), so by the time a reader
    can open this it's present; a stub message covers the vanishingly-rare race. */
-function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited }) {
+function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate }) {
   // renderCited(key) is an optional host hook returning the passages this source
   // backs, as click-to-jump snippets shown under the document — so a reader can
   // hop back into the story without ever leaving the page (no new tab).
@@ -550,6 +606,11 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited }) {
     return Math.min(list.length - 1, Math.max(0, want >= 0 ? want : 0));
   });
   const gallery = !!(list && list.length > 1);
+  // `locate` (the pinned quote) is the "open the source AT the cited span" pivot —
+  // it applies only to the source the lightbox was opened on. Tab to another source
+  // and it no longer holds, so we drop it the moment the reader navigates away.
+  const openIdx = useRef(null);
+  if (openIdx.current === null) openIdx.current = idx;
   const activeKey = (list && list.length) ? list[Math.min(idx, list.length - 1)] : srcKey;
   const s = (list ? null : rec) || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[activeKey]) || null;
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800);
@@ -608,10 +669,29 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited }) {
         </header>
         <div className="srclb-body np-scroll">
           {window.SourceViewer
-            ? <window.SourceViewer key={activeKey || (s.id || s.key)} srcKey={activeKey} rec={s} height={bodyH} />
+            ? <window.SourceViewer key={activeKey || (s.id || s.key)} srcKey={activeKey} rec={s} height={bodyH}
+                locate={idx === openIdx.current ? locate : null} />
             : <div className="np-mono" style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>Loading the document viewer…</div>}
           {(() => { const cited = renderCited ? renderCited(activeKey) : null; return cited ? <div className="srclb-cited">{cited}</div> : null; })()}
         </div>
+        {/* the filmstrip — every source as a thumbnail, so browsing the receipts is a
+           first-class activity: see them all at once and jump straight to any one,
+           not just page ‹ › through them one at a time */}
+        {gallery && (
+          <div className="srclb-strip np-scroll" role="tablist" aria-label="All sources">
+            {list.map((k, i) => {
+              const r = (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || { id: k };
+              const on = i === idx;
+              return (
+                <button key={k} role="tab" aria-selected={on} onClick={() => setIdx(i)}
+                  className={"srclb-thumb" + (on ? " is-on" : "")} title={r.title || r.id || k}>
+                  <SourceThumb rec={r} size={54} />
+                  <span className="srclb-thumb-n np-mono">{i + 1}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1000,5 +1080,5 @@ function Carousel({ images, caption, style }) {
   );
 }
 
-Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceCard, SourceLightbox, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
+Object.assign(window, { I, SRC_TYPE, fmtDate, shortDate, Handle, npjPerson, npjRichText, Byline, ContributorChip, SourceTag, SourceThumb, SourceCard, SourceLightbox, ShareBar, DraftStatusPill, npjSiteBase, npjArticleUrl, npjArticleRawUrl, npjArticleLogUrl,
   MediaImg, CropFrame, imageCandidates, Carousel, ZoomImg, openLightbox });
