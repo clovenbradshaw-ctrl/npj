@@ -471,6 +471,25 @@ a { color: inherit; }
   position: absolute; top: -7px; left: -7px; flex: 0 0 auto; line-height: 1; margin: 0;
   box-shadow: 0 1px 3px rgba(8,7,5,.3);
 }
+/* ---- the Sources page gallery: every source as a thumbnail you open full-size ---- */
+.srcg-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px;
+}
+@media (max-width: 560px) { .srcg-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; } }
+.srcg-tile {
+  display: flex; flex-direction: column; text-align: left; cursor: pointer; font: inherit; color: var(--ink);
+  border: 1.5px solid var(--ink); background: var(--card); padding: 0; overflow: hidden;
+  box-shadow: 3px 3px 0 rgba(22,20,13,.10); transition: transform .1s ease, box-shadow .1s ease;
+}
+.srcg-tile:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 rgba(22,20,13,.16); }
+.srcg-tile .srcthumb { border-width: 0 0 1.5px 0 !important; }
+.srcg-body { display: flex; flex-direction: column; gap: 4px; padding: 9px 11px 11px; min-width: 0; }
+.srcg-title {
+  font-family: var(--cond); font-weight: 600; font-size: 15px; line-height: 1.12;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.srcg-meta { display: flex; flex-wrap: wrap; gap: 4px; font-family: var(--mono); font-size: 10px; color: var(--ink-soft); }
+
 /* the hero entry into the source browser */
 .srcx-browse {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer; flex: 0 0 auto;

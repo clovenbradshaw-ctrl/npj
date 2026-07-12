@@ -591,7 +591,7 @@ function SourceCard({ srcKey, onClose, pinned, quote, preview, onExpand }) {
    locks the page scroll while open, and restores it on close. SourceViewer lives
    in the READ bundle (loaded before the reader renders), so by the time a reader
    can open this it's present; a stub message covers the vanishingly-rare race. */
-function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate }) {
+function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate, recs }) {
   // renderCited(key) is an optional host hook returning the passages this source
   // backs, as click-to-jump snippets shown under the document — so a reader can
   // hop back into the story without ever leaving the page (no new tab).
@@ -599,24 +599,36 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate
   // tab through every source at full size — the ‹ › buttons, the ← → arrow keys,
   // and an "n / total" counter. Opened with a lone srcKey (a citation card's
   // "View document"), it's a single document with no nav — unchanged from before.
-  const list = Array.isArray(keys) ? keys.filter(Boolean) : null;
+  // The set can arrive two ways: as source KEYS resolved against the live ledger
+  // (window.NPJ.SOURCES — the reader's own citations), or as whole source RECORDS
+  // handed in directly (the site-wide Sources explorer, whose sources aren't in
+  // the current article's ledger). `count` and `recAt`/`keyAt` unify the two so
+  // the rest of the sheet doesn't care which it got.
+  const recList = Array.isArray(recs) ? recs.filter(Boolean) : null;
+  const keyList = Array.isArray(keys) ? keys.filter(Boolean) : null;
+  const count = recList ? recList.length : keyList ? keyList.length : 0;
+  const keyAt = (i) => keyList ? keyList[i] : (recList && recList[i] ? (recList[i].id || recList[i].key) : srcKey);
+  const recAt = (i) => recList ? recList[i]
+    : keyList ? (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[keyList[i]]) || { id: keyList[i] }
+    : (rec || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || null);
   const [idx, setIdx] = useState(() => {
-    if (!list || !list.length) return 0;
-    const want = typeof start === "number" ? start : list.indexOf(srcKey);
-    return Math.min(list.length - 1, Math.max(0, want >= 0 ? want : 0));
+    if (!count) return 0;
+    const want = typeof start === "number" ? start : (keyList ? keyList.indexOf(srcKey) : 0);
+    return Math.min(count - 1, Math.max(0, want >= 0 ? want : 0));
   });
-  const gallery = !!(list && list.length > 1);
+  const gallery = count > 1;
   // `locate` (the pinned quote) is the "open the source AT the cited span" pivot —
   // it applies only to the source the lightbox was opened on. Tab to another source
   // and it no longer holds, so we drop it the moment the reader navigates away.
   const openIdx = useRef(null);
   if (openIdx.current === null) openIdx.current = idx;
-  const activeKey = (list && list.length) ? list[Math.min(idx, list.length - 1)] : srcKey;
-  const s = (list ? null : rec) || (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[activeKey]) || null;
+  const clamped = Math.min(idx, Math.max(0, count - 1));
+  const activeKey = keyAt(clamped);
+  const s = recAt(clamped);
   const [vh, setVh] = useState(typeof window !== "undefined" ? window.innerHeight : 800);
   // step through the gallery, wrapping around at either end so it reads like a
   // slideshow of the receipts
-  const go = useCallback((d) => { if (list && list.length) setIdx(i => (i + d + list.length) % list.length); }, [list]);
+  const go = useCallback((d) => { if (count) setIdx(i => (i + d + count) % count); }, [count]);
   useEffect(() => {
     // Esc closes (capture phase + stopPropagation so it beats the reader's own
     // Escape handlers); ← / → walk the gallery (but never while typing in a field
@@ -655,7 +667,7 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <SourceTag type={s.type} />
-              {gallery && <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{idx + 1} / {list.length}</span>}
+              {gallery && <span className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)" }}>{clamped + 1} / {count}</span>}
             </div>
             <div className="np-cond" style={{ fontWeight: 600, fontSize: 17, lineHeight: 1.12, marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title || s.filename || "Document"}</div>
             <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.id}{s.outlet ? " · " + s.outlet : ""}</div>
@@ -672,19 +684,19 @@ function SourceLightbox({ srcKey, rec, onClose, keys, start, renderCited, locate
             ? <window.SourceViewer key={activeKey || (s.id || s.key)} srcKey={activeKey} rec={s} height={bodyH}
                 locate={idx === openIdx.current ? locate : null} />
             : <div className="np-mono" style={{ padding: "48px 16px", textAlign: "center", color: "var(--ink-soft)", fontSize: 12 }}>Loading the document viewer…</div>}
-          {(() => { const cited = renderCited ? renderCited(activeKey) : null; return cited ? <div className="srclb-cited">{cited}</div> : null; })()}
+          {(() => { const cited = renderCited ? renderCited(activeKey, s, clamped) : null; return cited ? <div className="srclb-cited">{cited}</div> : null; })()}
         </div>
         {/* the filmstrip — every source as a thumbnail, so browsing the receipts is a
            first-class activity: see them all at once and jump straight to any one,
            not just page ‹ › through them one at a time */}
         {gallery && (
           <div className="srclb-strip np-scroll" role="tablist" aria-label="All sources">
-            {list.map((k, i) => {
-              const r = (window.NPJ && window.NPJ.SOURCES && window.NPJ.SOURCES[k]) || { id: k };
-              const on = i === idx;
+            {Array.from({ length: count }, (_, i) => {
+              const r = recAt(i) || { id: keyAt(i) };
+              const on = i === clamped;
               return (
-                <button key={k} role="tab" aria-selected={on} onClick={() => setIdx(i)}
-                  className={"srclb-thumb" + (on ? " is-on" : "")} title={r.title || r.id || k}>
+                <button key={(keyAt(i) || "") + ":" + i} role="tab" aria-selected={on} onClick={() => setIdx(i)}
+                  className={"srclb-thumb" + (on ? " is-on" : "")} title={r.title || r.id || keyAt(i)}>
                   <SourceThumb rec={r} size={54} />
                   <span className="srclb-thumb-n np-mono">{i + 1}</span>
                 </button>
