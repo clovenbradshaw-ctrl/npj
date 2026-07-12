@@ -368,18 +368,58 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
   //   "source"  (default) — one row per unique source, backtracked to the stories citing it
   //   "article"           — pivoted by article: each story with the deduped sources it rests on
   //   "all"               — every archive.org item carrying the tag, cited or not
-  const [mode, setMode] = useState("source");
+  const [mode, setMode] = useState("gallery");
   const [q, setQ] = useState("");
   const [proj, setProj] = useState("All");
   const [archiveTarget, setArchiveTarget] = useState(null);
   // a published source the reader opened to read full-size, right here in the app
   const [viewRec, setViewRec] = useState(null);
+  // the full-screen source browser, opened across the whole (filtered) set at a
+  // given index — the hero way to navigate the sources: thumbnails, ‹ ›/← →, and
+  // a pivot into each source at the passage a story cited (locate) and back out
+  // into that story (renderCited)
+  const [browse, setBrowse] = useState(null);
   const ql = q.toLowerCase();
   const shown = data.filter(d => (proj === "All" || d.project === proj) && dsHaystack(d).includes(ql));
   const pubGroups = (pub.groups || []).filter(g =>
     !ql || ((g.title || "") + " " + ((g.rec && (g.rec.archive_url || g.rec.original_url)) || "") + " " + g.carriers.map(c => c.title).join(" ")).toLowerCase().includes(ql));
   const articles = articlePivot(pub.groups).filter(a =>
     !ql || ((a.title || "") + " " + a.sources.map(s => s.g.title).join(" ")).toLowerCase().includes(ql));
+
+  // The set the full-screen browser tabs through — the sources currently shown,
+  // so the filmstrip matches the grid. `firstQuoteOf` gives the passage to land
+  // on when a source opens (the first thing a story quoted from it).
+  const galleryRecs = pubGroups.map(g => g.rec).filter(Boolean);
+  const firstQuoteOf = (g) => {
+    for (const c of (g && g.carriers) || []) { if (c.quotes && c.quotes.length) return c.quotes[0]; }
+    return "";
+  };
+  const openBrowser = (i) => setBrowse({ start: Math.max(0, i) });
+  // inside the browser: the trail back OUT of a source into the stories that cite
+  // it — click a story to read it, so the pivot runs both ways (source ↔ article)
+  const renderArchiveCited = (key, recc, i) => {
+    const g = pubGroups[i]; if (!g) return null;
+    const arts = (g.carriers || []).filter(c => c.kind === "published");
+    if (!arts.length) return null;
+    return (
+      <React.Fragment>
+        <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "0 0 6px" }}>
+          Cited by {arts.length} {arts.length === 1 ? "story" : "stories"} — open one to read it
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {arts.map(c => (
+            <div key={c.id} style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+              <button onClick={() => { setBrowse(null); onOpenArticle && c.slug && onOpenArticle(c.slug); }}
+                title="Read this story" style={{ cursor: "pointer", textAlign: "left", border: 0, background: "transparent", fontFamily: "var(--cond)", fontWeight: 600, fontSize: 14.5, color: "var(--ink)", textDecoration: "underline", textUnderlineOffset: 2, padding: 0 }}>{c.title}</button>
+              {(c.quotes || []).slice(0, 1).map((qt, j) => (
+                <span key={j} style={{ fontFamily: "var(--serif)", fontStyle: "italic", fontSize: 12.5, color: "var(--ink-soft)" }}>“{qt.length > 120 ? qt.slice(0, 120) + "…" : qt}”</span>
+              ))}
+            </div>
+          ))}
+        </div>
+      </React.Fragment>
+    );
+  };
 
   return (
     <div className="fade-in">
@@ -393,8 +433,8 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
 
         {/* pivot the cited-source archive by source or by article, or browse the raw archive.org list */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 0, marginBottom: 18, border: "1.5px solid var(--ink)", width: "fit-content", maxWidth: "100%" }}>
-          {[["source", "By source"], ["article", "By article"], ["all", "All on archive.org"]].map(([m, label], i) => (
-            <button key={m} onClick={() => setMode(m)} className="np-cond" style={{ fontSize: 13, padding: "7px 16px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, border: 0, borderRight: i < 2 ? "1.5px solid var(--ink)" : 0, cursor: "pointer",
+          {[["gallery", "Gallery"], ["source", "By source"], ["article", "By article"], ["all", "All on archive.org"]].map(([m, label], i, arr) => (
+            <button key={m} onClick={() => setMode(m)} className="np-cond" style={{ fontSize: 13, padding: "7px 16px", textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, border: 0, borderRight: i < arr.length - 1 ? "1.5px solid var(--ink)" : 0, cursor: "pointer",
               background: mode === m ? "var(--ink)" : "var(--card)", color: mode === m ? "var(--yellow)" : "var(--ink)" }}>{label}</button>
           ))}
         </div>
@@ -405,10 +445,46 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={mode === "all" ? "Search datasets, columns, projects…" : mode === "article" ? "Search articles, or the sources they cite…" : "Search sources, or the stories citing them…"}
               style={{ flex: 1, border: 0, background: "transparent", padding: "11px 0", fontFamily: "var(--serif)", fontSize: 15, outline: "none", minWidth: 0 }} />
           </div>
-          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{mode === "source" ? pubGroups.length + " source" + (pubGroups.length !== 1 ? "s" : "") : mode === "article" ? articles.length + " article" + (articles.length !== 1 ? "s" : "") : shown.length + " of " + data.length}</span>
+          <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{(mode === "source" || mode === "gallery") ? pubGroups.length + " source" + (pubGroups.length !== 1 ? "s" : "") : mode === "article" ? articles.length + " article" + (articles.length !== 1 ? "s" : "") : shown.length + " of " + data.length}</span>
         </div>
 
-        {mode === "source" ? (
+        {mode === "gallery" ? (
+          <React.Fragment>
+            <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              {pub.state === "loading" && <span><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", verticalAlign: "-1px", marginRight: 6 }} />reading the published record…</span>}
+              {pub.state === "ok" && <span style={{ color: "var(--verified)" }}>● {pubGroups.length} source{pubGroups.length !== 1 ? "s" : ""} — {mobile ? "tap" : "click"} any to open it full-size and land on the cited passage</span>}
+              {pub.state === "error" && <span style={{ color: "var(--reject)" }}>couldn't read the published record</span>}
+            </div>
+            {pubGroups.length > 0 ? (
+              <div className="srcg-grid">
+                {pubGroups.map((g, i) => {
+                  const k = g.kind || {};
+                  const n = g.carriers.filter(c => c.kind === "published").length;
+                  return (
+                    <button key={g.signature} type="button" className="srcg-tile" onClick={() => openBrowser(i)}
+                      title={"Open “" + (g.title || "source") + "” full-size"}
+                      aria-label={"Open source " + (g.title || g.rec.id) + " full-size in the app"}>
+                      <window.SourceThumb rec={g.rec} size={140} style={{ width: "100%", height: 140 }} />
+                      <span className="srcg-body">
+                        <span className="srcg-title">{g.title}</span>
+                        <span className="srcg-meta">
+                          <span style={{ color: "var(--data)" }}>{k.label}</span>
+                          <span>· cited by {n}</span>
+                          {g.duplicated && <span title="Identical content uploaded more than once — linked, not duplicated" style={{ color: "var(--review)" }}>· ×{g.uploads} linked</span>}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : pub.state !== "loading" && (
+              <div style={{ border: "1.5px dashed var(--ink)", background: "var(--card)", padding: "18px 20px", maxWidth: 640 }}>
+                <div style={{ fontFamily: "var(--cond)", fontWeight: 700, fontSize: 16, textTransform: "uppercase", letterSpacing: ".04em", marginBottom: 6 }}>{q ? "No source matches" : "No published sources yet"}</div>
+                <p style={{ fontFamily: "var(--serif)", fontSize: 14.5, lineHeight: 1.55, color: "var(--ink-soft)", margin: 0 }}>{q ? "Try another search, or switch to All on archive.org." : "When a story ships, every source its claims rest on lands here — a thumbnail you can open full-size, with the trail back to the article."}</p>
+              </div>
+            )}
+          </React.Fragment>
+        ) : mode === "source" ? (
           <React.Fragment>
             <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 16, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               {pub.state === "loading" && <span><span style={{ display: "inline-block", width: 10, height: 10, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite", verticalAlign: "-1px", marginRight: 6 }} />reading the published record…</span>}
@@ -466,6 +542,11 @@ function DataExplorer({ onHome, onNewsroom, onOpenArticle }) {
       </div>
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.id} items={[{ name: archiveTarget.name }]} onClose={() => setArchiveTarget(null)} onDone={() => setArchiveTarget(null)} />}
       {viewRec && window.SourceLightbox && <window.SourceLightbox rec={viewRec} onClose={() => setViewRec(null)} />}
+      {browse && window.SourceLightbox && galleryRecs.length > 0 && (
+        <window.SourceLightbox key={"browse:" + browse.start} recs={galleryRecs} start={browse.start}
+          locate={firstQuoteOf(pubGroups[browse.start])} renderCited={renderArchiveCited}
+          onClose={() => setBrowse(null)} />
+      )}
     </div>
   );
 }

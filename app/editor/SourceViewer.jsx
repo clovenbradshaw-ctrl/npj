@@ -26,6 +26,51 @@
    ============================================================ */
 const zBtn = { width: 26, height: 24, border: "1px solid var(--ink)", background: "var(--paper)", color: "var(--ink)", fontSize: 13, fontWeight: 700, cursor: "pointer", lineHeight: 1 };
 
+/* Find `needle` inside `hay` tolerant of whitespace/case, mapping back to the raw
+   offsets so the ORIGINAL formatting still renders around the hit. Returns
+   { start, end } into hay, or null. Pure — the pivot "into the source, at the
+   cited span" for text the reader can render (text files, extracted text). */
+function locateSpan(hay, needle) {
+  hay = String(hay || ""); needle = String(needle || "");
+  if (hay.length < 3 || needle.trim().length < 3) return null;
+  // normalized haystack (collapsed whitespace, lowercased) + index map → raw
+  let norm = "", map = [], prevSpace = false;
+  for (let i = 0; i < hay.length; i++) {
+    const ch = hay[i];
+    if (/\s/.test(ch)) { if (!prevSpace) { norm += " "; map.push(i); prevSpace = true; } }
+    else { norm += ch.toLowerCase(); map.push(i); prevSpace = false; }
+  }
+  const nd = needle.replace(/\s+/g, " ").trim().toLowerCase();
+  let at = norm.indexOf(nd);
+  // a long pinned quote may not match end-to-end (an ellipsis, a stray char) —
+  // fall back to its leading run of words, enough to land the reader in the region
+  if (at < 0 && nd.length > 24) at = norm.indexOf(nd.split(" ").slice(0, 6).join(" "));
+  if (at < 0) return null;
+  const nlen = (at + nd.length <= norm.length) ? nd.length : (norm.length - at);
+  const rawStart = map[at];
+  const rawEnd = (map[at + nlen - 1] != null ? map[at + nlen - 1] : map[map.length - 1]) + 1;
+  return { start: rawStart, end: rawEnd };
+}
+
+/* Render text with the cited passage marked and scrolled into view — the payoff
+   of opening a source "at" a claim: the exact words land highlighted, mid-screen. */
+function HighlightedText({ text, locate, className, style }) {
+  const markRef = useRef(null);
+  const hay = String(text || "");
+  const span = locate ? locateSpan(hay, locate) : null;
+  useEffect(() => {
+    if (markRef.current) { try { markRef.current.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {} }
+  }, [locate, hay, !!span]);
+  if (!span) return <div className={className} style={style}>{hay}</div>;
+  return (
+    <div className={className} style={style}>
+      {hay.slice(0, span.start)}
+      <mark ref={markRef} className="src-locate">{hay.slice(span.start, span.end)}</mark>
+      {hay.slice(span.end)}
+    </div>
+  );
+}
+
 /* A readable, citable image. A dense screenshot (an emailed scan, say) was
    rendered too small to read and had no way to be grabbed — so it's now zoomable
    (Fit / +/− , scroll to pan) AND, when citing, carries an "Area" grab: drag a
@@ -140,7 +185,7 @@ function ImageCite({ rec, url, alt, H, frameless, onSelectText }) {
   );
 }
 
-function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hideOcr, onEditText }) {
+function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hideOcr, onEditText, locate }) {
   const SV = window.NpjSourceView;
   rec = rec || (window.NPJ.SOURCES && window.NPJ.SOURCES[srcKey]) || {};
   const key = (rec && (rec.id || rec.key)) || srcKey || "";
@@ -194,6 +239,20 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
   // A source that shipped as a REDACTED copy (a PDF with the boxes burned in) is
   // the real document, scrubbed — say so, so the black bars read as deliberate
   // withholding, not a rendering glitch.
+  // The "you came in on a cited span" banner. Above renderable text the passage is
+  // also marked + scrolled to (HighlightedText); over an image/PDF canvas — which
+  // we can't yet highlight in place — it stands alone as the thing to look for, so
+  // the pivot still lands the reader on the right passage.
+  const locq = locate ? String(locate).replace(/\s+/g, " ").trim() : "";
+  const locateBanner = locq ? (
+    <div className="src-locate-note np-mono" role="note" style={{ display: "flex", gap: 7, alignItems: "baseline",
+      fontSize: 10.5, lineHeight: 1.45, color: "var(--ink)", border: "1px solid var(--yellow-deep)",
+      background: "color-mix(in srgb, var(--yellow) 16%, var(--paper))", padding: "7px 10px", marginBottom: 6 }}>
+      <span aria-hidden="true" style={{ color: "var(--yellow-deep)", flex: "0 0 auto" }}>↳</span>
+      <span><span className="np-eyebrow" style={{ color: "var(--ink-soft)", marginRight: 5 }}>Cited passage</span>“{locq.slice(0, 160)}{locq.length > 160 ? "…" : ""}”</span>
+    </div>
+  ) : null;
+
   const redactedNote = rec.redacted ? (
     <div className="np-mono" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: "var(--review)", border: "1px solid color-mix(in srgb, var(--review) 40%, transparent)", background: "color-mix(in srgb, var(--review) 10%, transparent)", padding: "6px 9px", marginBottom: 6, lineHeight: 1.4 }}>
       <I.shield style={{ fontSize: 14, flex: "0 0 auto" }} /> Redacted copy — the blacked-out spans were destroyed before archiving; the un-redacted original is withheld.
@@ -241,7 +300,9 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
         <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 6, display: "flex", alignItems: "center", gap: 6, lineHeight: 1.4 }}>
           <I.doc style={{ fontSize: 13, flex: "0 0 auto" }} /> Extracted text — the original {SV.kindLabel(rec).toLowerCase()} file isn't in the public record.
         </div>
-        <div className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }}>{ownText}</div>
+        {locateBanner}
+        <HighlightedText text={ownText} locate={locate}
+          className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }} />
       </div>
     );
   }
@@ -252,6 +313,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     return (
       <div>
         {redactedNote}
+        {locateBanner}
         <window.PdfView rec={rec} height={H} onSelectText={onSelectText} />
         {url && linkRow}
       </div>
@@ -269,6 +331,7 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     const ocr = String(rec.text || "").trim();
     return (
       <div>
+        {locateBanner}
         <ImageCite rec={rec} url={url} alt={rec.title || "uploaded image"} H={H} frameless={frameless} onSelectText={onSelectText} />
         {linkRow}
         {ocr && !hideOcr ? (
@@ -317,7 +380,9 @@ function SourceViewer({ srcKey, rec, height, onText, onSelectText, frameless, hi
     );
     return (
       <div>
-        <div className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }}>{txt}</div>
+        {locateBanner}
+        <HighlightedText text={txt} locate={locate}
+          className="np-scroll" style={{ maxHeight: H, overflow: "auto", whiteSpace: "pre-wrap", wordBreak: "break-word", background: "var(--paper)", color: "var(--ink)", border: frameless ? 0 : "1px solid var(--rule)", padding: "12px 14px", fontFamily: "var(--serif)", fontSize: 13, lineHeight: 1.6 }} />
         {linkRow}
       </div>
     );

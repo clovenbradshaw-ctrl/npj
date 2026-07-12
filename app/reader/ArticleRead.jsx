@@ -104,17 +104,36 @@ function snippet(text, max = 96) {
   const t = String(text || "").trim();
   return t.length > max ? t.slice(0, max - 1).trimEnd() + "…" : t;
 }
-function CitedSpanList({ claims, onJump, currentId }) {
+// Each passage is a TWO-WAY pivot. The snippet jumps to the exact span in the
+// article (onJump — always). When `onLocate` is wired (the Sources gallery), it
+// also carries an "in source" button that opens the source document itself,
+// scrolled + highlighted to the pinned quote (srcKey → the source this passage
+// is grounded in). Without onLocate it's the plain jump list the hover card and
+// ledger have always shown.
+function CitedSpanList({ claims, onJump, currentId, onLocate, srcKey }) {
   if (!claims || !claims.length) return null;
+  const Jump = (c) => (
+    <button className="cite-span" data-current={c.id === currentId ? "1" : "0"}
+      onClick={() => onJump(c.id)} title="Jump to this passage in the article">
+      <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)", flex: "0 0 auto" }}>↳</span>
+      <span style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.3, color: "var(--ink)" }}>“{snippet(c.text)}”</span>
+    </button>
+  );
   return (
     <div>
-      {claims.map(c => (
-        <button key={c.id} className="cite-span" data-current={c.id === currentId ? "1" : "0"}
-          onClick={() => onJump(c.id)} title="Jump to this passage in the article">
-          <span style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-soft)", flex: "0 0 auto" }}>↳</span>
-          <span style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.3, color: "var(--ink)" }}>“{snippet(c.text)}”</span>
-        </button>
-      ))}
+      {claims.map(c => {
+        if (!onLocate) return <React.Fragment key={c.id}>{Jump(c)}</React.Fragment>;
+        const quote = (srcKey && c.q && c.q[srcKey]) ? c.q[srcKey] : "";
+        return (
+          <div key={c.id} className="cite-span-row">
+            {Jump(c)}
+            <button className="cite-span-src np-mono" title="Show this passage inside the source — full-size, right here"
+              onClick={() => onLocate(c.id, quote)}>
+              <I.expand style={{ fontSize: 11 }} /> in source
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -645,14 +664,17 @@ function ArticleRead(props) {
   // dismisses the floating hover card so nothing lingers behind the lightbox.
   const [lightbox, setLightbox] = useState(null);
   // a citation card's "View document" opens just that one source (no nav)
-  const openLightbox = useCallback((key) => { setLightbox({ keys: [key], start: 0 }); setHover(null); setActiveSrc(null); }, []);
+  const openLightbox = useCallback((key, locate) => { setLightbox({ keys: [key], start: 0, locate: locate || null }); setHover(null); setActiveSrc(null); }, []);
   // the Sources explorer opens a set of sources (whatever the reader has filtered
   // to) at the one they clicked, so they read it full-size IN THE APP and tab
   // through that exact set with ‹ › / ← → — never navigated off the page.
-  const openSourceGallery = useCallback((keys, i) => {
+  // `locate` (a pinned quote) is optional: when present the viewer opens the
+  // source scrolled + highlighted to that exact passage — the "into the source"
+  // half of the two-way pivot. Omitted, it just opens the gallery as before.
+  const openSourceGallery = useCallback((keys, i, locate) => {
     const list = (Array.isArray(keys) ? keys : sourceList.map(x => x.key)).filter(Boolean);
     if (!list.length) return;
-    setLightbox({ keys: list, start: Math.max(0, Math.min(list.length - 1, i || 0)) });
+    setLightbox({ keys: list, start: Math.max(0, Math.min(list.length - 1, i || 0)), locate: locate || null });
     setHover(null); setActiveSrc(null);
   }, [sourceList]);
   // footnotes, keyed for the inline hover/tap preview (the Substack feel)
@@ -1486,7 +1508,7 @@ function ArticleRead(props) {
         <GroundingPop data={groundPop} onEnter={cancelGroundLeave} onLeave={scheduleGroundLeave} dockTop={DRAWER_TOP}
           onClose={() => setGroundPop(null)} onExpand={(tok) => openStage({ kind: "ground", tok })} />
         <MainStage stage={stage} onClose={() => setStage(null)} onJumpNote={jumpToFn} />
-        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
+        {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} locate={lightbox.locate} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
         {showExport && window.SubstackExport && <window.SubstackExport article={A} onClose={() => setShowExport(false)} />}
       </div>
     );
@@ -1498,7 +1520,10 @@ function ArticleRead(props) {
       <ControlBar transLevel={transLevel} setTransLevel={setTransLevel}
         suggesting={showSugg} onToggleSuggest={() => { setShowSugg(v => !v); setCompose(null); }}
         openCount={suggestions.filter(s => s.status === "proposed" || s.status === "review").length}
-        totalCount={suggestions.length} />
+        totalCount={suggestions.length}
+        sourceCount={sourceList.length} versionCount={artVersions.length}
+        onOpenSources={() => openSourceGallery(sourceList.map(x => x.key), 0)}
+        onOpenVersions={() => setShowVersions(true)} />
 
       {/* When a docked citation/note/grounding panel is up on a wide window, cede
          a right gutter for it so the column slides left and the two sit centered
@@ -1567,7 +1592,7 @@ function ArticleRead(props) {
       {/* a source's document, expanded to fill the screen in-app — opened from a
          citation card or the Sources footer (where you can tab through them all);
          ✕ / Esc / backdrop to exit */}
-      {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
+      {lightbox && <SourceLightbox key={(lightbox.keys[0] || "") + ":" + lightbox.start} keys={lightbox.keys} start={lightbox.start} locate={lightbox.locate} renderCited={renderCitedForSource} onClose={() => setLightbox(null)} />}
     </div>
   );
 }
@@ -1696,44 +1721,66 @@ function TransparencyControl({ level, setLevel, isPhone }) {
   );
 }
 
+/* One chip in the reader's instrument panel: an icon, a label and a live count,
+   as either a plain action (Sources, Edits) or a toggle (Comments). Kept uniform
+   so the three read as ONE row — the record behind the story — rather than three
+   controls that happen to sit near each other. */
+function BarBtn({ icon: Icon, label, count, onClick, toggle, active, title, isPhone }) {
+  const on = toggle && active;
+  return (
+    <button onClick={onClick} className="np-cond" aria-pressed={toggle ? !!active : undefined} title={title}
+      style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+        border: "1.5px solid var(--ink)", background: on ? "var(--ink)" : "transparent",
+        color: on ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 9px" : "6px 12px",
+        fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em", whiteSpace: "nowrap" }}>
+      <Icon style={{ fontSize: 15 }} /> <span className="npj-barbtn-l">{label}</span>
+      {count > 0 && (
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
+          minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, fontSize: 11, lineHeight: 1, fontWeight: 700,
+          background: on ? "var(--yellow)" : "var(--ink)", color: on ? "var(--ink)" : "var(--paper)" }}>{count}</span>
+      )}
+    </button>
+  );
+}
+
 /* ---- sticky control bar (the reader's instrument panel) ----
    The public read view is the EXTERNAL face of a piece, so it carries no editing
-   or newsroom chrome — no Edit / Unpublish, no Auditability / Figures /
-   Suggestions rails. The single thing a reader steers is NPJ's transparency
-   layer (how much of the grounding to surface), so that's the only control here.
-   The hover side panel that opens off a claim is on by default (Standard), since
-   `previews` is true at every level but Clean.
+   or newsroom chrome — no Edit / Unpublish, no Figures rail. What it DOES carry
+   is NPJ's transparency layer, and that layer used to leak out through four
+   unrelated entry points — a version chip in the dateline, a lone Comments
+   toggle here, the grounding lens in a dropdown, and a Sources list stranded at
+   the foot of the page. They're now ONE coherent row: everything BEHIND THE
+   STORY (the sources you can browse, the edit history, the open comments) on the
+   left, and the single dial that governs how much grounding overlays the prose
+   (the transparency level) on the right.
 
-   The record stays open to public suggestion, so the bar also carries a SUGGEST
-   toggle: switch it on and anyone reading can drag-select any run of text — a
-   word, a phrase, a passage across sentences — to propose an edit or leave a
-   comment (the selection is the anchor; it needn't line up with a sentence). The
-   Suggestions rail opens and open suggestions paint into the prose. Posting
-   prompts a one-tap hyphae.social sign-up if needed. */
-function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount, totalCount }) {
+   • Sources  — opens the full-screen source browser (navigating the receipts is
+                a first-class activity, not a footnote).
+   • Edits    — the piece's version history (every state on the record).
+   • Comments — the open suggestions + comments; toggling it on also lets anyone
+                drag-select any run of text to propose an edit or leave a comment.
+   The grounding hover panel is on by default (Standard); `previews` is true at
+   every level but Clean. */
+function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, openCount, totalCount,
+                      sourceCount, versionCount, onOpenSources, onOpenVersions }) {
   const isPhone = window.useIsMobile(760);
-  // The button is the way in to every comment + suggestion on the piece, so it
-  // reads as "Comments" and carries a live count of how many there are — a reader
-  // shouldn't have to guess that this is where the discussion lives. Toggling it
-  // open also lets anyone drag-select any words to comment on or suggest an edit.
   const n = totalCount || 0;
-  const label = suggesting ? "Reading comments" : (n ? "Comments" : "Comment");
   return (
-    <div style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
-      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "9px 22px", display: "flex", alignItems: "center", gap: isPhone ? 7 : 14, justifyContent: "space-between" }}>
-        <button onClick={onToggleSuggest} className="np-cond" aria-pressed={!!suggesting}
-          title="See all comments and suggestions — and drag-select any words or passage to add your own. Open to everyone."
-          style={{ display: "inline-flex", alignItems: "center", gap: 7, cursor: "pointer",
-            border: "1.5px solid var(--ink)", background: suggesting ? "var(--ink)" : "transparent",
-            color: suggesting ? "var(--paper)" : "var(--ink)", padding: isPhone ? "5px 10px" : "6px 13px",
-            fontSize: 12.5, fontWeight: 600, textTransform: "uppercase", letterSpacing: ".05em" }}>
-          <I.chat style={{ fontSize: 15 }} /> {label}
-          {n > 0 && (
-            <span aria-label={n + " comments and suggestions"} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center",
-              minWidth: 18, height: 18, padding: "0 5px", borderRadius: 9, fontSize: 11, lineHeight: 1, fontWeight: 700,
-              background: suggesting ? "var(--yellow)" : "var(--ink)", color: suggesting ? "var(--ink)" : "var(--paper)" }}>{n}</span>
+    <div className="npj-readbar" style={{ position: "sticky", top: 0, zIndex: 1500, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", boxShadow: "0 2px 0 rgba(22,20,13,.06)" }}>
+      <div style={{ maxWidth: 1180, margin: "0 auto", padding: isPhone ? "7px 12px" : "8px 22px", display: "flex", alignItems: "center", gap: isPhone ? 8 : 14, justifyContent: "space-between", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: isPhone ? 6 : 9, minWidth: 0, flexWrap: "wrap" }}>
+          {!isPhone && <span className="np-eyebrow" style={{ color: "var(--ink-soft)", marginRight: 2, flex: "0 0 auto" }}>Behind the story</span>}
+          {sourceCount > 0 && (
+            <BarBtn icon={I.source} label="Sources" count={sourceCount} onClick={onOpenSources} isPhone={isPhone}
+              title="Open the source browser — every source this story cites, full-size and in the app." />
           )}
-        </button>
+          {versionCount > 1 && (
+            <BarBtn icon={I.clock} label="Edits" count={versionCount} onClick={onOpenVersions} isPhone={isPhone}
+              title="This story's edit history — every version on the record." />
+          )}
+          <BarBtn icon={I.chat} label={n ? "Comments" : "Comment"} count={n} onClick={onToggleSuggest} toggle active={suggesting} isPhone={isPhone}
+            title="See all comments and suggestions — and drag-select any words or passage to add your own. Open to everyone." />
+        </div>
         <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
       </div>
     </div>
@@ -1978,12 +2025,19 @@ function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {
 
   return (
     <footer id="article-sources" style={{ margin: "44px 0 0", borderTop: "2.5px solid var(--ink)", paddingTop: 18, scrollMarginTop: 90 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "baseline", flexWrap: "wrap", marginBottom: 5 }}>
         <h3 style={{ fontFamily: "var(--display)", fontSize: 24, margin: 0 }}>SOURCES</h3>
         <span className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>{total} · {summary}</span>
+        <span style={{ flex: 1 }} />
+        {/* the hero entry: open the whole set as a full-screen browser you tab
+           through — the receipts, made a place you go, not a list you skim */}
+        <button type="button" className="srcx-browse" onClick={() => onOpen(viewKeys, 0)}
+          title="Open the source browser — every source full-size, in the app">
+          <I.images style={{ fontSize: 14 }} /> Browse {total > 1 ? "all " + total : "the source"}
+        </button>
       </div>
       <p className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", margin: "0 0 14px", lineHeight: 1.5 }}>
-        {isPhone ? "Tap" : "Click"} any source to read it full-size, right here{total > 1 ? " — then ← → to move through them" : ""}. Nothing opens a new tab.
+        {isPhone ? "Tap" : "Click"} any source to open it full-size and land on the exact passage it backs{total > 1 ? " — then ← → to move through them all" : ""}. Nothing opens a new tab.
       </p>
 
       {showControls && (
@@ -2045,12 +2099,19 @@ function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {
             const overflow = spans.length > cap + 1;
             const expanded = openKey === key;
             const shown = (expanded || !overflow) ? spans : spans.slice(0, cap);
+            // the pinned quote to land on when this source is opened: its first
+            // cited passage (the "into the source, at the span" pivot target)
+            const firstQuote = (() => { const sp = spans.find(x => x && x.q && x.q[key] && String(x.q[key]).trim()); return sp ? sp.q[key] : ""; })();
+            const openAt = (q) => onOpen(viewKeys, i, q || firstQuote);
             return (
               <li key={key} className="srcx-card">
-                <button type="button" className="srcx-open" onClick={() => onOpen(viewKeys, i)}
-                  title="Read this source full-size, here in the app"
+                <button type="button" className="srcx-open" onClick={() => openAt(firstQuote)}
+                  title="Open this source full-size, here in the app — landed on the passage it backs"
                   aria-label={"Open source " + num + ", " + (s.title || s.id || key) + ", full-size in the app"}>
-                  <span className="claim-marker srcx-num">{num}</span>
+                  <span className="srcx-thumbwrap">
+                    <window.SourceThumb rec={s} size={74} />
+                    <span className="claim-marker srcx-num">{num}</span>
+                  </span>
                   <span className="srcx-main">
                     <span className="srcx-title">{s.title || s.id || key}</span>
                     {s.outlet ? <span className="srcx-outlet">{s.outlet}</span> : null}
@@ -2064,9 +2125,9 @@ function SourcesExplorer({ sourceList, spansForSource, onJump, onOpen }) {
                 {spans.length > 0 && (
                   <div className="srcx-foot">
                     <div className="srcx-foot-h">
-                      Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} in the story — click one to jump there
+                      Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} — ↳ jumps to the story, “in source” opens the document there
                     </div>
-                    <CitedSpanList claims={shown} onJump={onJump} />
+                    <CitedSpanList claims={shown} onJump={onJump} onLocate={(id, q) => openAt(q)} srcKey={key} />
                     {overflow && (
                       <button type="button" className="srcx-more" aria-expanded={expanded} onClick={() => setOpenKey(expanded ? null : key)}>
                         {expanded ? "Show fewer" : "+ " + (spans.length - cap) + " more passage" + (spans.length - cap !== 1 ? "s" : "")}
