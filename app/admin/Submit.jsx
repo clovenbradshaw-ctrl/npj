@@ -3,7 +3,7 @@
    Identity is verified against the homeserver (whoami); access to the tools is
    then gated on the layout roles, so randos can't draft until the admin adds them. */
 
-const TIP_EMAIL = "peoplesjournalism@proton.com";
+const TIP_EMAIL = "peoplesjournalism@protonmail.com";
 
 /* A mailto: link silently does nothing on a device with no mail app configured
    (common on shared/locked-down machines). This is the fallback: copy the

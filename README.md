@@ -242,7 +242,7 @@ public profile — a display **name** and a **≤250-character "About me."**
 
 Two ways in, surfaced on the **Submit** page:
 
-1. **Email a tip** — anyone, no account: `peoplesjournalism@proton.com`.
+1. **Email a tip** — anyone, no account: `peoplesjournalism@protonmail.com`.
 2. **Sign in with Matrix** — contributors on the allowlist. Signing in lands you
    in **Documents** (your drafts, projects and the published record). No account
    yet? Pick a homeserver at <https://matrix.org/ecosystem/hosting/>.
