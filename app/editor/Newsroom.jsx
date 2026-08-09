@@ -1409,7 +1409,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           composition: window.NpjComposition ? window.NpjComposition.publishable(draftId) : null }
       );
       setPreviewDoc(gen.article);
-    } catch (e) { setPreviewDoc(null); }
+    } catch (e) {
+      // Preview building an exception (a malformed block) used to fail with
+      // ZERO signal — the modal guard requires previewDoc truthy, so the click
+      // just looked like a no-op. Surface it so it's diagnosable instead of
+      // silently doing nothing.
+      console.error("Preview failed to build:", e);
+      setPreviewDoc(null);
+    }
   };
 
   // image slots mutate themselves (src attribute, local fills) — onInput

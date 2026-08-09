@@ -954,7 +954,17 @@
           // this branch it fell through to "unknown wrapper → recurse", and since an
           // <image-slot>/<img> has no text children, its src/caption were silently
           // discarded and the photo never rendered.
-          if (tag === "figure") { flush(); const im = figureToImgToken(c); if (im) toks.push(im); return; }
+          if (tag === "figure") {
+            flush();
+            // never let one odd figure (a shape figureToImgToken doesn't expect)
+            // throw and abort the WHOLE fold — that took down Preview entirely
+            // (genesisFromContent's catch swallows it and shows nothing at all)
+            // instead of just dropping this one image.
+            let im = null;
+            try { im = figureToImgToken(c); } catch (e) { im = null; }
+            if (im) toks.push(im);
+            return;
+          }
           // a block-level child (a wrapped paragraph/line of a multi-paragraph quote)
           // is its own line — keep the break between blocks so a GROUNDED quote reads
           // like the plain-text path, instead of running its paragraphs together.
