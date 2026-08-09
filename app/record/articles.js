@@ -777,6 +777,45 @@
     const preview = !!(opts && opts.preview);
     const root = document.createElement("div"); root.innerHTML = html || "";
     let idSeq = 0;
+    // Shared src-resolution rules for a <figure>/<image-slot> — used both by the
+    // top-level figure branch below and by inlineTokens (a figure nested inside
+    // a callout/aside, which otherwise has no block-level branch to land in and
+    // was silently dropped as an "unknown wrapper").
+    const W = (typeof window !== "undefined") ? window : {};
+    const isStoreUrl = (u) => !!(u && W.NpjMedia && W.NpjMedia.isStoreUrl(u));
+    const isArchiveUrl = (u) => !!u && (!W.NpjArchiveCDN || W.NpjArchiveCDN.isMediaUrl(u));
+    const okSrcUrl = (u) => !!u && (W.NpjMedia ? W.NpjMedia.isPublishable(u) : isArchiveUrl(u));
+    function figureToImgToken(scope) {
+      const sl = scope.querySelector && scope.querySelector("image-slot");
+      const plainImg = !sl && scope.querySelector && scope.querySelector("img");
+      let src = null, local = false, storeU = null;
+      if (sl) {
+        const cands = [sl.getAttribute("src"), sl.getAttribute("data-alt")].filter(Boolean);
+        let archiveU = null, otherU = null;
+        cands.forEach(u => { if (isStoreUrl(u)) storeU = storeU || u; else if (isArchiveUrl(u)) archiveU = archiveU || u; else otherU = otherU || u; });
+        src = archiveU || storeU || (okSrcUrl(otherU) ? otherU : null);
+        if (!src && preview) { const d = cands.find(u => /^data:image\//i.test(u)); if (d) { src = d; local = true; } }
+      } else if (plainImg) {
+        src = plainImg.getAttribute("src") || null;
+      }
+      if (!src) return null;
+      const tok = { t: "img", src };
+      const cap = scope.querySelector && scope.querySelector("figcaption:not(.cmp-credit):not(.cmp-desc):not(.cmp-embed-hint)");
+      const cr = scope.querySelector && scope.querySelector(".cmp-credit");
+      const ds = scope.querySelector && scope.querySelector(".cmp-desc");
+      const ct = cap ? cap.textContent.trim() : ""; if (ct) tok.caption = ct;
+      const crt = cr ? cr.textContent.trim() : ""; if (crt) tok.credit = crt;
+      const dt = ds ? ds.textContent.trim() : ""; if (dt) tok.description = dt;
+      if (local) tok.local = true;
+      if (storeU && storeU !== src) tok.store = storeU;
+      if (sl) {
+        const fit = (sl.getAttribute("fit") || "").toLowerCase();
+        if (fit === "contain" || fit === "fill") tok.fit = fit;
+        const crop = parseCrop(sl.getAttribute("data-crop"));
+        if (crop && crop.ar && (tok.fit || crop.s !== 1 || crop.x || crop.y)) tok.crop = crop;
+      }
+      return tok;
+    }
     const newId = () => "cl-" + Date.now().toString(36) + "-" + (++idSeq);
 
     // Resolve a reusable citation record (window.NPJ.CITATIONS) to its quote.
@@ -911,6 +950,11 @@
           if (tag === "s" || tag === "strike" || tag === "del") { flush(); toks.push({ t: "s", text: plain(c) }); return; }
           if (tag === "code") { flush(); toks.push({ t: "code", text: plain(c) }); return; }
           if (tag === "a") { flush(); toks.push({ t: "a", text: plain(c), href: c.getAttribute("href") || "" }); return; }
+          // an image dropped inside this container (e.g. a callout/aside) — without
+          // this branch it fell through to "unknown wrapper → recurse", and since an
+          // <image-slot>/<img> has no text children, its src/caption were silently
+          // discarded and the photo never rendered.
+          if (tag === "figure") { flush(); const im = figureToImgToken(c); if (im) toks.push(im); return; }
           // a block-level child (a wrapped paragraph/line of a multi-paragraph quote)
           // is its own line — keep the break between blocks so a GROUNDED quote reads
           // like the plain-text path, instead of running its paragraphs together.
@@ -1288,8 +1332,23 @@
 
   /* ---------------- body blocks → HTML (the post-publish edit surface) ---------------- */
   const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  // editable image-slot figure markup, shared by a top-level image block and an
+  // image token nested inside a callout's inline tokens (round-trips the same
+  // way so re-editing keeps the photo either place it was dropped).
+  function imgFigureHtml(b, slotId, clsOverride) {
+    const primary = b.store || b.src || "";
+    const alt = (b.store && b.src && b.src !== b.store) ? b.src : "";
+    const cls = clsOverride || (b.banner ? "cmp-embed nr-banner" : "cmp-embed");
+    const fitAttr = b.fit ? ' fit="' + esc(b.fit) + '"' : '';
+    const cropAttr = (b.crop && b.crop.ar) ? ' data-crop="' + esc([b.crop.s, b.crop.x, b.crop.y, b.crop.ar].join(",")) + '"' : '';
+    const conformAttr = ' conform';
+    const capHtml = '<figcaption class="cmp-cap np-mono" contenteditable="true" data-ph="Caption — what\'s happening in the photo" style="font-size:11px;margin-top:4px">' + esc(b.caption || "") + '</figcaption>';
+    const credHtml = '<figcaption class="cmp-credit np-mono" contenteditable="true" data-ph="Credit — e.g. Jane Doe / [Reuters](https://reuters.com)" style="font-size:11px;margin-top:2px">' + esc(b.credit || "") + '</figcaption>';
+    const descHtml = '<figcaption class="cmp-desc np-mono" contenteditable="true" data-ph="Description — alt text for screen readers &amp; search (not shown on the page)" style="font-size:11px;margin-top:2px">' + esc(b.description || "") + '</figcaption>';
+    return '<figure contenteditable="false" class="' + cls + '"' + (b.banner ? ' data-banner="1"' : '') + '><image-slot id="' + slotId + '" src="' + esc(primary) + '"' + (alt ? ' data-alt="' + esc(alt) + '"' : '') + fitAttr + cropAttr + conformAttr + ' fitcontrol shape="rect" style="width:100%;height:300px;display:block" placeholder="Drop a photo or an archive.org link"></image-slot>' + capHtml + credHtml + descHtml + "</figure>";
+  }
   function tokensToHtml(tokens) {
-    return (tokens || []).map(t => {
+    return (tokens || []).map((t, ti) => {
       if (typeof t === "string") return esc(t);
       if (t.c != null) {
         // an owned claim round-trips with its stance (and no source) so the edit
@@ -1306,6 +1365,7 @@
       if (t.t === "code") return "<code>" + esc(t.text) + "</code>";
       if (t.t === "a") return '<a href="' + esc(t.href) + '">' + esc(t.text) + "</a>";
       if (t.t === "sup") { const k = t.key || t.text || ""; const label = (t.num != null ? t.num : t.text); return '<sup class="md-cite" data-fn="1" data-cite="' + esc(k) + '" contenteditable="false">' + esc(label) + "</sup>"; }
+      if (t.t === "img") return imgFigureHtml(t, "eo-cal-img-" + ti);
       return esc(t.text || "");
     }).join("");
   }

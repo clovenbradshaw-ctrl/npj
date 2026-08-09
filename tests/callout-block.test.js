@@ -95,6 +95,48 @@ test("a callout survives a full blocksToHtml → htmlToBlocks round trip", () =>
   assert.equal(callout.tokens.join(""), "Round trip me.");
 });
 
+/* ---- an image dropped inside a callout must not be silently discarded ---- */
+function figureNode(src, caption) {
+  const slot = {
+    nodeType: 1, tagName: "IMAGE-SLOT", childNodes: [], textContent: "",
+    classList: { contains: () => false },
+    getAttribute: (k) => (k === "src" ? src : null),
+    hasAttribute: () => false,
+  };
+  const cap = caption ? { nodeType: 1, tagName: "FIGCAPTION", childNodes: [], textContent: caption, classList: { contains: () => false } } : null;
+  const kids = cap ? [slot, cap] : [slot];
+  return {
+    nodeType: 1, tagName: "FIGURE", childNodes: kids,
+    get textContent() { return kids.map((k) => k.textContent).join(""); },
+    classList: { contains: () => false },
+    getAttribute: () => null, hasAttribute: () => false,
+    querySelector: (sel) => {
+      if (sel === "image-slot") return slot;
+      if (sel.indexOf("figcaption") === 0) return cap || null;
+      return null;
+    },
+    querySelectorAll: () => [],
+  };
+}
+
+test("an image dropped inside a callout survives htmlToBlocks (previously silently dropped)", () => {
+  const aside = enode("aside", { class: "np-callout" }, [
+    tnode("Context — "), figureNode("https://example.test/photo.jpg", "the photo"),
+  ]);
+  const blocks = foldNode(aside);
+  const callout = blocks.find((b) => b.type === "callout");
+  assert.ok(callout, "a callout block is produced");
+  const img = callout.tokens.find((t) => t && t.t === "img");
+  assert.ok(img, "the nested image survives as a token instead of being discarded");
+  assert.equal(img.src, "https://example.test/photo.jpg");
+  assert.equal(img.caption, "the photo");
+});
+
+test("blocksToHtml round-trips an img token inside a callout back to a figure/image-slot", () => {
+  const html = A.blocksToHtml([{ type: "callout", tokens: ["See: ", { t: "img", src: "https://example.test/a.jpg", caption: "cap" }] }]);
+  assert.match(html, /<figure[^>]*><image-slot[^>]*src="https:\/\/example\.test\/a\.jpg"/, "the image round-trips as an editable figure");
+});
+
 /* ---- the clean block converter's pure surface (rich-blocks.js) ---- */
 test("rich-blocks exposes a spec for every toolbar block type", () => {
   ["p", "h1", "h2", "h3", "blockquote", "pull", "callout", "code"].forEach((k) => {

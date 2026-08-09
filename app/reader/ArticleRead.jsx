@@ -1098,6 +1098,15 @@ function ArticleRead(props) {
         }
         return <sup key={i} className="np-mono" style={{ fontSize: 11 }}>{t.text}</sup>;
       }
+      if (t.t === "img" && t.src) {
+        return (
+          <figure key={i} style={{ margin: "14px 0", display: "block" }}>
+            <ZoomImg image={t} alt={t.description || t.caption || ""} style={{ width: "100%", display: "block", border: "1.5px solid var(--ink)" }} />
+            {t.local ? <NotUploadedNote /> : null}
+            <PhotoFigCaption caption={t.caption} credit={t.credit} />
+          </figure>
+        );
+      }
       return <React.Fragment key={i}>{t.text || ""}</React.Fragment>;
     }
     // an OWNED claim — the author's analysis/account/position, or a documented
