@@ -796,7 +796,13 @@
         src = archiveU || storeU || (okSrcUrl(otherU) ? otherU : null);
         if (!src && preview) { const d = cands.find(u => /^data:image\//i.test(u)); if (d) { src = d; local = true; } }
       } else if (plainImg) {
-        src = plainImg.getAttribute("src") || null;
+        // a raw <img> (no image-slot) inside the figure — e.g. a bare paste. Its
+        // src can itself be a session data: URL; gate it the SAME way the
+        // image-slot branch above does, so a data: URL only ever shows in
+        // Preview (flagged local) and never rides into the committed record.
+        const s = plainImg.getAttribute("src") || null;
+        if (s && /^data:image\//i.test(s)) { if (preview) { src = s; local = true; } }
+        else src = s;
       }
       if (!src) return null;
       const tok = { t: "img", src };
@@ -961,7 +967,8 @@
             // (genesisFromContent's catch swallows it and shows nothing at all)
             // instead of just dropping this one image.
             let im = null;
-            try { im = figureToImgToken(c); } catch (e) { im = null; }
+            try { im = figureToImgToken(c); }
+            catch (e) { im = null; if (typeof console !== "undefined" && console.warn) console.warn("callout image dropped:", e); }
             if (im) toks.push(im);
             return;
           }
