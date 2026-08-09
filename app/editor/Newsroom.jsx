@@ -479,6 +479,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // a commenter always lands in the collaboration rail — that's their surface
   useEffect(() => { if (amCommenter) setCommentsOn(true); }, [amCommenter]);
   const ed = useRef(null);
+  const titleTaRef = useRef(null);                   // the Headline field — an auto-growing textarea (see autoGrowTitle)
   const scroller = useRef(null);                     // the editor scroll container (the page scrolls inside it)
   const selRange = useRef(null);
   const popoverFileRef = useRef(null);               // the source popover's hidden upload input
@@ -703,6 +704,17 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // The fields are the source of truth; each writes through to the hidden body
   // <h1> / .nr-dek so the publish gate, reader, markdown export and front page
   // keep reading exactly what they always have — no pipeline change.
+  // the Headline field is a textarea, not a single-line input, so a long
+  // headline WRAPS onto more lines instead of scrolling off the edge and
+  // reading as cut off — grow it to fit its content on every keystroke, on
+  // mount, and whenever the title changes from outside typing (a restored
+  // draft, a loaded article).
+  const autoGrowTitle = useCallback(() => {
+    const el = titleTaRef.current; if (!el) return;
+    el.style.height = "auto";
+    el.style.height = el.scrollHeight + "px";
+  }, []);
+  useEffect(() => { autoGrowTitle(); }, [title, autoGrowTitle]);
   const onTitleInput = useCallback((v) => {
     setTitle(v);
     const root = ed.current;
@@ -3297,7 +3309,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               they read as the article, not a form. */}
           <div className="nr-sheet">
             <div className="nr-fields">
-              <input id="nr-title-field" aria-label="Headline" value={title} onChange={e => onTitleInput(e.target.value)} placeholder="Headline" spellCheck={true} readOnly={amCommenter}
+              <textarea id="nr-title-field" ref={titleTaRef} aria-label="Headline" value={title}
+                onChange={e => { onTitleInput(e.target.value); autoGrowTitle(); }}
+                onKeyDown={e => { if (e.key === "Enter") e.preventDefault(); }}
+                placeholder="Headline" spellCheck={true} readOnly={amCommenter} rows={1}
                 className="nr-field-title" style={{ fontSize: isMobile ? 28 : 40 }} />
               <input id="nr-dek-field" aria-label="Subtitle" value={dek} onChange={e => onDekInput(e.target.value)} placeholder="A subtitle line under the headline" spellCheck={true} readOnly={amCommenter}
                 className="nr-field-dek" style={{ fontSize: isMobile ? 17 : 21 }} />
