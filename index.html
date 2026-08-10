@@ -137,6 +137,11 @@
 <!-- span-anchored reader feedback (suggest/comment) committed as EVA events in
      the article's own folder; merge applies + commits a REC. Requires NpjArticles. -->
 <script src="app/feedback/feedback.js"></script>
+<!-- Newsroom "Authors" mode: color each collaborator's last-edited paragraphs
+     and hide/show them. data-author rides the draft's own HTML like
+     structure.js's data-sec — editing-only, never read by htmlToBlocks, so it
+     never reaches Preview, publish or any export (I1). -->
+<script src="app/feedback/authorship.js"></script>
 <!-- Substack export: a folded article → clean .md + rich HTML for the clipboard
      (paste into Substack keeps headings, images, links & the sourcing). -->
 <script src="app/export/substack-export.js"></script>

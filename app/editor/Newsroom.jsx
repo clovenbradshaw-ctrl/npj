@@ -456,6 +456,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [collabs, setCollabs] = useState(() => (session ? [session.user_id] : []));
   const [room, setRoom] = useState(null);            // the project this document belongs to
   const [commentsOn, setCommentsOn] = useState(false); // when on, the right panel is the e2ee collaboration rail
+  // "Authors" mode: color each collaborator's last-edited paragraphs and let you
+  // hide/show them (app/feedback/authorship.js). Editor-only — never persisted
+  // as a preference, never published; see the toolbar toggle below.
+  const [authorsOn, setAuthorsOn] = useState(false);
+  const [hiddenAuthors, setHiddenAuthors] = useState(() => new Set()); // mxids hidden while Authors mode is on
+  const [authorsLoading, setAuthorsLoading] = useState(false); // fetching the shared room's save history for a retroactive backfill
   const [commenters, setCommenters] = useState({});   // project members invited comment/suggest-only (mxid → {by,ts})
   const [invite, setInvite] = useState(false);
   const [inviteVal, setInviteVal] = useState("");
@@ -1301,7 +1307,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // link tool are caught inline; this is the safety net for a hand-typed link).
   // innerHTML so it sees both bare URLs and real <a href> targets; in-page jumplinks,
   // image-slot media and embeds aren't hrefs, so they're never mistaken for sources.
-  const onEditorBlur = () => { if (ed.current && window.NpjHtmlUrls) ingestProseUrls(ed.current.innerHTML || ""); };
+  const onEditorBlur = () => {
+    if (ed.current && window.NpjHtmlUrls) ingestProseUrls(ed.current.innerHTML || "");
+    // Authors mode: repaint colors (picks up anything tagged since the mode was
+    // switched on) and bump rev so the legend's block counts stay current.
+    if (authorsOn && ed.current && window.NpjAuthorship) { window.NpjAuthorship.paint(ed.current); setRev(v => v + 1); }
+  };
+  // stamp the block the caret is in as authored by me — cheap (one element),
+  // safe to call on every prose input event (see app/feedback/authorship.js)
+  const tagAuthorship = () => { if (window.NpjAuthorship && me && ed.current) window.NpjAuthorship.tagEdit(ed.current, me); };
   const caretToPoint = (e) => {
     let r = null;
     if (document.caretRangeFromPoint) r = document.caretRangeFromPoint(e.clientX, e.clientY);
@@ -2901,7 +2915,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
 
   return (
-    <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "")} style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
+    <div className={"newsroom fade-in" + (theme === "light" ? " nr-light" : "") + (authorsOn ? " nr-authors-on" : "")} style={{ height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column" }}>
       {/* top bar — pinned: never shrinks or scrolls with the body */}
       <div className="nr-chrome" style={{ borderBottom: "1.5px solid " + NR.line, padding: "10px 20px", alignItems: "center", flexShrink: 0,
         ...(isMobile
@@ -3188,6 +3202,68 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
           {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
         </button>
+        {/* "Authors" mode — color each collaborator's edits and let you hide/show
+            them. Purely a live-DOM view: data-author rides the draft's own HTML
+            exactly like structure.js's data-sec (I1), so it survives autosave/sync
+            but htmlToBlocks never reads it — none of this reaches Preview, the
+            published page, or any export. Turning it on ALSO retroactively
+            backfills anything already in the doc from the shared room's real save
+            history (MatrixAuth.getRoomDocHistory), not just edits from now on —
+            see app/feedback/authorship.js. */}
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <button onMouseDown={e => e.preventDefault()}
+            onClick={() => setAuthorsOn(v => {
+              const next = !v;
+              if (next && ed.current && window.NpjAuthorship) {
+                window.NpjAuthorship.paint(ed.current);
+                if (room && room.roomId && window.MatrixAuth && window.MatrixAuth.getRoomDocHistory) {
+                  setAuthorsLoading(true);
+                  window.MatrixAuth.getRoomDocHistory(room.roomId, draftId).then(snaps => {
+                    if (ed.current && snaps && snaps.length > 0) {
+                      const owners = window.NpjAuthorship.attributionFromSnapshots(snaps);
+                      window.NpjAuthorship.backfill(ed.current, owners);
+                    }
+                  }).catch(() => {}).then(() => { setAuthorsLoading(false); setRev(r => r + 1); });
+                }
+              }
+              return next;
+            })}
+            aria-pressed={authorsOn}
+            title={authorsOn ? "Hide author colors" : "Authors — color each collaborator's edits and hide/show them, including a retroactive backfill from this project's real save history. Never shown in Preview or published — this browser only."}
+            className="np-cond" style={{ background: authorsOn ? "var(--yellow)" : "transparent", border: 0, color: authorsOn ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <I.palette style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Authors</span>
+          </button>
+          {authorsOn && (() => {
+            const rows = window.NpjAuthorship ? window.NpjAuthorship.list(ed.current) : [];
+            return (
+              <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, width: 260, maxWidth: "calc(100vw - 24px)", maxHeight: 360, overflowY: "auto", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
+                <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Who wrote what</div>
+                <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.4 }}>Colored by the last person to edit each paragraph — backfilled from this project's save history too. This browser only, never shown in Preview, on the published page, or in any export.</div>
+                {authorsLoading && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 8 }}>Reading edit history…</div>}
+                {!authorsLoading && rows.length === 0 && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>No edits tagged yet — keep typing and paragraphs pick up a color.</div>}
+                {rows.map(r => {
+                  const p = window.npjPerson ? window.npjPerson(r.author) : { name: r.author.replace(/^@/, "").split(":")[0], color: "#6b6b6b" };
+                  const hidden = hiddenAuthors.has(r.author);
+                  return (
+                    <div key={r.author} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                      <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: p.color, flex: "0 0 auto", opacity: hidden ? .3 : 1 }} />
+                      <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: hidden ? .5 : 1 }} title={r.author}>{p.name}</span>
+                      <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{r.blocks}¶</span>
+                      <button onMouseDown={e => e.preventDefault()} onClick={() => setHiddenAuthors(s => { const n = new Set(s); if (n.has(r.author)) n.delete(r.author); else n.add(r.author); return n; })}
+                        title={hidden ? "Show " + p.name + "’s text" : "Hide " + p.name + "’s text"}
+                        style={{ background: "none", border: 0, color: "var(--ink)", cursor: "pointer", padding: 2, display: "inline-flex" }}>
+                        {hidden ? <I.eyeoff style={{ fontSize: 13 }} /> : <I.eye style={{ fontSize: 13 }} />}
+                      </button>
+                    </div>
+                  );
+                })}
+                {hiddenAuthors.size > 0 && (
+                  <button onMouseDown={e => e.preventDefault()} onClick={() => setHiddenAuthors(new Set())} className="np-mono" style={{ marginTop: 4, background: "none", border: "1px solid var(--ink)", color: "var(--ink)", cursor: "pointer", fontSize: 10, padding: "3px 8px" }}>Show everyone</button>
+                )}
+              </div>
+            );
+          })()}
+        </div>
         {view === "prose" && <Sep />}
         {view === "prose" && (
           <button onMouseDown={e => e.preventDefault()} onClick={() => (htmlMode ? closeHtmlSource() : openHtmlSource())} aria-pressed={htmlMode}
@@ -3331,7 +3407,16 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                 </div>
               </div>
             </div>
-            <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable={!amCommenter} suppressContentEditableWarning onInput={amCommenter ? undefined : (e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
+            {/* per-author hide/show: scoped rules for whichever mxids are currently
+                hidden. A style tag, not a DOM attribute on the blocks themselves —
+                it never touches the editor's own HTML, so it can't leak anywhere
+                the words go. */}
+            {authorsOn && hiddenAuthors.size > 0 && (
+              <style>{Array.from(hiddenAuthors).map(a =>
+                '.newsroom.nr-authors-on .md-preview [data-author="' + ((typeof CSS !== "undefined" && CSS.escape) ? CSS.escape(a) : a.replace(/["\\]/g, "\\$&")) + '"]{display:none}'
+              ).join("\n")}</style>
+            )}
+            <div className={"md-preview nr-page nr-fielded" + (armSrc ? " nr-arming" : "") + (citeHl ? "" : " nr-no-cites")} ref={ed} contentEditable={!amCommenter} suppressContentEditableWarning onInput={amCommenter ? undefined : (e) => { recordComposition(e); scanHeadings(); destrandFootnotes(); healSplitBlocks(); tagAuthorship(); renumberCites(); renumberFootnotes(); scheduleSave(); }} onClick={onBodyClick}
               onKeyDown={amCommenter ? undefined : onEditorKeyDown} onFocus={amCommenter ? undefined : ensureParaSep} onBlur={amCommenter ? undefined : onEditorBlur}
               onMouseOver={amCommenter ? undefined : onBodyOver} onMouseLeave={amCommenter ? undefined : onBodyLeave} onMouseMove={amCommenter ? undefined : onEdMouseMove}
               onPaste={amCommenter ? undefined : onPaste} onDrop={amCommenter ? undefined : onDropText}

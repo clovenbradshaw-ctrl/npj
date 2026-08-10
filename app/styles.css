@@ -946,6 +946,16 @@ a { color: inherit; }
 .md-preview.nr-no-cites .claim-src::after { display: none !important; }
 .md-preview.nr-no-cites .md-cite { display: none; }
 .md-preview.nr-no-cites ol.nr-fnotes { display: none; }
+/* "Authors" mode (Newsroom.jsx, app/feedback/authorship.js) — colors the last
+   editor of each paragraph. --author-c and data-author live only in the
+   editor's own DOM and are never read by htmlToBlocks, so none of this — not
+   the color, not who's hidden — reaches Preview, the published page, or any
+   export (the same editor-only pattern as data-sec). Hide/show per author is a
+   separate, dynamically generated <style> block (Newsroom.jsx), not a rule here. */
+.newsroom.nr-authors-on .md-preview [data-author] {
+  box-shadow: inset 3px 0 0 var(--author-c, transparent);
+  background: color-mix(in srgb, var(--author-c, transparent) 8%, transparent);
+}
 /* A manual highlight (the highlighter pen — an inline background-color baked onto
    the span) shares the citation yellow, so on a clean read it reads as a citation
    that failed to turn off. Treat it as part of the annotation layer and suppress it
