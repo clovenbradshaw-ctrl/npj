@@ -1,14 +1,18 @@
 /* authorship-leakage.test.js — the Newsroom's "Authors" mode (app/feedback/
  * authorship.js) never reaches the published record.
  *
- * data-author / data-author-ts / --author-c ride the draft's own HTML exactly
- * like structure.js's data-sec (Invariant I1) — they're stamped straight onto
- * the live <p>/<h2>/<li>… elements the author is editing. htmlToBlocks builds
- * each block token purely from a node's TEXT (inlineTokens/walk), never from
- * its attributes, so an editor-only tag on the block itself should vanish at
- * the fold without any special-case stripping. These tests prove that stays
- * true — that the mxid, the timestamp and the CSS custom property never turn
- * up anywhere in the folded block model.
+ * Authors mode wraps the exact run of characters someone typed in
+ * <span class="npj-author" data-author data-author-ts>, riding the draft's
+ * own HTML exactly like structure.js's data-sec (Invariant I1) — including
+ * NESTED spans, when one person's edit lands in the middle of another's
+ * (Newsroom.jsx's wrapRange can split an existing author span, so a
+ * data-author span can sit right inside another data-author span). htmlToBlocks
+ * builds each block token purely from a node's TEXT (inlineTokens/walk,
+ * recursing through any unrecognized wrapper regardless of nesting depth),
+ * never from its attributes, so none of that tagging — however deeply
+ * nested — should vanish at the fold without any special-case stripping.
+ * These tests prove that stays true: the mxid, the timestamp and the CSS
+ * custom property never turn up anywhere in the folded block model.
  *
  * No jsdom — htmlToBlocks parses via document.createElement+innerHTML, so we
  * feed it a tiny faithful node tree through a createElement shim, matching
@@ -80,4 +84,25 @@ test("mixed authors on adjacent paragraphs still fold to plain, attribution-free
   assert.equal(paras[1].tokens.join(""), "Bob edited this second one.");
   const dump = JSON.stringify(out.blocks);
   assert.ok(!dump.includes("alice") && !dump.includes("bob"), "neither collaborator's identity survives the fold");
+});
+
+test("a data-author span NESTED inside another author's span still folds clean", () => {
+  // the real shape Newsroom.jsx's wrapRange produces when bob's edit lands in
+  // the middle of alice's sentence: her span splits around his.
+  const out = foldBody([
+    enode("p", {}, [
+      enode("span", { class: "npj-author", "data-author": "@alice:hyphae.social" }, [
+        tnode("The MNPD "),
+        enode("span", { class: "npj-author", "data-author": "@bob:hyphae.social", "data-author-ts": "123" },
+          [tnode("[Metro Nashville Police Department] ")]),
+        tnode("hosted a meeting."),
+      ]),
+    ]),
+  ]);
+  const p = out.blocks.find((b) => b.type === "p");
+  assert.ok(p);
+  assert.equal(p.tokens.join(""), "The MNPD [Metro Nashville Police Department] hosted a meeting.");
+  const dump = JSON.stringify(out.blocks);
+  assert.ok(!dump.includes("alice") && !dump.includes("bob"), "neither collaborator's identity survives, nested or not");
+  assert.ok(!dump.includes("data-author") && !dump.includes("npj-author"));
 });
