@@ -107,8 +107,10 @@ function SourcePicker({ srcKey, claimText, onPick }) {
     } else body = text;
 
     inner = React.createElement("div", { key: "in" },
-      React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: Y, margin: (viewerEl ? "8px 0 4px" : "0 0 4px") } },
-        "The source — highlight the words that back your claim" + (top ? " (best match is shaded)" : "")),
+      React.createElement("div", { className: "np-mono", style: { fontSize: 10.5, fontWeight: 700, letterSpacing: ".02em", color: Y, margin: (viewerEl ? "8px 0 2px" : "0 0 2px") } },
+        "THE SOURCE — drag over the matching words"),
+      top && React.createElement("div", { className: "np-mono", style: { fontSize: 9, color: "rgba(255,255,255,.55)", margin: "0 0 4px" } },
+        "we shaded our best guess below — drag over it if it looks right, or select something else"),
       React.createElement("div", { ref: ref, onMouseUp: onMouseUp,
         style: { maxHeight: 150, overflowY: "auto", whiteSpace: "pre-wrap", background: "var(--paper)", color: "var(--ink)", border: "1px solid rgba(255,255,255,.25)", padding: "8px 9px", fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.5, userSelect: "text", cursor: "text" } }, body),
       hits.length > 0 && React.createElement("div", { style: { marginTop: 6, display: "flex", flexDirection: "column", gap: 4 } },
@@ -116,7 +118,9 @@ function SourcePicker({ srcKey, claimText, onPick }) {
         hits.slice(0, 3).map((h, j) => React.createElement("button", {
           key: j, onClick: () => onPick(h.s, h.loc || null), title: "Pin this span",
           style: { textAlign: "left", border: "1px solid rgba(255,255,255,.22)", background: "rgba(255,255,255,.06)", color: "var(--paper)", padding: "5px 8px", cursor: "pointer", fontFamily: "var(--serif)", fontSize: 12, lineHeight: 1.35 }
-        }, React.createElement("span", { style: { borderLeft: "3px solid " + Y, paddingLeft: 7, display: "block" } }, "“" + (h.s.length > 160 ? h.s.slice(0, 160) + "…" : h.s) + "”")))));
+        }, React.createElement("span", { style: { borderLeft: "3px solid " + Y, paddingLeft: 7, display: "block" } }, "“" + (h.s.length > 160 ? h.s.slice(0, 160) + "…" : h.s) + "”")))),
+      hits.length === 0 && React.createElement("div", { className: "np-mono", style: { fontSize: 9.5, color: "rgba(255,255,255,.5)", marginTop: 5 } },
+        "Not seeing a match? Scroll for the right passage, or attach a different source with the menu below."));
   }
 
   return React.createElement("div", { style: { marginTop: 8 } }, viewerEl, inner);

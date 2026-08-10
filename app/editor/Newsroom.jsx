@@ -2853,9 +2853,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           <button onClick={closePin} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 15, cursor: "pointer", lineHeight: 1 }}><I.x /></button>
         </div>
         {pinTarget.claimText && (
-          <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 9 }}>
-            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOUR CLAIM</span>
+          <div style={{ fontFamily: "var(--serif)", fontSize: 12.5, lineHeight: 1.4, color: "rgba(255,255,255,.78)", borderLeft: "2px solid var(--yellow)", paddingLeft: 8, marginBottom: 2 }}>
+            <span className="np-mono" style={{ fontSize: 9.5, color: "var(--yellow)", display: "block", marginBottom: 2 }}>YOU WROTE THIS —</span>
             “{pinTarget.claimText.length > 180 ? pinTarget.claimText.slice(0, 180) + "…" : pinTarget.claimText}”
+          </div>
+        )}
+        {pinTarget.claimText && (
+          <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.45)", margin: "3px 0 10px", display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 12, color: "var(--yellow)" }}>↓</span> — now point at the words below that prove it
           </div>
         )}
         {onSpan.length > 1 && (
@@ -2874,13 +2879,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             })}
           </div>
         )}
-        <div className="np-mono" style={{ fontSize: 10, color: "rgba(255,255,255,.6)", marginBottom: 5 }}>Highlight the exact words in the source below to mint the citation — or type/paste them here.</div>
-        <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
-          style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
         {window.SourcePicker && (
           <window.SourcePicker srcKey={pinTarget.key} claimText={pinTarget.claimText}
             onPick={(quote, loc) => { setPinQuote(quote); pinLoc.current = loc || null; }} />
         )}
+        <div className="np-mono" style={{ fontSize: 10, color: ready ? "var(--yellow)" : "rgba(255,255,255,.5)", margin: "10px 0 5px" }}>
+          {ready ? "✓ Pinned — this is what got selected above. Edit it, or drag a different bit of text." : "Didn’t drag-select above? Paste the exact quote here instead."}
+        </div>
+        <textarea value={pinQuote} onChange={e => { setPinQuote(e.target.value); pinLoc.current = null; }} placeholder="The supporting words, quoted verbatim from the source…"
+          style={{ width: "100%", minHeight: 52, resize: "vertical", border: "1px solid rgba(255,255,255,.3)", background: "var(--paper)", color: "var(--ink)", fontFamily: "var(--serif)", fontSize: 13.5, lineHeight: 1.4, padding: "8px 9px", outline: "none", boxSizing: "border-box" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
           {span && <button onClick={() => { removeCitation(span); closePin(); }} title="Remove this citation entirely — keep the words, drop the source binding"
             className="np-cond" style={{ flex: "0 0 auto", background: "transparent", color: NR.warn, border: "1px solid " + NR.warn, padding: "6px 11px", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Remove citation</button>}
