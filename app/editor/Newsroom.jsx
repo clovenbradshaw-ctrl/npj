@@ -456,9 +456,10 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [collabs, setCollabs] = useState(() => (session ? [session.user_id] : []));
   const [room, setRoom] = useState(null);            // the project this document belongs to
   const [commentsOn, setCommentsOn] = useState(false); // when on, the right panel is the e2ee collaboration rail
-  // "Authors" mode: color each collaborator's last-edited paragraphs and let you
-  // hide/show them (app/feedback/authorship.js). Editor-only — never persisted
-  // as a preference, never published; see the toolbar toggle below.
+  // "Authors" mode: color each collaborator's own words — span by span, not
+  // just whose paragraph it is — and let you hide/show them
+  // (app/feedback/authorship.js). Editor-only — never persisted as a
+  // preference, never published; see the toolbar toggle below.
   const [authorsOn, setAuthorsOn] = useState(false);
   const [hiddenAuthors, setHiddenAuthors] = useState(() => new Set()); // mxids hidden while Authors mode is on
   const [authorsLoading, setAuthorsLoading] = useState(false); // fetching the shared room's save history for a retroactive backfill
@@ -3209,10 +3210,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           className="np-cond" style={{ background: "transparent", border: 0, color: citeHl ? NR.text : NR.muted, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
           {citeHl ? <I.eye style={{ fontSize: 14 }} /> : <I.eyeoff style={{ fontSize: 14 }} />} <span className="npj-hide-sm">Citations</span>
         </button>
-        {/* "Authors" mode — color each collaborator's edits and let you hide/show
-            them. Purely a live-DOM view: data-author rides the draft's own HTML
-            exactly like structure.js's data-sec (I1), so it survives autosave/sync
-            but htmlToBlocks never reads it — none of this reaches Preview, the
+        {/* "Authors" mode — color each collaborator's own words, span by span
+            (not just whose paragraph it is), and let you hide/show them. Purely
+            a live-DOM view: data-author rides the draft's own HTML exactly like
+            structure.js's data-sec (I1), so it survives autosave/sync but
+            htmlToBlocks never reads it — none of this reaches Preview, the
             published page, or any export. Turning it on ALSO retroactively
             backfills anything already in the doc from the shared room's real save
             history (MatrixAuth.getRoomDocHistory), not just edits from now on —
@@ -3236,7 +3238,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               return next;
             })}
             aria-pressed={authorsOn}
-            title={authorsOn ? "Hide author colors" : "Authors — color each collaborator's edits and hide/show them, including a retroactive backfill from this project's real save history. Never shown in Preview or published — this browser only."}
+            title={authorsOn ? "Hide author colors" : "Authors — color each collaborator's own words and hide/show them, including a retroactive backfill from this project's real save history. Never shown in Preview or published — this browser only."}
             className="np-cond" style={{ background: authorsOn ? "var(--yellow)" : "transparent", border: 0, color: authorsOn ? "var(--ink)" : NR.text, padding: "5px 9px", fontSize: 14, fontWeight: 600, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}>
             <I.palette style={{ fontSize: 14 }} /> <span className="npj-hide-sm">Authors</span>
           </button>
@@ -3245,9 +3247,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
             return (
               <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, width: 260, maxWidth: "calc(100vw - 24px)", maxHeight: 360, overflowY: "auto", background: "var(--card)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "5px 5px 0 rgba(0,0,0,.3)", padding: 12, zIndex: 30 }}>
                 <div className="np-eyebrow" style={{ color: "var(--ink-soft)", marginBottom: 6 }}>Who wrote what</div>
-                <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.4 }}>Colored by the last person to edit each paragraph — backfilled from this project's save history too. This browser only, never shown in Preview, on the published page, or in any export.</div>
+                <div className="np-mono" style={{ fontSize: 10, color: "var(--ink-soft)", marginBottom: 10, lineHeight: 1.4 }}>Each collaborator's own words, colored span by span — backfilled from this project's save history too. This browser only, never shown in Preview, on the published page, or in any export.</div>
                 {authorsLoading && <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginBottom: 8 }}>Reading edit history…</div>}
-                {!authorsLoading && rows.length === 0 && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>No edits tagged yet — keep typing and paragraphs pick up a color.</div>}
+                {!authorsLoading && rows.length === 0 && <div className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)" }}>No edits tagged yet — keep typing and your words pick up a color.</div>}
                 {rows.map(r => {
                   const p = window.npjPerson ? window.npjPerson(r.author) : { name: r.author.replace(/^@/, "").split(":")[0], color: "#6b6b6b" };
                   const hidden = hiddenAuthors.has(r.author);
@@ -3255,7 +3257,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                     <div key={r.author} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
                       <span aria-hidden="true" style={{ width: 12, height: 12, borderRadius: "50%", background: p.color, flex: "0 0 auto", opacity: hidden ? .3 : 1 }} />
                       <span style={{ flex: 1, minWidth: 0, fontFamily: "var(--cond)", fontWeight: 600, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", opacity: hidden ? .5 : 1 }} title={r.author}>{p.name}</span>
-                      <span className="np-mono" style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{r.blocks}¶</span>
+                      <span className="np-mono" title={r.words + " word" + (r.words === 1 ? "" : "s")} style={{ fontSize: 9.5, color: "var(--ink-soft)" }}>{r.words}w</span>
                       <button onMouseDown={e => e.preventDefault()} onClick={() => setHiddenAuthors(s => { const n = new Set(s); if (n.has(r.author)) n.delete(r.author); else n.add(r.author); return n; })}
                         title={hidden ? "Show " + p.name + "’s text" : "Hide " + p.name + "’s text"}
                         style={{ background: "none", border: 0, color: "var(--ink)", cursor: "pointer", padding: 2, display: "inline-flex" }}>

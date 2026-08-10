@@ -59,7 +59,13 @@
     return out;
   }
 
-  function diffWords(aStr, bStr) {
+  // The raw LCS partition — same/del parts concatenate back to EXACTLY aStr,
+  // same/add parts to EXACTLY bStr. No cosmetic touch-ups, so it's the one to
+  // reconstruct FROM (e.g. authorship.js's advanceRuns, slicing old runs by
+  // these exact offsets); diffWords is the one to RENDER (it inserts a
+  // separator normalizeDiff needs for "~was~ appears" to read right, which
+  // means it no longer round-trips to either input string byte-for-byte).
+  function diffWordsRaw(aStr, bStr) {
     const a = diffTokens(aStr), b = diffTokens(bStr);
     const n = a.length, m = b.length;
     // LCS table
@@ -77,8 +83,10 @@
     }
     while (i < n) { push("del", a[i]); i++; }
     while (j < m) { push("add", b[j]); j++; }
-    return normalizeDiff(out);
+    return out;
   }
+
+  function diffWords(aStr, bStr) { return normalizeDiff(diffWordsRaw(aStr, bStr)); }
 
   function diffStats(parts) {
     let add = 0, del = 0;
@@ -86,7 +94,7 @@
     return { add, del };
   }
 
-  root.NpjVersionDiff = { diffTokens, diffWords, diffStats, normalizeDiff };
+  root.NpjVersionDiff = { diffTokens, diffWords, diffWordsRaw, diffStats, normalizeDiff };
   // node tests require() the pure diff; the browser path is unchanged (root === window).
   if (typeof module !== "undefined" && module.exports) module.exports = root.NpjVersionDiff;
 })(typeof window !== "undefined" ? window : globalThis);
