@@ -44,6 +44,7 @@ founding admin curates the site and grows the network from there.
 | `app/identity/e2ee.js` | **end-to-end encryption** for the collaboration layer — Web Crypto group sessions (ECDH P-256 device keys + an AES-GCM room key delivered per-device), modelled on Element/Matrix's Olm/Megolm but dependency-free |
 | `app/feedback/collab.js` | **private collaboration transport** — e2ee chat (Matrix timeline) + Google-Docs-style comments & suggested edits (encrypted state events), with a live `/sync` watch loop |
 | `app/reader/CollabRail.jsx` | the collaboration panel — Comments tab (anchored comments + suggested edits, reply / resolve / accept) and a live Chat tab; takes over the Newsroom's right panel when **Comments** is on |
+| `app/feedback/authorship.js` | the Newsroom's **Authors** mode — colors each collaborator's last-edited paragraphs and lets you hide/show them, with a retroactive backfill from the project room's own save history. Editor-only: never read by the publish fold, never shown outside the editor |
 | `backend/` | n8n publish workflow + thin browser clients |
 | `assets/` | logo + brand art |
 
@@ -188,6 +189,28 @@ ciphertext, public keys, and per-device wraps — never a room key or a plaintex
 so a homeserver admin cannot read the team's comments or chat. It is *not* wire-
 compatible with Element (same threat model, our own primitives). The crypto's
 cross-member roundtrip + non-member exclusion are covered by `tests/e2ee.test.js`.
+
+### Authors mode — who wrote what, colored and retroactive
+
+When more than one person is working the same draft, the Newsroom's **Authors**
+toggle (🎨, next to Comments) colors each paragraph by whoever last edited it,
+with a legend to hide/show any one collaborator's text. It's purely an editing
+aid — `data-author` rides the draft's own HTML exactly like `structure.js`'s
+`data-sec` (Invariant I1), so it autosaves and syncs like the words do, but
+`htmlToBlocks` builds every published block from a node's TEXT alone and never
+copies its attributes: none of it — the colors, the tags, who hid whom — ever
+reaches Preview, the published page, a REC edit, or any export (Substack, the
+source packet, the `.html`/`.md` downloads). `tests/authorship-leakage.test.js`
+guards that boundary the same way `tests/leakage-gate.mjs` guards structure.
+
+Turning it on **retroactively backfills the whole document**, not just edits
+from that point forward. A shared project room already keeps a permanent
+record of every save (each is a real Matrix state-event revision, not a
+guess); `MatrixAuth.getRoomDocHistory` mines that timeline for the document's
+past revisions, and `app/feedback/authorship.js` replays them — crediting each
+paragraph to whichever save last changed it — onto whatever's still untagged.
+A solo, unshared draft has no such history to mine and simply starts coloring
+from the next edit.
 
 ## Identity & permissions (rooted in Matrix)
 

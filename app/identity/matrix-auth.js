@@ -741,6 +741,47 @@
     } catch (e) { return []; }
   }
   async function getRoomDocContent(mxc) { try { return await fetchJson(mxc); } catch (e) { return null; } }
+  // Every past revision of ONE shared document, oldest first — mined straight
+  // from the room's own timeline. /state only ever answers with the latest
+  // value per (type, state_key), but a state event's every PUT is ALSO a
+  // permanent entry in the room's message graph, so paginating backwards finds
+  // each prior save: who made it (the event's own verified `sender`, not the
+  // freeform content.by) and its full draft snapshot (downloaded from that
+  // revision's own mxc). Feeds the Newsroom's Authors mode, retroactively
+  // attributing paragraphs nobody has touched since the mode existed.
+  // Best-effort and capped — an old, busy room degrades to whatever revisions
+  // turn up within the cap rather than paging indefinitely; a homeserver
+  // hiccup just yields fewer (or zero) revisions, never throws.
+  const DOC_HISTORY_MAX_PAGES = 12, DOC_HISTORY_MAX_EVENTS = 400;
+  async function getRoomDocHistory(roomId, id) {
+    if (!session || !roomId || !id) return [];
+    const found = []; // { sender, ts, mxc }
+    let from = null, pages = 0, scanned = 0;
+    try {
+      while (pages < DOC_HISTORY_MAX_PAGES && scanned < DOC_HISTORY_MAX_EVENTS) {
+        const qs = "/_matrix/client/v3/rooms/" + encodeURIComponent(roomId) + "/messages?dir=b&limit=100" +
+          (from ? "&from=" + encodeURIComponent(from) : "");
+        const page = await api(session.base_url, qs, { token: session.access_token });
+        pages++;
+        const chunk = (page && page.chunk) || [];
+        scanned += chunk.length;
+        chunk.forEach(ev => {
+          if (ev && ev.type === APP_DOC_TYPE && ev.state_key === id && ev.content && ev.content.mxc) {
+            found.push({ sender: ev.sender, ts: ev.origin_server_ts || 0, mxc: ev.content.mxc });
+          }
+        });
+        if (!page || !page.end || !chunk.length) break; // reached the start of the room
+        from = page.end;
+      }
+    } catch (e) { /* whatever we already found is still useful */ }
+    found.sort((a, b) => a.ts - b.ts); // oldest first
+    const out = [];
+    for (const f of found) {
+      const body = await fetchJson(f.mxc);
+      if (body && typeof body.html === "string") out.push({ author: f.sender, ts: f.ts, html: body.html });
+    }
+    return out;
+  }
   // Open this room's press.npj.doc events to every member (power level 0) so
   // invitees can edit, not just read. Additive + owner-only: reads the live power
   // levels, adds only our key, and silently no-ops for anyone who can't edit them
@@ -773,6 +814,6 @@
     // comment/suggest-only invitees (the Google-Docs default tier)
     readCommenters, setCommenter, removeCommenter,
     // shared project documents (the draft lives in the room, not just the account)
-    putRoomDoc, deleteRoomDoc, getRoomDocs, getRoomDocContent, ensureDocPower
+    putRoomDoc, deleteRoomDoc, getRoomDocs, getRoomDocContent, getRoomDocHistory, ensureDocPower
   };
 })();
