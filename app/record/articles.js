@@ -1117,7 +1117,16 @@
           const c = node.querySelector("div,p"); const cta = c && c.style && c.style.textAlign;
           align = /^(?:center|right|left)$/.test(cta || "") ? cta : "";
         }
-        if (qt) {
+        // inlineTokens already handles an <image-slot>/<img>/<figure> nested
+        // anywhere inside the quote (its `figure` branch, shared with callouts,
+        // converts it via figureToImgToken) — quoteText above does not, since an
+        // image node has no text children. Without also checking for an image
+        // token here, a quote with a photo either dropped the photo (kept its
+        // text, lost the image) or, if the quote was IMAGE-ONLY (no prose), qt
+        // was empty and the whole blockquote block vanished from Preview/publish.
+        const toks = inlineTokens(node);
+        const hasImg = toks.some(t => t && typeof t === "object" && t.t === "img");
+        if (qt || hasImg) {
           const pull = { type: "pull", text: qt, attribution: "", kind: isPull ? "pull" : "block" };
           if (align && align !== "left") pull.align = align;
           // A quote can be GROUNDED: the author wrapped it (or part of it) in a
@@ -1131,11 +1140,11 @@
           // the claim (a footnote becomes a {t:sup} token; a cite marker merges its
           // key/quote), so when tokens carry the grounding we don't also set `marks`
           // — that would double the footnote. A PLAIN quote keeps the lean
-          // text + marks path, byte-for-byte as before.
-          const toks = inlineTokens(node);
+          // text + marks path, byte-for-byte as before — unless it carries an image,
+          // which only ever rides on tokens (renderTokens' `t.t === "img"` branch).
           const grounded = toks.some(t => t && typeof t === "object" &&
             (t.stance || (Array.isArray(t.src) && t.src.length)));
-          if (grounded) pull.tokens = toks;
+          if (grounded || hasImg) pull.tokens = toks;
           else if (marks.length) pull.marks = marks;
           blocks.push(pull);
         }
