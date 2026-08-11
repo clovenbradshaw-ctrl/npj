@@ -5,10 +5,11 @@
    "npj:datasets" — useArchiveData() below re-renders on that event. */
 
 /* ============ archive.org consent modal (Permanence/Privacy/Rights) ============ */
-function ArchiveModal({ items, onClose, onDone, srcKey }) {
+function ArchiveModal({ items, onClose, onDone, srcKey, onArchiveItem }) {
   const [consent, setConsent] = useState({ permanence: false, privacy: false, rights: false });
-  const [phase, setPhase] = useState("consent"); // consent | running | done
+  const [phase, setPhase] = useState("consent"); // consent | running | done | fail
   const [i, setI] = useState(0);
+  const [results, setResults] = useState([]);    // per-item { ok, error? } as archiving lands
   const [reviewOpen, setReviewOpen] = useState(false);
   const [, bumpReview] = useState(0);
   const PII = window.NpjPII;
@@ -22,12 +23,27 @@ function ArchiveModal({ items, onClose, onDone, srcKey }) {
   const all = consent.permanence && privacyOk && consent.rights;
   const list = items && items.length ? items : [{ name: "this source" }];
 
-  useEffect(() => {
-    if (phase !== "running") return;
-    if (i >= list.length) { const t = setTimeout(() => setPhase("done"), 400); return () => clearTimeout(t); }
-    const t = setTimeout(() => setI(i + 1), 700);
-    return () => clearTimeout(t);
-  }, [phase, i]);
+  // Drive the real archive action. When an onArchiveItem is provided (an uploaded
+  // source document), each item is handed to it and awaited; otherwise the item is
+  // already on archive.org (an IA dataset) and lands as done instantly. Successes
+  // are remembered so Retry never re-uploads something already archived.
+  const run = async () => {
+    setPhase("running");
+    const acc = results.length ? results.slice() : [];
+    for (let j = 0; j < list.length; j++) {
+      if (acc[j] && acc[j].ok) continue;
+      setI(j);
+      let r;
+      if (onArchiveItem) {
+        try { await onArchiveItem(list[j]); r = { ok: true }; }
+        catch (e) { r = { ok: false, error: (e && e.message) || "archive failed" }; }
+      } else { r = { ok: true }; }
+      acc[j] = r;
+      setResults([...acc]);
+      if (!r.ok) break;
+    }
+    setPhase(acc.every(r => r && r.ok) ? "done" : "fail");
+  };
 
   const Chk = ({ k, label, children }) => (
     <label style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid var(--rule)", cursor: "pointer", alignItems: "flex-start" }}>
@@ -80,13 +96,28 @@ function ArchiveModal({ items, onClose, onDone, srcKey }) {
           </React.Fragment>}
 
           {phase === "running" && <div style={{ padding: "4px 0" }}>
-            {list.map((s, j) => (
-              <div key={j} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: j < list.length - 1 ? "1px solid var(--rule)" : 0, opacity: j > i ? .4 : 1 }}>
-                <span style={{ width: 20, textAlign: "center" }}>{j < i ? <I.check style={{ fontSize: 16, color: "var(--verified)" }} /> : j === i ? <span style={{ width: 12, height: 12, border: "2px solid var(--ink)", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span className="np-mono" style={{ color: "var(--ink-soft)" }}>↻</span>}</span>
-                <span style={{ fontFamily: "var(--serif)", fontSize: 14, flex: 1 }}>{s.name}</span>
-                <span className="np-mono" style={{ fontSize: 10, color: j < i ? "var(--verified)" : "var(--ink-soft)" }}>{j < i ? "archived ✓" : "submitting…"}</span>
-              </div>
-            ))}
+            {list.map((s, j) => {
+              const st = results[j];
+              return (
+                <div key={j} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: j < list.length - 1 ? "1px solid var(--rule)" : 0, opacity: st ? 1 : (j > i ? .4 : 1) }}>
+                  <span style={{ width: 20, textAlign: "center" }}>
+                    {st && st.ok ? <I.check style={{ fontSize: 16, color: "var(--verified)" }} />
+                      : st && !st.ok ? <span style={{ fontSize: 15, color: "var(--review)" }}>✕</span>
+                      : j === i ? <span style={{ width: 12, height: 12, border: "2px solid var(--ink)", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />
+                      : <span className="np-mono" style={{ color: "var(--ink-soft)" }}>↻</span>}
+                  </span>
+                  <span style={{ fontFamily: "var(--serif)", fontSize: 14, flex: 1 }}>{s.name}</span>
+                  <span className="np-mono" style={{ fontSize: 10, color: st && st.ok ? "var(--verified)" : st && !st.ok ? "var(--review)" : "var(--ink-soft)" }}>{st && st.ok ? "archived ✓" : st && !st.ok ? "failed" : "submitting…"}</span>
+                </div>
+              );
+            })}
+          </div>}
+
+          {phase === "fail" && <div style={{ padding: "4px 0" }} className="fade-in">
+            <div style={{ padding: "12px 14px", background: "color-mix(in srgb, var(--review) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--review) 40%, transparent)", fontFamily: "var(--serif)", fontSize: 13.5, color: "var(--ink)", lineHeight: 1.5 }}>
+              <strong style={{ color: "var(--review)", fontWeight: 700 }}>Couldn't archive{list[i] ? " " + list[i].name : ""}. </strong>
+              {(results[i] && results[i].error) || "The archive service didn't complete the upload."} Nothing was published — fix this and retry.
+            </div>
           </div>}
 
           {phase === "done" && <div style={{ textAlign: "center", padding: "10px 0 4px" }} className="fade-in">
@@ -101,7 +132,11 @@ function ArchiveModal({ items, onClose, onDone, srcKey }) {
           <div style={{ display: "flex", gap: 8 }}>
             {phase === "consent" && <React.Fragment>
               <button className="btn btn-sm" onClick={onClose}>Cancel</button>
-              <button className="btn btn-sm btn-primary" disabled={!all} onClick={() => setPhase("running")} style={{ opacity: all ? 1 : .45, cursor: all ? "pointer" : "not-allowed" }}>Publish {list.length} to archive.org</button>
+              <button className="btn btn-sm btn-primary" disabled={!all} onClick={run} style={{ opacity: all ? 1 : .45, cursor: all ? "pointer" : "not-allowed" }}>Publish {list.length} to archive.org</button>
+            </React.Fragment>}
+            {phase === "fail" && <React.Fragment>
+              <button className="btn btn-sm" onClick={onClose}>Close</button>
+              <button className="btn btn-sm btn-primary" onClick={run}>Retry</button>
             </React.Fragment>}
             {phase === "done" && <button className="btn btn-sm btn-primary" onClick={() => (onDone ? onDone() : onClose())}>Done</button>}
           </div>

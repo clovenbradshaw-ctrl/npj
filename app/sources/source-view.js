@@ -197,6 +197,58 @@
     return null;
   }
 
+  /* ---------------- the archive upload's bytes ----------------
+     archiveBytesFor(rec) → Promise<{blob, filename, mime} | null>. The bytes that
+     may go to archive.org for THIS record, honouring exactly the decisions
+     NpjArticles.publishableSource makes at publish time — archiving must never
+     ship a byte the committed record wouldn't:
+       • a redacted PDF built by Citey (review.redactedFile, boxes burned into
+         rasterized pages) is THE document that archives — its scrubbed bytes,
+         fetched durably off the media store.
+       • a redacted TEXT source archives its scrubbed text (re-asserted from the
+         recorded ranges), NEVER the un-redacted media-store bytes behind file_url.
+       • a redacted OPAQUE file (image / office) with no built copy returns null —
+         there is no safe artifact, so the original must not be archived.
+       • an unredacted source archives the original bytes (session blob first,
+         then the durable store).
+     Returns null when nothing safe can be shipped, so the caller can tell the
+     author why instead of archiving a leak. */
+  async function archiveBytesFor(rec) {
+    if (!rec) return null;
+    var review = rec.piiReview;
+    var redactions = (review && review.redactions) || [];
+    var rf = review && review.redactedFile;
+    if (rf && rf.url) {
+      var rb = null;
+      var M = root.NpjMedia;
+      if (M && M.fetchBytes) { try { rb = await M.fetchBytes(rf.url); } catch (e) {} }
+      if (!rb) { try { var r0 = await fetch(rf.url); if (r0.ok) rb = await r0.blob(); } catch (e) {} }
+      if (!rb) return null;
+      var baseName = String(rec.filename || rec.title || 'document').replace(/\.pdf$/i, '');
+      return {
+        blob: rb,
+        filename: rf.name || (baseName + '-redacted.pdf'),
+        mime: 'application/pdf'
+      };
+    }
+    if (redactions.length) {
+      var t = str(rec.text).trim();
+      if (!rec.binary && t) {
+        var scrubbed = (root.NpjPII && root.NpjPII.redactText)
+          ? root.NpjPII.redactText(String(rec.text || ''), redactions)
+          : rec.text;
+        var mime = (rec.mime && /^text\//.test(rec.mime)) ? rec.mime : 'text/plain';
+        return { blob: new Blob([String(scrubbed || '')], { type: mime }), filename: rec.filename || rec.title || 'document.txt', mime: mime };
+      }
+      return null;   // redacted but no shippable redacted artifact — withhold
+    }
+    var b = getBlob(recKey(rec));
+    if (b) return { blob: b, filename: rec.filename || b.name || 'document', mime: b.type || rec.mime || 'application/octet-stream' };
+    var bytes = await bytesFor(rec);
+    if (!bytes) return null;
+    return { blob: bytes, filename: rec.filename || 'document', mime: bytes.type || rec.mime || 'application/octet-stream' };
+  }
+
   /* ---------------- pdf.js (lazy, from the CDN) ----------------
      UMD legacy build so it attaches window.pdfjsLib without ESM import — the
      same script-tag style the app already uses for React/Babel. Loaded only
@@ -641,7 +693,7 @@
     kindOf: kindOf, detectKind: detectKind, kindPinned: kindPinned, ADAPT_KINDS: ADAPT_KINDS,
     kindLabel: kindLabel, docLabel: docLabel, isViewable: isViewable, hasFile: hasFile,
     ocrEligible: ocrEligible, ocrEnabled: ocrEnabled, citedPassageVisible: citedPassageVisible,
-    displayUrl: displayUrl, bytesFor: bytesFor,
+    displayUrl: displayUrl, bytesFor: bytesFor, archiveBytesFor: archiveBytesFor,
     ensurePdfJs: ensurePdfJs, extractPdfText: extractPdfText, pdfTextState: pdfTextState,
     ensurePdfLib: ensurePdfLib, extractPdfLayout: extractPdfLayout, pdfLayoutState: pdfLayoutState,
     buildLayout: buildLayout, rangesToBoxes: rangesToBoxes, boxesToRanges: boxesToRanges, dedupeBoxes: dedupeBoxes,

@@ -559,7 +559,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
               sup.setAttribute("data-cid", cid);
               if (!sup.hasAttribute("data-quote")) sup.setAttribute("data-quote", el.getAttribute("data-quote") || "");
             }
-            if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
+            if (!(el.getAttribute("data-quote") || "").trim() && !el.getAttribute("data-stance")) el.classList.add("needs-quote");
           });
           // back-fill citation RECORDS from any inline data-quote (idempotent —
           // skips spans that already carry data-cite-id), so legacy drafts gain
@@ -1747,7 +1747,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         sup.setAttribute("data-cid", cid);
         if (!sup.hasAttribute("data-quote")) sup.setAttribute("data-quote", el.getAttribute("data-quote") || "");
       }
-      if (!(el.getAttribute("data-quote") || "").trim()) el.classList.add("needs-quote");
+      if (!(el.getAttribute("data-quote") || "").trim() && !el.getAttribute("data-stance")) el.classList.add("needs-quote");
     });
     if (window.NpjCitations) window.NpjCitations.migrateRoot(root);
     ensureFigCaptions(root); // a hand-edited / pasted figure can lack the caption lines
@@ -1884,9 +1884,12 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   //
   // Binding no longer FINISHES the citation — it opens it. You can't just cite a
   // page: every bound span must then PIN the exact words IN THE SOURCE that back
-  // the claim (data-quote). Until it's pinned the span is flagged `needs-quote`
-  // and the publish build refuses it, so a claim can never stand on a whole
-  // page — only on a specific span of a specific source.
+  // the claim (data-quote). Until a line is pinned the span defaults to "the
+  // author asserts" (data-stance="analysis") — it reads owned, never undeclared,
+  // so a bound-but-unpinned claim isn't flagged at the publish gate. The first
+  // pin flips it to sourced (savePin drops the stance); only then must the
+  // claim carry its pinned words, so a claim can never stand on a whole page —
+  // only on a specific span of a specific source.
   // Wrap a Range in a fresh claim-src span bound to `key`, drop the numbered
   // marker after it, and register the source. Shared by the toolbar's
   // bindSource and the table's "add citation to this sentence". Returns the cid.
@@ -1895,7 +1898,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     if (order.indexOf(key) < 0) { order = [...order, key]; citeOrderRef.current = order; setCiteOrder(order); }
     const num = order.indexOf(key) + 1;
     const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
-    const span = document.createElement("span"); span.className = "claim-src needs-quote";
+    const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-stance", "analysis");
     span.setAttribute("data-src", key); span.setAttribute("data-cid", cid); span.setAttribute("data-quote", "");
     try { r.surroundContents(span); } catch (e) { const frag = r.extractContents(); span.appendChild(frag); r.insertNode(span); if (span.parentNode) span.parentNode.normalize(); }
     const sup = document.createElement("sup"); sup.className = "md-cite"; sup.setAttribute("contenteditable", "false");
@@ -1905,14 +1908,15 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     return cid;
   };
   // The .claim-src that a selection sits inside — the span a NEW source should be
-  // ADDED to rather than nesting a fresh span within. Owned claims (data-stance,
-  // no citation) are left alone; they aren't sourced.
+  // ADDED to rather than nesting a fresh span within. An owned claim (data-stance)
+  // is a host too: binding a source to its words is how the author moves it from
+  // "I assert this" to "this is sourced" (the pin does the actual flip).
   const claimHostOf = (r) => {
     if (!r) return null;
     const node = r.commonAncestorContainer;
     const el = node && node.nodeType === 1 ? node : (node && node.parentElement);
     const host = el && el.closest ? el.closest(".claim-src") : null;
-    return (host && ed.current && ed.current.contains(host) && !host.getAttribute("data-stance")) ? host : null;
+    return (host && ed.current && ed.current.contains(host)) ? host : null;
   };
   // Give a claim span a citation marker for `key` if it doesn't have one yet — so
   // a span backed by several sources carries one numbered sup per source (the
@@ -2013,6 +2017,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const t = pinTarget; if (!t) return;
     const q = String(pinQuote || "").trim();
     if (!q) return;
+    if (!t.key) return;   // an owned span opened without a source picked — nothing to pin yet
     const span = ed.current && ed.current.querySelector('.claim-src[data-cid="' + t.cid + '"]');
     if (span) ensureCiteSup(span, t.key);   // a source ADDED to an existing span gets its own marker now (on pin, not on add)
     if (window.NpjCitations && span) {
@@ -2037,6 +2042,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // same source can be matched against text we've already pulled
     const rec = window.NPJ.SOURCES[t.key];
     if (rec && (!rec.text || rec.text.indexOf(q) < 0)) rec.text = (rec.text ? rec.text + "\n" : "") + q;
+    // the flip: a bound span defaulted to "the author asserts" (data-stance)
+    // becomes a real sourced claim once its supporting line is pinned
+    if (span) span.removeAttribute("data-stance");
     closePin(); setRev(v => v + 1); scheduleSave();
     // let Citey flip ⊥→⊤ and re-cost the publish gate
     if (window.__citey) { if (span) window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
@@ -2050,6 +2058,14 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     const cid = span.getAttribute("data-cid");
     if (cid && ed.current) Array.from(ed.current.querySelectorAll('sup.md-cite[data-cid="' + cid + '"]')).filter(s => s.getAttribute("data-cite") === key).forEach(s => s.remove());
     const left = (span.getAttribute("data-src") || "").split(/\s+/).filter(Boolean);
+    // removing the last source hands the words back to the author: the span
+    // returns to "the author asserts" (owned) instead of sitting flagged
+    // needs-quote — a claim is only ungrounded once a source is actually cited
+    if (!left.length && !(span.getAttribute("data-cite-id") || "").trim()) {
+      span.setAttribute("data-stance", "analysis");
+      span.classList.remove("needs-quote");
+      span.removeAttribute("data-src");
+    }
     setRev(v => v + 1); scheduleSave(); renumberCites();
     if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
     // if the popover was editing the source we just removed, follow it to a survivor
@@ -2165,7 +2181,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   // sentence that has no claim yet (own needs an element to mark).
   const wrapPlainClaim = (range) => {
     const cid = "cs-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 1e4).toString(36);
-    const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-cid", cid);
+    const span = document.createElement("span"); span.className = "claim-src"; span.setAttribute("data-cid", cid); span.setAttribute("data-stance", "analysis");
     try { range.surroundContents(span); } catch (e) { const frag = range.extractContents(); span.appendChild(frag); range.insertNode(span); if (span.parentNode) span.parentNode.normalize(); }
     return span;
   };
@@ -2320,6 +2336,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       } else {
         span.setAttribute("data-quote", q); span.classList.remove("needs-quote");
       }
+      // pinning is the flip: a bound span defaulted to "the author asserts"
+      // (data-stance) becomes a real sourced claim once its line is pinned
+      span.removeAttribute("data-stance");
       span.setAttribute("title", "Cited span — “" + q.slice(0, 140) + (q.length > 140 ? "…" : "") + "”");
       setRev(v => v + 1); scheduleSave();
       if (window.__citey) { window.__citey.evaluateSpan(span); if (window.__citey.refreshGate) window.__citey.refreshGate(); }
@@ -2617,14 +2636,59 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
     // never touched the prose, so the saved selection range is still good)
     if (bindAfterInterview.current) { bindAfterInterview.current = false; bindSource(rec.id); }
   };
-  // the consented archive action (ArchiveModal) — request + verify for real;
-  // a source with no original URL (an uploaded file) can't be auto-archived
+  // the consented archive action (ArchiveModal) — request + verify for real:
+  // an uploaded document's bytes were already PUT to archive.org by onArchiveItem
+  // (rec.archive_url is set), while a web source is frozen by Save Page Now.
   const onArchived = async (key) => {
     const rec = window.NPJ.SOURCES[key];
     setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: true } : x));
-    const snap = rec && rec.original_url ? await window.NpjArchiveCDN.ensureSnapshot(rec.original_url).catch(() => null) : null;
-    if (snap) rec.archive_url = snap;
+    let snap = rec && rec.archive_url;
+    if (!snap && rec && rec.original_url) snap = await window.NpjArchiveCDN.ensureSnapshot(rec.original_url).catch(() => null);
+    if (snap && rec) rec.archive_url = snap;
     setSources(s => s.map(x => x.key === key ? { ...x, snapshotting: false, archived: !!snap } : x));
+    if (rec) scheduleSave();
+  };
+  // The REAL archive action — what ArchiveModal's onArchiveItem awaits for one
+  // source (single or bulk "Archive all"). A web source (it has an original_url)
+  // is frozen by Save Page Now, like onArchived always did. An uploaded document
+  // is PUT to archive.org: pick the safe bytes (redacted PDF / redacted text /
+  // the original — NpjSourceView.archiveBytesFor makes the same calls
+  // publishableSource makes), POST them + the consent ledger to site/source-npj,
+  // and stamp the record with the durable archive.org URL. Throws so the modal can
+  // show the reason and Retry; nothing is recorded unless the action actually
+  // landed.
+  const archiveSourceToIA = async (key) => {
+    const rec = window.NPJ.SOURCES[key];
+    if (!rec) throw new Error("This source is gone — reload and try again.");
+    if (rec.original_url) {
+      if (!window.NpjArchiveCDN || !window.NpjArchiveCDN.ensureSnapshot) throw new Error("The Wayback snapshot service isn't available.");
+      const snap = await window.NpjArchiveCDN.ensureSnapshot(rec.original_url).catch(() => null);
+      if (!snap) throw new Error("Couldn't snapshot " + rec.original_url + " — the Wayback service didn't confirm it.");
+      rec.archive_url = snap;
+      rec.archivedAt = new Date().toISOString();
+      scheduleSave();
+      return { ok: true, url: snap };
+    }
+    const SVa = window.NpjSourceView, Ma = window.NpjMedia;
+    if (!SVa || !SVa.archiveBytesFor || !Ma || !Ma.archiveSource) throw new Error("The archive service isn't available on this page.");
+    const p = await SVa.archiveBytesFor(rec);
+    if (!p) throw new Error("This source carries redactions but no redacted copy was built, so its original can't be archived. Reopen the PII review and build the redacted document (or undo the redactions), then archive again.");
+    const ctxId = (fileSlug && fileSlug !== "working") ? fileSlug : ((draftId && draftId !== "working") ? draftId : "");
+    const res = await Ma.archiveSource(p.blob, {
+      kind: rec.type === "dataset" ? "dataset" : "source",
+      filename: p.filename, mime: p.mime,
+      title: rec.title || rec.filename || "Archived source document",
+      description: rec.description || "",
+      tags: (rec.tags ? rec.tags + ", " : "") + "npj-source",   // discoverable in #explore (subject tag)
+      research_id: ctxId,
+      consent_acknowledged: ["permanence", "privacy", "rights"]
+    });
+    if (!res || !res.url) throw new Error("archive.org returned no URL for the upload.");
+    rec.archive_url = res.url;
+    rec.archive_identifier = res.identifier;
+    rec.archivedAt = new Date().toISOString();
+    scheduleSave();
+    return { ok: true, url: res.url };
   };
   // ---- PII review (Citey's archive gate) ----
   // Text we can actually read in-browser → Citey scans it. Binary types (pdf,
@@ -3589,7 +3653,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           {sources.map(s => {
             const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key, outlet: "" };
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
-            const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !(el.getAttribute("data-quote") || "").trim()).length : 0;
+            const unpinned = ed.current ? Array.from(ed.current.querySelectorAll('.claim-src[data-src="' + s.key + '"]')).filter(el => !el.getAttribute("data-stance") && !(el.getAttribute("data-quote") || "").trim()).length : 0;
             const reviewSt = piiGated(s.key) ? piiReviewState(s.key) : null;
             const iv = !!(window.NpjInterview && window.NpjInterview.isInterview(rec));
             return (
@@ -3866,10 +3930,11 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
       {redactTarget && window.CiteyRedactModal && <window.CiteyRedactModal srcKey={redactTarget}
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
-      {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
-      {archiveAllTargets && <ArchiveModal items={archiveAllTargets.map(s => ({ name: (window.NPJ.SOURCES[s.key] || {}).title || s.key }))}
+      {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} onArchiveItem={() => archiveSourceToIA(archiveTarget.key)} />}
+      {archiveAllTargets && <ArchiveModal items={archiveAllTargets.map(s => ({ key: s.key, name: (window.NPJ.SOURCES[s.key] || {}).title || s.key }))}
         onClose={() => setArchiveAllTargets(null)}
-        onDone={() => { archiveAllTargets.forEach(s => onArchived(s.key)); setArchiveAllTargets(null); }} />}
+        onDone={() => { archiveAllTargets.forEach(s => onArchived(s.key)); setArchiveAllTargets(null); }}
+        onArchiveItem={(item) => archiveSourceToIA(item.key)} />}
       {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
         customSlug={fileSlug} onSlug={setFileSlug} initialByline={byline} initialEditors={editorsField}
@@ -4007,9 +4072,14 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
       if (k && usedKeys.indexOf(k) < 0) usedKeys.push(k);
       const rec = window.NPJ.SOURCES[k];
       if ((!rec || !(rec.archive_url || rec.original_url)) && missing.indexOf(k) < 0) missing.push(k);
-      // every bound span must point at the exact words in the source, not just
-      // the page — a span with no pinned quote fails the build
-      if (!(n.getAttribute("data-quote") || "").trim()) unpinned++;
+      // a bound span defaults to "the author asserts" (data-stance) until a
+      // source line is pinned, so only unpinned markers whose span is NOT owned
+      // count as ungrounded — an owned span can't cite a page it hasn't pinned
+      if (!(n.getAttribute("data-quote") || "").trim()) {
+        const cid = n.getAttribute("data-cid");
+        const host = cid ? root.querySelector('.claim-src[data-cid="' + cid + '"]') : null;
+        if (!(host && host.getAttribute("data-stance"))) unpinned++;
+      }
     });
     // Only CITED sources ride in the committed record and get archived to
     // archive.org — an uploaded-but-unused source is never pushed (it stays

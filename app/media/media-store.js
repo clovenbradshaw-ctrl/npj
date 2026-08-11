@@ -342,6 +342,75 @@
     return j.url;
   }
 
+  /* Source-document archive endpoint (site/source-npj): the dedicated webhook
+     that puts an uploaded SOURCE DOCUMENT on archive.org server-side (redaction-
+     gated, consent-ledgered), answering { success, archive: { identifier, url, … } }.
+     Same host derivation as mediaEndpoint — it mirrors the publish webhook's host. */
+  function sourceArchiveEndpoint() {
+    try { const c = JSON.parse(localStorage.getItem("npj_publish_cfg_v1") || "null"); if (c && c.sourceArchiveEndpoint) return c.sourceArchiveEndpoint; } catch (e) {}
+    const base = (root.NpjArticles && root.NpjArticles.publishEndpoint && root.NpjArticles.publishEndpoint()) || "";
+    if (base) return base.replace(/\/[^/]+$/, "/source-npj");
+    return "https://n8n.intelechia.com/webhook/site/source-npj";
+  }
+
+  /* archiveSource(blob, opts) → Promise<{ identifier, url, filename, mime, size_bytes }>.
+     The real archive.org upload for an uploaded source document: multipart-POST the
+     bytes + metadata to the site/source-npj webhook, which validates, records the
+     consent ledger, and PUTs the item to archive.org server-side (the IA keys never
+     touch the browser). The bytes MUST already be the redacted copy when the source
+     carries redactions (see NpjSourceView.archiveBytesFor) — the server freezes what
+     it's handed; it does not re-redact.
+
+     opts: { filename, mime, title, description, license, tags, kind, research_id,
+             parent_identifier, consent_acknowledged: [] }.
+     Rejects loudly with the backend's message so the caller can warn the author. */
+  async function archiveSource(blob, opts) {
+    const o = opts || {};
+    const m = MA();
+    const token = m && m.token && m.token();
+    if (!token) throw new Error("Sign in with Matrix to upload to archive.org.");
+    if (!blob) throw new Error("Nothing to archive — the source's bytes couldn't be read.");
+    const name = o.filename || (blob.name) || "document";
+    const fd = new FormData();
+    fd.append("file", blob, name);
+    fd.append("kind", o.kind || "source");
+    fd.append("filename", name);
+    fd.append("title", o.title || "Archived source document");
+    fd.append("description", o.description || "");
+    fd.append("license", o.license || "CC-BY-4.0");
+    fd.append("tags", o.tags || "");
+    fd.append("mime", o.mime || (blob.type) || "application/octet-stream");
+    if (o.research_id) fd.append("research_id", String(o.research_id));
+    if (o.parent_identifier) fd.append("parent_identifier", String(o.parent_identifier));
+    const ack = (o.consent_acknowledged && o.consent_acknowledged.length)
+      ? o.consent_acknowledged : ["permanence", "privacy", "rights"];
+    ack.forEach(x => fd.append("consent_acknowledged", String(x)));
+    // The upload includes the author's Matrix token for Matrix-auth + the roles
+    // check, and the backend's round-trip (validate → archive.org PUT) can take up
+    // to a minute — generous headroom before aborting, like migrateToArchive.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    let res;
+    try {
+      res = await fetch(sourceArchiveEndpoint(), {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + token },   // Content-Type is set by the browser for FormData
+        body: fd,
+        signal: ctrl.signal
+      });
+    } catch (e) {
+      throw new Error(e && e.name === "AbortError"
+        ? "archive.org upload timed out — the archive service took too long."
+        : "Couldn't reach the archive service.");
+    } finally { clearTimeout(timer); }
+    let j = null; try { j = await res.json(); } catch (e) {}
+    if (!j || !j.success || !j.archive) {
+      const msg = (j && j.error) || (j && Array.isArray(j.errors) && j.errors.join("; ")) || ("archive.org upload failed (HTTP " + res.status + ").");
+      throw new Error(msg);
+    }
+    return j.archive;
+  }
+
   /* freeze(url) → Promise<archive.org URL | null>. The no-keys fallback: Save
      Page Now + verify (NpjArchiveCDN.ensureSnapshot), then rewrite to the raw
      image (im_) form so an <img> gets the bytes, not the Wayback page. */
@@ -503,8 +572,8 @@
   }
 
   root.NpjMedia = {
-    canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint,
-    upload, uploadViaBackend, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive,
+    canUpload, isStoreUrl, isPublishable, mxcToHttp, httpToMxc, mediaEndpoint, archiveEndpoint, sourceArchiveEndpoint,
+    upload, uploadViaBackend, uploadLimit, fetchBytes, resolveDisplay, uploadToArchive, migrateToArchive, archiveSource,
     freeze, freezeArticleMedia, slotNeedsArchive, prearchiveCensus, prearchiveSlots
   };
 
