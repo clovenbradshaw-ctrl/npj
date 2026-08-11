@@ -415,6 +415,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [urlInput, setUrlInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState(null);
+  const [archiveAllTargets, setArchiveAllTargets] = useState(null); // bulk "Archive all" — array of {key,name}
   const [interviewOpen, setInterviewOpen] = useState(false); // the "cite a conversation" composer
   const [redactTarget, setRedactTarget] = useState(null);   // Citey's PII review, open on a source key
   const [publish, setPublish] = useState(null);
@@ -3563,6 +3564,28 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
           </div>
 
           {sources.length === 0 && <div className="np-mono" style={{ fontSize: 10.5, color: NR.muted, lineHeight: 1.6, padding: "0 2px" }}>No sources yet. Ingest a URL or upload a document, then highlight a claim and bind it.</div>}
+          {(() => {
+            // Everything one click could archive right now: not a conversation
+            // (no URL to snapshot), not already archived or in flight, and clear
+            // of Citey's PII gate — a gated source still needs its own review, so
+            // bulk-archiving skips it rather than silently blocking on it.
+            const pending = sources.filter(s => {
+              const rec = window.NPJ.SOURCES[s.key];
+              const isIv = !!(window.NpjInterview && rec && window.NpjInterview.isInterview(rec));
+              return !isIv && !s.archived && !s.snapshotting && !needsPiiReview(s.key);
+            });
+            const gatedCount = sources.filter(s => needsPiiReview(s.key)).length;
+            if (pending.length < 2) return null;
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <button onClick={() => setArchiveAllTargets(pending)} title="Archive every eligible source in this draft to archive.org"
+                  className="np-cond" style={{ flex: 1, background: "transparent", border: "1px solid " + NR.warn, color: NR.warn, padding: "6px 9px", fontSize: 11, textTransform: "uppercase", letterSpacing: ".04em", fontWeight: 600, cursor: "pointer" }}>
+                  Archive all ({pending.length})
+                </button>
+                {gatedCount > 0 && <span className="np-mono" title="These need a PII review before they can be archived" style={{ fontSize: 9, color: NR.muted, whiteSpace: "nowrap" }}>{gatedCount} need PII review</span>}
+              </div>
+            );
+          })()}
           {sources.map(s => {
             const rec = window.NPJ.SOURCES[s.key] || { id: s.key, title: s.key, outlet: "" };
             const n = citeNum(s.key); const cnt = spanCount(s.key); void rev;
@@ -3844,6 +3867,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
         onClose={() => { redactNext.current = null; setRedactTarget(null); setSources(s => [...s]); }}
         onDone={() => { const s = redactNext.current; redactNext.current = null; setRedactTarget(null); setSources(x => [...x]); if (s && !needsPiiReview(s.key)) setArchiveTarget(s); }} />}
       {archiveTarget && <ArchiveModal srcKey={archiveTarget.key} items={[{ name: (window.NPJ.SOURCES[archiveTarget.key] || {}).title || archiveTarget.key }]} onClose={() => setArchiveTarget(null)} onDone={() => { onArchived(archiveTarget.key); setArchiveTarget(null); }} />}
+      {archiveAllTargets && <ArchiveModal items={archiveAllTargets.map(s => ({ name: (window.NPJ.SOURCES[s.key] || {}).title || s.key }))}
+        onClose={() => setArchiveAllTargets(null)}
+        onDone={() => { archiveAllTargets.forEach(s => onArchived(s.key)); setArchiveAllTargets(null); }} />}
       {interviewOpen && window.InterviewComposer && <window.InterviewComposer reporter={(session && session.user_id) || me || ""} onSave={addInterview} onClose={() => { setInterviewOpen(false); bindAfterInterview.current = false; }} />}
       {publish && <PublishOverlay publish={publish} setPublish={setPublish} onClose={() => setPublish(null)} onPublished={onPublished} sources={sources} title={title} session={session} draftId={draftId}
         customSlug={fileSlug} onSlug={setFileSlug} initialByline={byline} initialEditors={editorsField}
