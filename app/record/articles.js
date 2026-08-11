@@ -1575,9 +1575,14 @@
     const o = opts || {};
     const { blocks, headline, dek } = htmlToBlocks(c.html || "", { preview: !!o.preview });
     const usedKeys = {};
+    // t.src is a citation-key ARRAY on a claim span ({c,src[],id}) but a plain
+    // URL STRING on an inline img token (a <figure> nested in a callout/list —
+    // see figureToImgToken); Array.isArray tells the two apart so an inline
+    // image doesn't crash the whole publish with a t.src.forEach TypeError.
+    const collectSrc = (t) => { if (t && Array.isArray(t.src)) t.src.forEach(k => usedKeys[k] = 1); };
     blocks.forEach(b => {
-      (b.tokens || []).forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); });
-      (b.items || []).forEach(it => it.forEach(t => { if (t && t.src) t.src.forEach(k => usedKeys[k] = 1); }));
+      (b.tokens || []).forEach(collectSrc);
+      (b.items || []).forEach(it => it.forEach(collectSrc));
     });
     const sources = {};
     Object.keys(usedKeys).forEach(k => { if (window.NPJ.SOURCES[k]) sources[k] = publishableSource(window.NPJ.SOURCES[k]); });
