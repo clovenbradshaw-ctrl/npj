@@ -77,6 +77,49 @@
     return r;
   }
 
+  // ---- caret preservation: live typing wraps spans around the caret's own
+  // text node, and mergeAdjacent's normalize() can silently detach that node —
+  // the browser then throws the caret to the top of the paragraph. So we
+  // capture the caret as a FLAT text offset in the block before the surgery
+  // (wrapping never changes the text content, so the offset is stable) and
+  // re-place it after. The same flat-offset walk rangeAtOffset uses, inverted.
+  function caretOffsetIn(blk) {
+    if (!blk || !blk.ownerDocument || !blk.ownerDocument.createTreeWalker) return -1;
+    var sel = G.getSelection ? G.getSelection() : null;
+    if (!sel || !sel.rangeCount) return -1;
+    var r = sel.getRangeAt(0);
+    if (!r || !r.collapsed || !blk.contains(r.startContainer)) return -1;
+    var node = r.startContainer;
+    var walker = blk.ownerDocument.createTreeWalker(blk, 4 /* NodeFilter.SHOW_TEXT */, null);
+    var off = r.startOffset, n = 0, found = false;
+    while (walker.nextNode()) {
+      var c = walker.currentNode;
+      if (c === node) { found = true; break; }
+      n += c.nodeValue.length;
+    }
+    if (!found) return -1;
+    return n + off;
+  }
+  function setCaretAtOffset(blk, offset) {
+    if (offset < 0 || !blk || !blk.ownerDocument || !blk.ownerDocument.createTreeWalker) return;
+    var total = (blk.textContent || "").length;
+    if (offset > total) offset = total;
+    var walker = blk.ownerDocument.createTreeWalker(blk, 4 /* NodeFilter.SHOW_TEXT */, null);
+    var pos = 0, node = null, o = 0, c;
+    while ((c = walker.nextNode())) {
+      var L = c.nodeValue.length;
+      if (pos + L >= offset) { node = c; o = offset - pos; break; }
+      pos += L;
+    }
+    if (!node) return;
+    var r = blk.ownerDocument.createRange();
+    try { r.setStart(node, o); r.collapse(true); } catch (e) { return; }
+    var sel = G.getSelection ? G.getSelection() : null;
+    if (!sel) return;
+    sel.removeAllRanges();
+    sel.addRange(r);
+  }
+
   // Fold a freshly wrapped span into an adjacent same-author span, if any, so
   // a typing session collapses into one growing span per contiguous author
   // run instead of a fragment per keystroke. Moves nodes (never clones), the
@@ -147,6 +190,7 @@
     if (!prevText.has(blk)) { prevText.set(blk, cur); return; }
     var prev = prevText.get(blk);
     if (prev === cur) return;
+    var caret = caretOffsetIn(blk);
     var parts = D.diffWordsRaw(prev, cur);
     var pos = 0, ts = Date.now();
     parts.forEach(function (p) {
@@ -158,6 +202,7 @@
     });
     sweepEmpty(blk);
     prevText.set(blk, blk.textContent || "");
+    if (caret >= 0) setCaretAtOffset(blk, caret);
   }
 
   // Find the block the caret currently sits in and tag whatever just changed
