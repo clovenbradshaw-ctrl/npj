@@ -823,17 +823,17 @@ function ArticleRead(props) {
     setTimeout(() => el.classList.remove("claim-flash"), 1800);
   }, [isPhone]);
   // the passages a source backs, rendered inside the in-app viewer — clicking one
-  // closes the sheet and jumps to that exact span in the story (it stays on the
-  // page; nothing opens a new tab)
+  // jumps to that exact span in the story WITHOUT closing the sheet (it stays on
+  // the page; the reader dismisses it when ready — nothing opens a new tab)
   const renderCitedForSource = useCallback((key) => {
     const spans = spansForSource(key);
     if (!spans || !spans.length) return null;
     return (
       <React.Fragment>
         <div className="np-eyebrow" style={{ color: "var(--ink-soft)", margin: "0 0 5px" }}>
-          Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} in the story — click to jump
+          Backs {spans.length} passage{spans.length !== 1 ? "s" : ""} in the story — click to jump (the sheet stays open until you close it)
         </div>
-        <CitedSpanList claims={spans} onJump={(id) => { setLightbox(null); jumpToClaim(id); }} />
+        <CitedSpanList claims={spans} onJump={jumpToClaim} />
       </React.Fragment>
     );
   }, [spansForSource, jumpToClaim]);

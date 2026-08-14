@@ -234,3 +234,45 @@ test("kind + align round-trip through blocksToHtml", () => {
   const plain = A.blocksToHtml([{ type: "pull", text: "Passage.", kind: "block" }]);
   assert.match(plain, /^<blockquote>Passage\.<\/blockquote>$/, "a block quote stays a bare blockquote");
 });
+
+test("a bound-but-unpinned stance span publishes as OWNED (the author asserts)", () => {
+  // the editor's default after binding a source but before pinning a line:
+  // <span class="claim-src" data-stance="analysis" data-src=k>…</span><sup>1</sup>
+  // (data-quote still empty, no citation record). It must fold to an owned token —
+  // never a sourced "needs a quote" token, and the trailing marker must not crash
+  // the fold or graft a source onto the owned claim.
+  const toks = foldParagraph([
+    claimSrc({ "data-src": "s9", "data-cid": "c9", "data-stance": "analysis", "data-quote": "" }, S2),
+    cite({ "data-cite": "s9", "data-cid": "c9", "data-quote": "" }, "1"),
+  ]);
+  const owned = toks.filter((t) => t && typeof t === "object" && t.stance);
+  assert.equal(owned.length, 1, "the stance span is owned, not a dangling sourced claim");
+  assert.equal(owned[0].c, S2);
+  assert.equal(owned[0].src, undefined, "no source is folded onto the owned claim");
+});
+
+test("a pinned line flips a stance span to SOURCED — the source wins", () => {
+  const toks = foldParagraph([
+    claimSrc({ "data-src": "s8", "data-cid": "c8", "data-stance": "analysis", "data-quote": "Q8" }, S1),
+    cite({ "data-cite": "s8", "data-cid": "c8", "data-quote": "Q8" }, "1"),
+  ]);
+  const claims = toks.filter((t) => t && typeof t === "object" && t.c != null);
+  assert.equal(claims.length, 1);
+  assert.ok(!claims[0].stance, "once a line is pinned the claim ships sourced, not owned");
+  assert.deepEqual(claims[0].src, ["s8"]);
+  assert.deepEqual(claims[0].q, { s8: "Q8" });
+});
+
+test("an unpinned legacy bound span (no stance) still folds sourced and ungrounded", () => {
+  // pre-default-owned drafts: <span class="claim-src" data-src=k>…</span> with no
+  // pinned words and no stance keeps its old shape — a sourced claim with q
+  // undefined, which the publish gate flags as "cites a whole page".
+  const toks = foldParagraph([
+    claimSrc({ "data-src": "s3", "data-cid": "c3", "data-quote": "" }, S2),
+    cite({ "data-cite": "s3", "data-cid": "c3", "data-quote": "" }, "1"),
+  ]);
+  const claims = toks.filter((t) => t && typeof t === "object" && t.c != null);
+  assert.equal(claims.length, 1);
+  assert.deepEqual(claims[0].src, ["s3"]);
+  assert.equal(claims[0].q, undefined, "still ungrounded — flagged at the publish gate");
+});

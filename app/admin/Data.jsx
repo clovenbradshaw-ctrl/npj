@@ -25,8 +25,10 @@ function ArchiveModal({ items, onClose, onDone, srcKey, onArchiveItem }) {
 
   // Drive the real archive action. When an onArchiveItem is provided (an uploaded
   // source document), each item is handed to it and awaited; otherwise the item is
-  // already on archive.org (an IA dataset) and lands as done instantly. Successes
-  // are remembered so Retry never re-uploads something already archived.
+  // already on archive.org (an IA dataset) and lands as done instantly. A failure
+  // records { ok:false } for that item but NEVER stops the run — every sibling
+  // still gets its attempt. Successes are remembered so Retry never re-uploads
+  // something already archived.
   const run = async () => {
     setPhase("running");
     const acc = results.length ? results.slice() : [];
@@ -40,7 +42,6 @@ function ArchiveModal({ items, onClose, onDone, srcKey, onArchiveItem }) {
       } else { r = { ok: true }; }
       acc[j] = r;
       setResults([...acc]);
-      if (!r.ok) break;
     }
     setPhase(acc.every(r => r && r.ok) ? "done" : "fail");
   };
@@ -115,8 +116,8 @@ function ArchiveModal({ items, onClose, onDone, srcKey, onArchiveItem }) {
 
           {phase === "fail" && <div style={{ padding: "4px 0" }} className="fade-in">
             <div style={{ padding: "12px 14px", background: "color-mix(in srgb, var(--review) 10%, transparent)", border: "1px solid color-mix(in srgb, var(--review) 40%, transparent)", fontFamily: "var(--serif)", fontSize: 13.5, color: "var(--ink)", lineHeight: 1.5 }}>
-              <strong style={{ color: "var(--review)", fontWeight: 700 }}>Couldn't archive{list[i] ? " " + list[i].name : ""}. </strong>
-              {(results[i] && results[i].error) || "The archive service didn't complete the upload."} Nothing was published — fix this and retry.
+              <strong style={{ color: "var(--review)", fontWeight: 700 }}>Couldn't archive{list[i] ? " " + list[i].name : " this one"}. </strong>
+              {(results[i] && results[i].error) || "The archive service didn't complete the upload."} {results.some(r => r && r.ok) ? "The others are archived; retry to catch this one." : "Nothing was published — fix this and retry."}
             </div>
           </div>}
 
