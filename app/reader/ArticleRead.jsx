@@ -560,6 +560,26 @@ function EmbedFigure({ url, caption, height, reload }) {
   );
 }
 
+// A bare domain or URL typed straight into prose (no [label](url), no editor
+// link) — "nashvillecommunitysafety.net", "instagram.com/handle" — never
+// became clickable, because the reader only linkifies explicit `{t:"a"}`
+// tokens. Split on a conservative pattern (a real TLD from the allowlist, so
+// "U.S." or "9 p.m." can't match) and wrap each hit the same way a real link
+// token renders, so a plain mention reads and behaves identically to one the
+// author linked by hand.
+const BARE_URL_RE = /((?:https?:\/\/)?(?:www\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.(?:com|net|org|edu|gov|io|co|us|app|dev|news|info|me)(?:\/[^\s<>"')\]]*)?)/gi;
+const BARE_URL_TEST = new RegExp("^" + BARE_URL_RE.source + "$", "i");
+function autolinkText(str, keyPrefix) {
+  const s = String(str == null ? "" : str);
+  if (!s || s.indexOf(".") === -1) return str;
+  const parts = s.split(BARE_URL_RE);
+  if (parts.length === 1) return str;
+  return parts.filter(p => p).map((p, i) => BARE_URL_TEST.test(p)
+    ? <a key={(keyPrefix || "") + "u" + i} href={/^https?:\/\//i.test(p) ? p : "https://" + p} target="_blank" rel="noopener noreferrer nofollow"
+        style={{ color: "var(--data)", textDecoration: "underline", textDecorationThickness: "1.5px", textUnderlineOffset: 2 }}>{p}</a>
+    : <React.Fragment key={(keyPrefix || "") + "t" + i}>{p}</React.Fragment>);
+}
+
 function ArticleRead(props) {
   const { audit, setAudit, showSugg, setShowSugg,
           suggestions = [], onVote, onResolve, onReply, onMerge, onAddSuggestion, filter, setFilter,
@@ -1038,7 +1058,18 @@ function ArticleRead(props) {
     return out;
   };
   const renderTokens = (tokens) => (tokens || []).map((t, i) => {
-    if (typeof t === "string") return <React.Fragment key={i}>{ent ? markEntities(t, ent, "p" + i) : markDefs(t, "p" + i)}</React.Fragment>;
+    if (typeof t === "string") {
+      // A stray non-breaking space (pasted in from a doc/word processor) glues
+      // words together so the line can never wrap, which can blow out the
+      // whole column's width — prose should always be free to break.
+      const clean = t.indexOf(" ") === -1 ? t : t.replace(/ /g, " ");
+      const linked = autolinkText(clean, "p" + i);
+      const mark = (str, kp) => (ent ? markEntities(str, ent, kp) : markDefs(str, kp));
+      const out = Array.isArray(linked)
+        ? linked.map((part, j) => typeof part === "string" ? <React.Fragment key={"p" + i + "s" + j}>{mark(part, "p" + i + "s" + j)}</React.Fragment> : part)
+        : mark(linked, "p" + i);
+      return <React.Fragment key={i}>{out}</React.Fragment>;
+    }
     if (t && t.t) {
       if (t.t === "br") return <br key={i} />;
       if (t.t === "strong") return <strong key={i}>{t.text}</strong>;

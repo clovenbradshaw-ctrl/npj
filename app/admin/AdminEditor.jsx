@@ -1,4 +1,5 @@
-/* NPJ Admin Layout Editor — visible ONLY to the verified admin.
+/* NPJ Admin Layout Editor — visible ONLY to the verified admin, and only on
+   the front page.
    Edits the site chrome (section nav, masthead taglines, utility links, brand)
    live, then publishes the config to GitHub via the n8n webhook. Gating is in
    App (isAdmin comes from a real Matrix whoami), so this component never renders
@@ -19,7 +20,7 @@ function MiniBtn({ onClick, children, title, danger }) {
   return <button onClick={onClick} title={title} style={{ border: "1px solid " + (danger ? "#a8503a" : AE.line), background: "transparent", color: danger ? "#e09a85" : AE.text, width: 28, height: 30, fontSize: 14, cursor: "pointer", flex: "0 0 auto", lineHeight: 1 }}>{children}</button>;
 }
 
-function AdminEditor() {
+function AdminEditor({ route }) {
   const ctx = React.useContext(window.LayoutCtx);
   const { layout, setLayout, isAdmin, admin } = ctx;
   const [open, setOpen] = useState(false);
@@ -38,8 +39,11 @@ function AdminEditor() {
   // during the previous render"). Keeping the order stable fixes that crash.
   // Admin-only, belt and braces: the launcher needs BOTH the layout role AND a
   // live verified Matrix session resolving to admin — never a cached flag alone.
+  // And home-only: every section here (lineup, masthead, nav, brand) previews
+  // against the front page, so the launcher has no reason to float over an
+  // article read, the newsroom, or any other route.
   const liveSession = window.MatrixAuth && window.MatrixAuth.current && window.MatrixAuth.current();
-  if (!isAdmin || !liveSession || window.roleOf(layout, liveSession.user_id) !== "admin") return null;
+  if (!isAdmin || !liveSession || window.roleOf(layout, liveSession.user_id) !== "admin" || route !== "home") return null;
 
   const patch = (next) => setLayout({ ...layout, ...next });
   const setSections = (sections) => patch({ sections });
@@ -86,14 +90,18 @@ function AdminEditor() {
   const FRONT = (window.NPJ && window.NPJ.FRONT) || {};
   const frontPool = [].concat(FRONT.lead ? [FRONT.lead] : [], Array.isArray(FRONT.secondary) ? FRONT.secondary : [])
     .filter(a => a && a.slug && a.status !== "unpublished");
-  // The cover is pinned to the most-recently-updated piece (frontPool arrives
-  // ordered by last touch) — matches the public front page, which ignores
-  // front.order for the lead slot so a stale pin can never outlive a genuinely
-  // newer (or freshly re-edited) story.
+  // The cover is pinned to the most-recently-PUBLISHED piece (frontPool
+  // arrives ordered by original publish date — see byNewest) — matches the
+  // public front page, which ignores front.order for the lead slot so a stale
+  // pin can never outlive a genuinely newer story. A republish or a later edit
+  // never bumps a piece back to the cover; only a piece that's genuinely new
+  // takes it.
   // Only the rest of the lineup (rail + feed) is admin-orderable.
   const frontLead = frontPool[0] || null;
   const frontOrdered = frontLead ? [frontLead, ...window.orderFrontItems(frontPool.slice(1), front)] : [];
-  const slotLabel = (i) => i === 0 ? "Cover" : i <= 3 ? "Row · " + i : "Feed · " + (i - 3);
+  // Mirrors FrontLineup's RAIL_MAX (2): slots 1-2 are the side rail, everything
+  // past that is the overflow list.
+  const slotLabel = (i) => i === 0 ? "Cover" : i <= 2 ? "Row · " + i : "Feed · " + (i - 2);
   // hotswap: persist the FULL current order with the one move applied. The
   // cover (i === 0) can't move — it's not user-orderable — and slot 1 can't
   // move up into it, so front.order[0] is always harmlessly the true cover.
@@ -199,7 +207,7 @@ function AdminEditor() {
             {/* Front-page lineup — hotswap positions + a layout template per piece */}
             <Section label="Front page lineup">
               <div className="np-mono" style={{ fontSize: 9.5, color: AE.soft, marginBottom: 8, lineHeight: 1.5 }}>
-                Reorder to <b style={{ color: AE.text }}>hotswap</b> the 3-across row and the vertical feed. The cover always shows the most recently updated piece and can't be pinned. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ most recently updated first.
+                Reorder to <b style={{ color: AE.text }}>hotswap</b> the 3-across row and the vertical feed. The cover always shows the most recently published piece (by its original publish date — a republish never bumps it) and can't be pinned. Pick a <b style={{ color: AE.text }}>template</b> to move the photo around the title + subtitle. Empty order ⇒ most recently published first.
               </div>
               <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 9 }}>
                 <span className="np-mono" style={{ fontSize: 10, color: AE.soft, flex: "0 0 auto" }}>Template</span>
