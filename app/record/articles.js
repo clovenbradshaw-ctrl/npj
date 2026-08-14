@@ -836,6 +836,16 @@
       } catch (e) {}
       return "";
     }
+    // does ANY of a claim's sources carry a pinned line? The flag that decides
+    // whether a stance-carrying span publishes as OWNED (nothing pinned yet) or
+    // SOURCED (a line is pinned — the source wins).
+    function spanHasPin(c, src) {
+      if ((c.getAttribute("data-quote") || "").trim()) return true;
+      let m; try { m = JSON.parse(c.getAttribute("data-quotes") || "null") || null; } catch (e) {}
+      if (m) { for (const k in m) { if (String(m[k] || "").trim()) return true; } }
+      for (let i = 0; i < src.length; i++) { if (quoteFromCiteIds(c, src[i])) return true; }
+      return false;
+    }
 
     // the claim is the trailing sentence of what was typed before the marker
     function splitClaim(buf) {
@@ -877,10 +887,13 @@
             const src = String(c.getAttribute("data-src") || "").split(/[\s,]+/).filter(Boolean);
             const stance = stanceNorm(c.getAttribute("data-stance"));
             // an OWNED claim — declared as the author's analysis/account/position
-            // (data-stance, never a source). It used to flatten to plain prose at
-            // publish; now it carries its stance into the body so the reader's
-            // transparency lens can show it's grounded by declaration, not a cite.
-            if (stance && !src.length) {
+            // (data-stance). A stance span defaults to owned UNTIL a source line is
+            // pinned: binding a source doesn't strip the stance (savePin flips it on
+            // the first pin), so the build treats a bound-but-unpinned stance span
+            // as the author asserting, not as a missing citation. The pinned line
+            // always wins — once one exists, the claim ships sourced.
+            const hasPin = stance ? spanHasPin(c, src) : false;
+            if (stance && !hasPin) {
               flush();
               const owned = { c: claimText(c), stance, id: c.getAttribute("data-id") || c.getAttribute("data-cid") || newId() };
               // an asserted absence carries the documented search it rests on (what
@@ -939,7 +952,7 @@
             // the pinned source-span: the exact words in the source backing this claim
             const quote = (c.getAttribute("data-quote") || "").trim() || quoteFromCiteIds(c, key);
             const prev = toks[toks.length - 1];
-            if (!buf.trim() && prev && typeof prev === "object" && prev.c) {
+            if (!buf.trim() && prev && typeof prev === "object" && prev.c && Array.isArray(prev.src)) {
               if (prev.src.indexOf(key) < 0) prev.src.push(key); // text[^a][^b] → one claim, two sources
               if (quote) { prev.q = prev.q || {}; prev.q[key] = quote; }
               return;

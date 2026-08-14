@@ -281,7 +281,7 @@ class CiteyAgent extends React.Component {
         React.createElement('button', { onClick: () => this._endWalk(false), title: 'Stop the walkthrough', style: { background: 'none', border: 0, color: '#A8A294', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: 0 } }, '✕')
       ) : null,
       React.createElement('div', { key: 'h', style: { fontFamily: CITEY_MONO, fontSize: '10px', letterSpacing: '1.2px', textTransform: 'uppercase', color: '#A8A294', marginBottom: '2px' } },
-        needsWork ? 'ground this claim' : isOwned ? 'owned by you' : isGrounded ? 'grounded ✓' : 'this draft'),
+        needsWork ? 'ground this claim' : isOwned ? 'owned by you — the author asserts' : isGrounded ? 'grounded ✓' : 'this draft'),
       needsWork ? React.createElement('button', { key: 'pin', onClick: this._pin, style: chip() }, '📌  Pin the line in the source') : null,
       needsWork ? React.createElement('div', { key: 'or', style: { fontFamily: CITEY_MONO, fontSize: '9.5px', color: '#8C867A', margin: '2px 0 0' } }, 'or own it instead —') : null,
       needsWork ? React.createElement('button', { key: 'a', onClick: () => this._own('analysis'), style: chip() }, '⊢  My analysis') : null,
@@ -290,6 +290,7 @@ class CiteyAgent extends React.Component {
       needsWork ? React.createElement('button', { key: 'cx', onClick: () => this._own('context'), style: chip({ borderColor: '#2E8B86' }) }, '⊪  In context — continuing coverage') : null,
       needsWork ? React.createElement('button', { key: 'ab', onClick: this._ownAbsence, style: chip({ borderColor: '#4D7EA8' }) }, '∅  Asserted absence — searched, not found') : null,
       isOwned ? React.createElement('button', { key: 'un', onClick: this._unown, style: chip() }, '↩  Unmark — back to a claim') : null,
+      isOwned ? React.createElement('button', { key: 'src', onClick: this._pin, style: chip() }, '📌  Pin the source line instead') : null,
       isGrounded ? React.createElement('button', { key: 're', onClick: this._pin, style: chip() }, '✎  Re-pin the source line') : null,
       React.createElement('button', { key: 'tags', onClick: this._suggest, style: chip({ borderColor: '#4a4733' }) }, '✦  Suggest tags'),
       (gate.undeclared > 0) ? React.createElement('button', { key: 'walk', onClick: this._startWalk, style: chip({ borderColor: '#7C74DE', background: '#2c2942' }) }, '➜  Cite everything — walk me through ' + gate.undeclared) : null,
