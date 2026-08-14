@@ -82,10 +82,11 @@ test("listArticles folds the git-tree + raw bodies into sorted front-page metas"
 // piece's publish and edit instants and make the ordering deterministic.
 function withTs(line, ts) { const e = JSON.parse(line); e.ts = ts; return JSON.stringify(e); }
 
-test("listArticles orders by most recent update — a re-edited older piece leads", async () => {
+test("listArticles orders by ORIGINAL publish date — a re-edited older piece does NOT jump the queue", async () => {
   // "edited-old" was published back in May but re-edited on Jul 2; "fresh" was
-  // published Jun 20 and never touched since. By publish date alone "fresh" wins,
-  // but the front page orders by last touch, so the freshly edited piece leads.
+  // published Jun 20 and never touched since. The front page orders purely by
+  // each piece's original publish date, so "fresh" leads — editing (or fully
+  // republishing, see the test below) never bumps a piece's place in line.
   const editedOld =
     withTs(A.genesisLine({
       slug: "edited-old", headline: "Edited old piece", dek: "A subtitle", column: "Investigations",
@@ -103,9 +104,43 @@ test("listArticles orders by most recent update — a re-edited older piece lead
   try {
     const metas = await A.listArticles();
     assert.equal(metas.length, 2, "both documents listed");
-    assert.equal(metas[0].slug, "edited-old", "the re-edited older piece takes the hero");
-    assert.equal(metas[0].updated, "2026-07-02", "sorted on its newest version's date");
-    assert.equal(metas[1].slug, "fresh", "the untouched newer publish falls in behind it");
+    assert.equal(metas[0].slug, "fresh", "the untouched newer publish takes the hero");
+    assert.equal(metas[1].slug, "edited-old", "the re-edited older piece stays behind it");
+    assert.equal(metas[1].published, "2026-05-01", "its ORIGINAL publish date survived the edit, unchanged");
+    assert.equal(metas[1].updated, "2026-07-02", "the edit still shows up as `updated`, just doesn't reorder");
+  } finally { restore(); }
+});
+
+test("a full REPUBLISH (a second INS on the same slug) does not change front-page order either", async () => {
+  // "republished-old" published in Feb, then republished (a brand-new INS event
+  // — see publishGenesis's genesis-is-write-once comment) in Aug. "fresh" only
+  // ever published once, in June. The republish's own INS operand stamps
+  // `published: today()` same as any publish — foldLog must still recover the
+  // ORIGINAL Feb date from the genesis event, not the republish's fresh stamp.
+  const republishedOld =
+    withTs(A.genesisLine({
+      slug: "republished-old", headline: "Republished old piece v1", dek: "A subtitle", column: "Investigations",
+      tags: ["bench"], authors: ["@a:h"], published: "2026-02-10",
+      body: [{ type: "p", tokens: ["Lorem ipsum dolor sit amet."] }]
+    }, "@a:h"), "2026-02-10T09:00:00.000Z") + "\n" +
+    withTs(A.genesisLine({
+      slug: "republished-old", headline: "Republished old piece v2", dek: "A subtitle", column: "Investigations",
+      tags: ["bench"], authors: ["@a:h"], published: "2026-08-14",
+      body: [{ type: "p", tokens: ["A rewritten lede, republished months later."] }]
+    }, "@a:h"), "2026-08-14T09:00:00.000Z") + "\n";
+  const fresh = withTs(A.genesisLine({
+    slug: "fresh", headline: "Fresh publish", dek: "A subtitle", column: "Investigations",
+    tags: ["bench"], authors: ["@a:h"], published: "2026-06-20",
+    body: [{ type: "p", tokens: ["Lorem ipsum dolor sit amet."] }]
+  }, "@a:h"), "2026-06-20T12:00:00.000Z") + "\n";
+  const restore = stubGitHub({ "republished-old": republishedOld, "fresh": fresh });
+  try {
+    const metas = await A.listArticles();
+    assert.equal(metas.length, 2, "both documents listed");
+    assert.equal(metas[0].slug, "fresh", "the piece that only ever published once still leads");
+    assert.equal(metas[1].slug, "republished-old");
+    assert.equal(metas[1].published, "2026-02-10", "the republish's own `today()` stamp never overwrote the genesis date");
+    assert.equal(metas[1].headline, "Republished old piece v2", "the republish still wins on everything ELSE — body, headline, etc.");
   } finally { restore(); }
 });
 

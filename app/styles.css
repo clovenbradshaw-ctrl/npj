@@ -1048,16 +1048,16 @@ a { color: inherit; }
 }
 .npj-side-item { padding: 20px 0; border-top: 1px solid var(--rule); }
 .npj-side-item:first-of-type { border-top: none; padding-top: 18px; }
+/* A single-column list of rows (not a card grid) — each row is a full-width
+   "image-left" FrontCard, so it reads as a list under the cover+rail block
+   rather than a wall of stacked cards. */
 .npj-feed-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 32px 36px;
+  grid-template-columns: 1fr;
+  gap: 0;
 }
-.npj-feed-item { min-width: 0; }
-/* Mid-width desktops/tablets: two overflow columns read better than three. */
-@media (max-width: 1080px) and (min-width: 761px) {
-  .npj-feed-grid { grid-template-columns: repeat(2, 1fr); }
-}
+.npj-feed-item { min-width: 0; padding: 28px 0; border-top: 1px solid var(--rule); }
+.npj-feed-item:first-child { border-top: none; padding-top: 4px; }
 
 /* ============================================================
    Responsive layer
@@ -1103,9 +1103,9 @@ a { color: inherit; }
     border-top: 2.5px solid var(--ink) !important;
   }
   .npj-side-head { border-bottom: none !important; padding-bottom: 0 !important; margin: 14px 0 2px !important; }
-  .npj-feed-grid { grid-template-columns: 1fr !important; gap: 0 !important; }
-  .npj-feed-item { padding: 22px 0 !important; border-top: 1px solid var(--rule); }
-  .npj-feed-item:first-child { border-top: none !important; }
+  /* .npj-feed-grid is already a single column at every width — just tighten
+     the row padding for the smaller screen. */
+  .npj-feed-item { padding: 20px 0 !important; }
   .npj-more-row { grid-template-columns: 100px 1fr !important; }
   .npj-more-row > span:last-child { display: none !important; }
   .npj-empty-h { font-size: 40px !important; }

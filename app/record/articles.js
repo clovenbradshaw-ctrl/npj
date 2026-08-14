@@ -390,9 +390,17 @@
     let state = null;
     const sources = {};
     const versions = []; // newest first when returned
+    // The ORIGINAL publish date, captured once from the genesis INS and never
+    // touched again — a later INS (a republish restarts the record, above) or
+    // REC otherwise stamps `published` fresh via FOLD_FIELDS, which used to let
+    // every republish quietly walk the front-page order forward. `updated`
+    // already tracks the latest touch separately (see byNewest, FrontCard,
+    // ArticleRead's dateline); this keeps `published` meaning what it says.
+    let firstPublished = null;
     events.forEach(({ ev, line }) => {
       const o = ev.operand || {};
       if (ev.op === "INS") {
+        if (firstPublished == null) firstPublished = o.published || (ev.ts ? String(ev.ts).slice(0, 10) : null);
         // a later INS restarts the record — someone uploaded the same document
         // again. The new upload is the current version; everything before it
         // stays in `versions`, so nothing is lost.
@@ -456,7 +464,7 @@
       editors: Array.isArray(state.editors) ? state.editors : [],
       byline: typeof state.byline === "string" ? state.byline : "",
       assignees: Array.isArray(state.assignees) ? state.assignees : [],
-      published: state.published || (versions.length ? String(versions[versions.length - 1].ts).slice(0, 10) : today()),
+      published: firstPublished || state.published || (versions.length ? String(versions[versions.length - 1].ts).slice(0, 10) : today()),
       // a scheduled release: the instant the piece comes off the front-page gate.
       // `scheduled` is computed against the wall-clock at fold time — but consumers
       // (the front page) re-decide from `releaseAt` on every paint, so a stale-cached
@@ -622,18 +630,14 @@
     return texts.filter(t => t != null).join("\n");
   }
 
-  // Front-page order is by the most recent TOUCH — the later of `updated` (the
-  // newest version's date) and `published` (the first) — so a freshly edited
-  // older piece bumps back up to the hero, not just brand-new publishes. Both
-  // stamps are YYYY-MM-DD, so a lexical compare is a chronological one; a piece
-  // with no `updated` falls back to `published`. `published` breaks exact ties.
+  // Front-page order is by ORIGINAL publish date, oldest-first-published at the
+  // back — a republish (or any later edit) never moves a piece in the lineup.
+  // `published` is now stable (foldLog captures it once, off the genesis INS),
+  // so a straight lexical compare on the YYYY-MM-DD stamp is a chronological
+  // one. `updated` still rides along on the meta for display (the "· updated"
+  // suffix on FrontCard/ArticleRead) — it just doesn't reorder anything.
   function byNewest(a, b) {
-    const touched = (x) => {
-      const p = String(x.published || ""), u = String(x.updated || "");
-      return u > p ? u : p;
-    };
-    return touched(b).localeCompare(touched(a)) ||
-           String(b.published || "").localeCompare(String(a.published || ""));
+    return String(b.published || "").localeCompare(String(a.published || ""));
   }
 
   /* List + fold every document into the front-page metas. Cached by blob sha, so
