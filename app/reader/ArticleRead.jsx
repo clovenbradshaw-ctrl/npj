@@ -22,7 +22,7 @@ function NotUploadedNote() {
 function PhotoFigCaption({ caption, credit }) {
   if (!caption && !credit) return null;
   return (
-    <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>
+    <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45, overflowWrap: "anywhere" }}>
       {caption ? <span>▢ {caption}</span> : null}
       {credit ? (
         <span style={{ display: caption ? "block" : "inline", marginTop: caption ? 2 : 0 }}>
@@ -549,13 +549,13 @@ function EmbedFigure({ url, caption, height, reload }) {
   if (media) return (
     <figure style={{ margin: "26px 0" }}>
       <div style={{ border: "1.5px solid var(--ink)", background: "#000", lineHeight: 0 }}>{media}</div>
-      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45 }}>{r && r.panel ? "▣" : "▶"} {caption}</figcaption>}
+      {caption && <figcaption className="np-mono" style={{ fontSize: 11, color: "var(--ink-soft)", marginTop: 7, lineHeight: 1.45, overflowWrap: "anywhere" }}>{r && r.panel ? "▣" : "▶"} {caption}</figcaption>}
     </figure>
   );
   return (
     <figure style={{ margin: "24px 0", border: "1.5px solid var(--ink)", background: "var(--card)", padding: "12px 14px" }}>
       <a href={u} target="_blank" rel="noopener" className="np-mono" style={{ fontSize: 12.5, color: "var(--data)", textDecoration: "underline", textUnderlineOffset: 2, overflowWrap: "anywhere" }}>↗ {host || u}</a>
-      {caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5 }}>{caption}</figcaption>}
+      {caption && <figcaption className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", marginTop: 5, overflowWrap: "anywhere" }}>{caption}</figcaption>}
     </figure>
   );
 }

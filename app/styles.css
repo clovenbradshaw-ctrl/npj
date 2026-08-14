@@ -1189,8 +1189,8 @@ a { color: inherit; }
   background: var(--paper-2, #efe9d8); cursor: zoom-in; overflow: hidden;
 }
 .npj-carousel-slide:focus-visible { outline: 2px solid var(--yellow, #ffec01); outline-offset: 3px; }
-.npj-carousel-slidecap { font-family: var(--mono); font-size: 11px; color: var(--ink-soft, #3a362b); margin-top: 6px; text-align: center; }
-.npj-carousel-cap { font-family: var(--mono); font-size: 11.5px; font-style: italic; color: var(--ink-soft, #3a362b); margin-top: 12px; text-align: center; }
+.npj-carousel-slidecap { font-family: var(--mono); font-size: 11px; color: var(--ink-soft, #3a362b); margin-top: 6px; text-align: center; overflow-wrap: anywhere; }
+.npj-carousel-cap { font-family: var(--mono); font-size: 11.5px; font-style: italic; color: var(--ink-soft, #3a362b); margin-top: 12px; text-align: center; overflow-wrap: anywhere; }
 /* a quiet count chip so it reads as a gallery at a glance */
 .npj-carousel-count {
   position: absolute; top: 8px; right: 8px; z-index: 2; pointer-events: none;
