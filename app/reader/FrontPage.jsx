@@ -687,12 +687,14 @@ function SideCard({ item, onOpen }) {
 
 /* ---- Front-page lineup ----
    The page is a two-column masthead-width grid: the cover story owns the left
-   2/3, and the next few stories stack in a 1/3 rail on the right. The rail sizes
-   to its contents and hangs from the top, so with only a story or two the empty
-   space beneath it is deliberate headroom — room for the lineup to grow, not a
-   gap to fill. Once the rail is full, further stories spill into a full-width
-   grid below both columns. On phones the whole thing collapses to one column:
-   cover, then rail briefs, then the overflow grid, top to bottom. */
+   2/3, and exactly the next two stories stack in a 1/3 rail on the right — one
+   hero, two beside it, always. The rail sizes to its contents and hangs from
+   the top, so with only a story or two the empty space beneath it is
+   deliberate headroom — room for the lineup to grow, not a gap to fill. Once
+   the rail's two slots are full, further stories spill into a full-width list
+   of rows below both columns. On phones the whole thing collapses to one
+   column: cover, then the two rail briefs, then the overflow list, top to
+   bottom. */
 function FrontLineup({ items, onOpen }) {
   const { layout } = React.useContext(window.LayoutCtx);
   const mobile = window.useIsMobile();
@@ -711,16 +713,18 @@ function FrontLineup({ items, onOpen }) {
   // the rail vs. the overflow feed — just never who's on the cover.
   const ordered = window.orderFrontItems(items, front);
   const rest = ordered.filter(a => a !== lead);
-  // The rail holds the freshest few beside the cover; the cap keeps it from
-  // towering over the cover. Everything past it drops into the overflow grid.
-  const RAIL_MAX = 4;
+  // The rail holds exactly the next two stories beside the cover — one hero
+  // left, two beside it right, so the top of the page reads as a fixed
+  // three-story masthead block. Everything past it drops into the overflow list.
+  const RAIL_MAX = 2;
   const rail = rest.slice(0, RAIL_MAX);
   const feed = rest.slice(RAIL_MAX);
   const hasRail = rail.length > 0;
   const tpl = (slug, pos) => window.cardTemplateFor(layout, slug, pos);
-  // Overflow cards read best as photo-topped grid cards; an explicit per-article
-  // template override still wins.
-  const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-top";
+  // Overflow reads as a single-column list of rows (photo beside the text, not
+  // stacked above it — a full-width row is too wide for a top-mounted photo to
+  // read well); an explicit per-article template override still wins.
+  const feedTpl = (slug) => (front.cards && front.cards[slug]) ? front.cards[slug] : "image-left";
 
   return (
     <>
