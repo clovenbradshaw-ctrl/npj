@@ -162,6 +162,41 @@ function nrProtectedEl(el) {
 function nrInProtected(el) { for (var n = el; n && n.nodeType === 1; n = n.parentElement) if (nrProtectedEl(n)) return true; return false; }
 function nrUnwrap(el) { var p = el.parentNode; if (!p) return; while (el.firstChild) p.insertBefore(el.firstChild, el); p.removeChild(el); }
 function nrNoAttrs(el) { return el.attributes.length === 0; }
+// Strip authorship.js's per-run <span class="npj-author" data-author=…> wrappers
+// out of a detached copy so the HTML source view reads as clean prose by
+// default — those spans are a live-DOM-only "who wrote this word" layer (see
+// app/feedback/authorship.js) that already never reaches htmlToBlocks, Preview
+// or any export; the source view is the one place that was still showing them
+// verbatim, since it serializes the real editable DOM. Unwrapping only removes
+// the wrapper tag + its attributes — the words and any markup nested inside
+// (citations, formatting) are untouched. Returns a detached container so the
+// live editor DOM is never touched; pass its childNodes to nrSerializeHtml.
+function nrStripAuthorship(html) {
+  var doc = document.createElement("div");
+  doc.innerHTML = html;
+  var list = doc.querySelectorAll(".npj-author");
+  for (var i = 0; i < list.length; i++) nrUnwrap(list[i]);
+  return doc;
+}
+// Applying the clean (authorship-hidden) source view would otherwise blow the
+// npj-author tags off the WHOLE document — including every paragraph the
+// editor never touched — since Apply is a full innerHTML replace, not a merge.
+// nrSerializeHtml is one leaf block per line, so lining trueHtml's (tagged)
+// lines up against its own freshly-stripped lines gives an exact per-line map;
+// wherever the edited draft's line matches that stripped line unchanged, swap
+// the tagged original back in. A block the author actually edited, or any edit
+// that shifts the line count (a block added/removed/split), just keeps the
+// plain edited line — losing authorship only for words that actually changed,
+// never for the rest of the piece. Never used to CHANGE text, only to decide
+// which line to keep, so it can't introduce a mismatch.
+function nrReapplyAuthorship(trueHtml, editedCleanHtml) {
+  var trueLines = trueHtml.split("\n");
+  var trueCleanLines = nrSerializeHtml(nrStripAuthorship(trueHtml)).split("\n");
+  var editedLines = editedCleanHtml.split("\n");
+  if (trueCleanLines.length !== editedLines.length) return editedCleanHtml;
+  var out = editedLines.map(function (line, i) { return line === trueCleanLines[i] ? trueLines[i] : line; });
+  return out.join("\n");
+}
 // One conservative cleanup pass over a DETACHED copy. Only touches the cruft the
 // composer is known to accumulate; never reaches into a protected node. Returns
 // the tidied, pretty-printed HTML and a count of fixes (non-destructive — the
@@ -1621,6 +1656,7 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   const [htmlMode, setHtmlMode] = useState(false);  // editing the document's raw HTML in the source view
   const [htmlDraft, setHtmlDraft] = useState("");   // the source-view textarea buffer
   const [htmlMsg, setHtmlMsg] = useState("");       // a transient note (e.g. the Tidy result)
+  const [htmlShowAuthors, setHtmlShowAuthors] = useState(false); // reveal npj-author spans in the source view instead of the clean default
   const [voidSearch, setVoidSearch] = useState(""); // the documented search/evidence behind a prose "cite a void"
   const [voidKind, setVoidKind] = useState("");     // which of the six kinds of void (see app/void-kinds.js)
   useEffect(() => {
@@ -1763,12 +1799,27 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const openHtmlSource = () => {
     if (!ed.current) return;
-    setHtmlDraft(nrSerializeHtml(ed.current));
+    setHtmlShowAuthors(false);
+    setHtmlDraft(nrSerializeHtml(nrStripAuthorship(ed.current.innerHTML)));
     setHtmlMsg(""); setFmtMenu(null); setMenu(null);
     if (scroller.current) scroller.current.scrollTop = 0;
     setHtmlMode(true);
   };
   const closeHtmlSource = () => { setHtmlMode(false); setHtmlMsg(""); };
+  // toggling ON re-syncs from the live document (the only place the true
+  // data-author spans live) — any edits made in the textarea since opening
+  // that haven't been Applied are discarded, same as Tidy replacing the
+  // buffer. Toggling OFF just strips the current buffer, so edits made while
+  // authorship was showing are kept.
+  const toggleHtmlAuthors = () => {
+    setHtmlShowAuthors(v => {
+      const next = !v;
+      if (next && ed.current) setHtmlDraft(nrSerializeHtml(ed.current));
+      else setHtmlDraft(nrSerializeHtml(nrStripAuthorship(htmlDraft)));
+      setHtmlMsg(next ? "Showing who wrote what — unapplied edits above were reset to the live document" : "");
+      return next;
+    });
+  };
   const tidyHtmlSource = () => {
     const res = nrTidyHtml(htmlDraft);
     setHtmlDraft(res.html);
@@ -1776,12 +1827,13 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
   };
   const applyHtmlSource = () => {
     const root = ed.current; if (!root) return;
-    root.innerHTML = htmlDraft;
+    const finalHtml = htmlShowAuthors ? htmlDraft : nrReapplyAuthorship(nrSerializeHtml(root), htmlDraft);
+    root.innerHTML = finalHtml;
     reconcileAfterReplace();
     // pasting an HTML document into the source view is an "import" too — mint a web
     // source for every link it carries that the room hasn't absorbed. Setting
     // innerHTML fires no paste/blur, so ingest the applied markup explicitly.
-    ingestProseUrls(htmlDraft);
+    ingestProseUrls(finalHtml);
     setHtmlMode(false); setHtmlMsg("");
   };
   // leaving prose for a grounding surface drops the source panel so it can't
@@ -3546,6 +3598,9 @@ function Newsroom({ session, draftId = "working", onExit, onDocs, onPublished })
                   <div className="np-mono npj-hide-sm" style={{ fontSize: 10.5, color: NR.muted, marginTop: 2 }}>Unstick a block, retag a heading, clear broken markup — then Apply.</div>
                 </div>
                 {htmlMsg && <span className="np-mono" style={{ fontSize: 10.5, color: NR.ok }}>{htmlMsg}</span>}
+                <button onMouseDown={(e) => e.preventDefault()} onClick={toggleHtmlAuthors} aria-pressed={htmlShowAuthors}
+                  title={htmlShowAuthors ? "Hide who-wrote-what — back to clean prose markup" : "Show who wrote what — reveal each collaborator's data-author spans in the source"}
+                  className="np-cond" style={{ background: htmlShowAuthors ? "var(--yellow)" : "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>{htmlShowAuthors ? <I.eye style={{ fontSize: 13 }} /> : <I.eyeoff style={{ fontSize: 13 }} />} Who edited</button>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={tidyHtmlSource} title="Auto-fix the usual cruft: bare wrapper spans, fragmented bold/italic runs, empty tags and blank paragraphs. Leaves citations, images and embeds untouched." className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.text, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}><I.sparkle style={{ fontSize: 13 }} /> Tidy</button>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={closeHtmlSource} title="Discard these edits and return to the editor" className="np-cond" style={{ background: "transparent", border: "1px solid " + NR.line, color: NR.soft, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer" }}>Cancel</button>
                 <button onMouseDown={(e) => e.preventDefault()} onClick={applyHtmlSource} title="Replace the document with this HTML, then re-link citations, re-upgrade images and renumber" className="np-cond" style={{ background: "var(--yellow)", border: "1.5px solid var(--ink)", color: "var(--ink)", padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}><I.check style={{ fontSize: 13 }} /> Apply</button>
