@@ -1633,8 +1633,31 @@ const TRANS_LEVELS = [
    Replaces the old pair of Transparency / Previews toggles. */
 function TransparencyControl({ level, setLevel, isPhone }) {
   const [open, setOpen] = useState(false);
+  // The menu used to be `position:absolute; right:0` inside its own
+  // shrink-wrapped `position:relative` button wrapper. That's fine while the
+  // wrapper sits at the right end of the bar — but ControlBar's row wraps on
+  // a phone (Sources/Edits/Comment alone already fill the width), which drops
+  // this control onto its OWN line at the LEFT of the screen. `right:0`
+  // relative to that narrow, left-sitting wrapper then pins a 296px-wide menu
+  // mostly off-screen to the left (only a sliver of its right edge was
+  // visible/tappable) — reproduced with a real render at a 393px viewport.
+  // Anchoring to a constant screen-edge margin instead (viewport-relative
+  // `position:fixed`, `top` still tracking the actual button via
+  // getBoundingClientRect — same technique the citation/grounding popups use
+  // elsewhere in this file) keeps the menu fully on-screen no matter which
+  // line the button ends up wrapped onto.
+  const [top, setTop] = useState(0);
+  const btnRef = useRef(null);
+  const edgeMargin = isPhone ? 16 : 22;
   const cur = TRANS_LEVELS.find(l => l.id === level) || TRANS_LEVELS[1];
   const on = level !== "clean";
+  const toggle = () => {
+    setOpen(o => {
+      const next = !o;
+      if (next && btnRef.current) setTop(btnRef.current.getBoundingClientRect().bottom + 6);
+      return next;
+    });
+  };
   useEffect(() => {
     if (!open) return;
     const onKey = (e) => { if (e.key === "Escape") setOpen(false); };
@@ -1647,7 +1670,7 @@ function TransparencyControl({ level, setLevel, isPhone }) {
          so a reader landing on a clean article knows where the grounding lives.
          Once on, it names the layer and shows the current level so they can dial it
          back. A roomier tap target on a phone. */}
-      <button className="btn btn-sm" onClick={() => setOpen(o => !o)} aria-haspopup="menu" aria-expanded={open}
+      <button ref={btnRef} className="btn btn-sm" onClick={toggle} aria-haspopup="menu" aria-expanded={open}
         title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance)."
         style={{ display: "inline-flex", alignItems: "center", gap: 7,
           padding: isPhone ? "8px 12px" : undefined, fontSize: isPhone ? 13 : undefined,
@@ -1661,7 +1684,7 @@ function TransparencyControl({ level, setLevel, isPhone }) {
         <React.Fragment>
           <div onClick={() => setOpen(false)} aria-hidden="true" style={{ position: "fixed", inset: 0, zIndex: 1600 }} />
           <div role="menu" aria-label="Transparency layer" className="fade-in"
-            style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 296, maxWidth: "calc(100vw - 32px)",
+            style={{ position: "fixed", top, right: edgeMargin, width: 296, maxWidth: "calc(100vw - " + (edgeMargin * 2) + "px)",
               background: "var(--card)", border: "1.5px solid var(--ink)", boxShadow: "0 14px 36px rgba(8,7,5,.24)", zIndex: 1601, overflow: "hidden" }}>
             <div className="np-eyebrow" style={{ padding: "10px 13px", borderBottom: "1.5px solid var(--ink)", color: "var(--ink-soft)" }}>Transparency layer</div>
             {TRANS_LEVELS.map((l, i) => {
