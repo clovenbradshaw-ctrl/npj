@@ -584,7 +584,11 @@ function ArticleRead(props) {
   // The transparency layer is ONE control with three escalating settings, so
   // there's a single mental model — "how much of NPJ's transparency layer do I
   // want to see" — instead of two overlapping toggles:
-  //   clean    — just the article (no inline previews, no assertion lens)
+  //   clean    — just the article: no passive tint/underline on grounded spans,
+  //              no ambient inline previews. The grounding is still THERE —
+  //              tapping/clicking a claim (or a footnote marker) still opens
+  //              its source card, exactly like Standard/Full. Clean only turns
+  //              off the unsolicited visual noise, never the on-demand reveal.
   //   standard — inline photo/social previews on; the assertion lens hidden
   //   full     — everything: previews + the grounding lens (sources & provenance)
   // `previews` and `transparency` derive from the level, so every downstream
@@ -724,7 +728,6 @@ function ArticleRead(props) {
   suggestions.forEach(s => { if (s.status === "proposed" || s.status === "review") openByClaim[s.claimId] = (openByClaim[s.claimId] || 0) + 1; });
 
   const enterClaim = useCallback((e, claim) => {
-    if (!previews) return;
     if (leaveTimer.current) clearTimeout(leaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
@@ -735,7 +738,7 @@ function ArticleRead(props) {
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
     setActiveSrc(claim.src[0]);
-  }, [previews, railBlockL, railBlockR]);
+  }, [railBlockL, railBlockR]);
   // The citation panel is docked and STAYS IN PLACE: leaving the marker or the
   // card no longer fades it. It swaps contents when you hover another marker and
   // closes on its ✕ or Escape — so it holds still while you read what it shows.
@@ -746,7 +749,6 @@ function ArticleRead(props) {
   // the docked panel and stays there. A click still jumps down to the note's home
   // in the endnotes.
   const enterFn = useCallback((e, key) => {
-    if (!previews) return;
     const n = footnoteByKey[key]; if (!n) return;
     if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
@@ -756,7 +758,7 @@ function ArticleRead(props) {
     setFnPop({ key, num: n.num, text: n.text, x: r.left, y: r.bottom,
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
-  }, [footnoteByKey, previews, railBlockL, railBlockR]);
+  }, [footnoteByKey, railBlockL, railBlockR]);
   // docked and persistent: leaving no longer hides it (closes on ✕ or Escape)
   const scheduleFnLeave = useCallback(() => {}, []);
   const cancelFnLeave = useCallback(() => { if (fnLeaveTimer.current) clearTimeout(fnLeaveTimer.current); }, []);
@@ -771,7 +773,7 @@ function ArticleRead(props) {
   // and the docked panel explains HOW it's grounded and stays put. Gated on
   // Previews, exactly like the citation and footnote cards.
   const enterGround = useCallback((e, tok) => {
-    if (!previews || !tok) return;
+    if (!tok) return;
     if (groundLeaveTimer.current) clearTimeout(groundLeaveTimer.current);
     const r = e.currentTarget.getBoundingClientRect();
     const c = bodyRef.current && bodyRef.current.getBoundingClientRect();
@@ -780,7 +782,7 @@ function ArticleRead(props) {
     setGroundPop({ tok, x: r.left, y: r.bottom,
       mk: { top: r.top, left: r.left, right: r.right }, col: c && { left: c.left, right: c.right },
       blockL: railBlockL, blockR: railBlockR });
-  }, [previews, railBlockL, railBlockR]);
+  }, [railBlockL, railBlockR]);
   // docked and persistent: leaving no longer hides it (closes on ✕ or Escape)
   const scheduleGroundLeave = useCallback(() => {
   }, []);
@@ -1055,7 +1057,7 @@ function ArticleRead(props) {
               <a href={"#fn-" + k} aria-label={"Footnote " + t.num} aria-describedby={"fn-" + k}
                 onMouseEnter={isPhone ? undefined : (e) => enterFn(e, k)}
                 onMouseLeave={isPhone ? undefined : scheduleFnLeave}
-                onClick={(e) => { e.preventDefault(); if (isPhone && previews) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
+                onClick={(e) => { e.preventDefault(); if (isPhone) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
                 style={{ color: "var(--data)", textDecoration: "none", fontWeight: 600, fontFamily: "var(--mono)" }}>{t.num}</a>
             </sup>
           );
@@ -1105,9 +1107,11 @@ function ArticleRead(props) {
         ? ((vdef ? vdef.label : "Unspecified") + " void — an asserted absence" + (vk ? ", " + VK.reader(vk) : "") + ". Press Enter for how it's grounded.")
         : (gm.label + " — " + gm.note + " Press Enter for detail.");
       const popOpen = !!(groundPop && groundPop.tok && groundPop.tok.id === oid);
-      // Interactive only while Previews is on. Off → an inert, plain span (the
-      // clean read): no card, no focus stop, just the lens's optional tint + title.
-      const popProps = previews ? {
+      // Always interactive, even in Clean — Clean only hides the passive tint/
+      // underline (gated on `previews` via the article's CSS class), not the
+      // ability to tap/click through to how a claim is grounded. A reader can
+      // always find the source; Clean just doesn't advertise it up front.
+      const popProps = {
         tabIndex: 0, role: "button", "aria-haspopup": "dialog",
         "aria-expanded": popOpen ? "true" : "false", "aria-label": gAria,
         onMouseEnter: isPhone ? undefined : (e) => enterGround(e, ownedTok),
@@ -1122,7 +1126,7 @@ function ArticleRead(props) {
           }
         },
         onClick: (e) => { if (isPhone) enterGround({ currentTarget: e.currentTarget }, ownedTok); }
-      } : {};
+      };
       return (
         <span key={i} id={"claim-" + oid} className="gowned" data-ground={kind} data-void={vk ? VK.reader(vk) : undefined}
           title={title} {...popProps}>
@@ -1134,12 +1138,11 @@ function ArticleRead(props) {
     const claim = claimById[t.id];
     if (!claim) return <React.Fragment key={i}>{t.c || ""}</React.Fragment>;
     const gk = groundKind(claim);
-    // Interactive only while the transparency layer is on (Standard/Full). In the
-    // Clean read the citation is hidden, so the claim is an inert plain span — no
-    // tab stop, no button role, no tap target that opens nothing. Mirrors the
-    // owned-claim treatment above. The id stays so the Sources footer can still
+    // Always interactive, even in Clean (mirrors the owned-claim treatment
+    // above) — Clean only hides the passive tint/underline; a tap or click
+    // still opens the citation. The id stays so the Sources footer can still
     // jump to the passage.
-    const claimProps = previews ? {
+    const claimProps = {
       tabIndex: 0, role: "button", "aria-haspopup": "dialog",
       "aria-expanded": hover && hover.claim.id === t.id ? "true" : "false",
       "aria-label": claimAria(claim),
@@ -1155,7 +1158,7 @@ function ArticleRead(props) {
         }
       },
       onClick: (e) => { if (isPhone) enterClaim({ currentTarget: e.currentTarget }, claim); else setShowSugg(true); }
-    } : {};
+    };
     return (
       <span key={i} id={"claim-" + t.id} className="claim" data-sugg={openByClaim[t.id] ? "1" : "0"}
         data-ground={gk}
@@ -1620,7 +1623,7 @@ function GroundingLegend({ tally, onClose }) {
    I want to see". Each level maps to the reader's previews + grounding-lens
    switches (see transLevel in ArticleRead). */
 const TRANS_LEVELS = [
-  { id: "clean",    label: "Clean",    desc: "Just the article. No inline previews or assertion highlights." },
+  { id: "clean",    label: "Clean",    desc: "Just the article. No inline previews or assertion highlights — tap any grounded text to see its source." },
   { id: "standard", label: "Standard", desc: "Inline photo & social previews. The assertion lens stays hidden." },
   { id: "full",     label: "Full",     desc: "Every assertion highlighted, with its sources & provenance." }
 ];

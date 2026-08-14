@@ -70,13 +70,17 @@ a { color: inherit; }
 
 /* ---- claim affordances (the spine) ---- */
 .claim { position: relative; transition: background .15s ease; }
-/* The claim only carries an affordance — pointer, underline, focus ring — when the
-   transparency layer is on (Standard/Full add `previews-on` to the article). In the
-   Clean read the sources are deliberately hidden, so a sourced sentence is inert:
-   plain prose with no dotted hint and no tap target that opens nothing. */
+/* The claim only carries a PASSIVE hint — pointer cursor, dotted underline —
+   when the transparency layer is on (Standard/Full add `previews-on` to the
+   article). In the Clean read that hint is deliberately hidden so a sourced
+   sentence reads as plain prose; the claim is still a real tap/click target
+   underneath (see ArticleRead's claimProps/popProps), it just isn't
+   advertised until the reader goes looking. */
 .previews-on .claim { cursor: pointer; }
-/* keyboard users get a clear focus ring on the claim they're about to open */
-.previews-on .claim:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
+/* keyboard users always get a clear focus ring, in every transparency level —
+   the claim is a real tab stop even in Clean, so the ring can't be gated on
+   `previews-on` or a keyboard-only reader would land on invisible stops. */
+.claim:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 2px; }
 
 /* clean read (transparency layer on, audit off): low-key dotted underline */
 .read-clean .previews-on .claim {
