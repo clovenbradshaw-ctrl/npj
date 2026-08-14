@@ -1253,6 +1253,11 @@ a { color: inherit; }
 .glightbox-clean .gslide-description { background: var(--paper, #f6f1e4); }
 .glightbox-clean .gslide-desc { font-family: var(--mono); font-size: 12.5px; color: var(--ink, #16140d); }
 .gbtn.gclose, .gbtn.gnext, .gbtn.gprev { background-color: rgba(22,20,13,.55); }
+/* the vendored overlay sets touch-action:none so its own JS owns every touch
+   gesture (swipe between slides) — which also blocks the browser's native
+   two-finger pinch on the photo itself. Carve pinch-zoom back out on the
+   image so opening a photo lets you actually zoom in on a phone. */
+.glightbox-container .gslide-image img { touch-action: pinch-zoom; }
 
 @media (max-width: 760px) {
   .npj-carousel-slide { height: 46vh; min-height: 200px; }
