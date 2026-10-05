@@ -1707,7 +1707,13 @@ function TransparencyControl({ level, setLevel, isPhone, onHoverOpen }) {
         <I.swatches style={{ fontSize: 14 }} /> {on ? "Transparency" : "Show sources"}
         {on && <span className="np-mono" style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: ".06em", textTransform: "uppercase",
           padding: "2px 6px", border: "1.5px solid currentColor", borderRadius: 2, lineHeight: 1 }}>{cur.label}</span>}
-        <I.caretDown style={{ fontSize: 11 }} />
+        {/* In Clean the label opens the source browser, so the caret is the way to
+           the Clean / Standard / Full menu (otherwise Clean is a dead end). */}
+        <span role="presentation" title="Change transparency level"
+          onClick={(e) => { e.stopPropagation(); toggle(); }}
+          style={{ display: "inline-flex", alignItems: "center", padding: "4px 4px 4px 6px", margin: "-4px -4px -4px 0", cursor: "pointer" }}>
+          <I.caretDown style={{ fontSize: 11 }} />
+        </span>
       </button>
       {open && (
         <React.Fragment>
