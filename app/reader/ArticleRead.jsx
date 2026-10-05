@@ -1475,7 +1475,7 @@ function ArticleRead(props) {
             <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
-          <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
+<TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} onHoverOpen={() => openSourceGallery(sourceList.map(x => x.key), 0)} />
           {/* Re-fold the editor's current content (onRefresh) AND re-key every embed
              with a fresh cache-buster (reloadTick) — so an embed that's in the draft
              but blank in the preview gets a clean re-fetch, ruling out a stale frame. */}
@@ -1662,8 +1662,21 @@ const TRANS_LEVELS = [
 /* One toolbar button that names the current level (a pill) and drops down a
    menu of the three settings — a radio dot, label and one-line description each.
    Replaces the old pair of Transparency / Previews toggles. */
-function TransparencyControl({ level, setLevel, isPhone }) {
+function TransparencyControl({ level, setLevel, isPhone, onHoverOpen }) {
   const [open, setOpen] = useState(false);
+  // In Clean the button reads "Show sources" and IS the doorway to the citations:
+  // a sustained 2.5s hover opens the source browser without leaving the clean read
+  // (and without clicking into the layer menu). Clean is the default, so this is
+  // how the footnotes/sources surface on a clean article. Only armed on a real
+  // pointer device, when clean, and while the menu is closed.
+  const hoverTimer = useRef(null);
+  const armHover = () => {
+    if (level !== "clean" || !onHoverOpen || open) return;
+    if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    hoverTimer.current = setTimeout(() => { hoverTimer.current = null; onHoverOpen(); }, 2500);
+  };
+  const cancelHover = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
+  useEffect(() => cancelHover, []);
   // The menu used to be `position:absolute; right:0` inside its own
   // shrink-wrapped `position:relative` button wrapper. That's fine while the
   // wrapper sits at the right end of the bar — but ControlBar's row wraps on
@@ -1702,7 +1715,8 @@ function TransparencyControl({ level, setLevel, isPhone }) {
          Once on, it names the layer and shows the current level so they can dial it
          back. A roomier tap target on a phone. */}
       <button ref={btnRef} className="btn btn-sm" onClick={toggle} aria-haspopup="menu" aria-expanded={open}
-        title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance)."
+        onMouseEnter={armHover} onMouseLeave={cancelHover}
+        title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance). Hold on “Show sources” to open the sources browser."
         style={{ display: "inline-flex", alignItems: "center", gap: 7,
           padding: isPhone ? "8px 12px" : undefined, fontSize: isPhone ? 13 : undefined,
           background: on ? "var(--ink)" : "var(--card)", color: on ? "var(--yellow)" : "var(--ink)" }}>
@@ -1804,7 +1818,7 @@ function ControlBar({ transLevel, setTransLevel, suggesting, onToggleSuggest, op
           <BarBtn icon={I.chat} label={n ? "Comments" : "Comment"} count={n} onClick={onToggleSuggest} toggle active={suggesting} isPhone={isPhone}
             title="See all comments and suggestions — and drag-select any words or passage to add your own. Open to everyone." />
         </div>
-        <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} />
+        <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} onHoverOpen={onOpenSources} />
       </div>
     </div>
   );
