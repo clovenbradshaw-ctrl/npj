@@ -618,16 +618,12 @@ function ArticleRead(props) {
     try {
       const v = localStorage.getItem("npj.transparency");
       if (v === "clean" || v === "standard" || v === "full") return v;
-      if (localStorage.getItem("npj.previews") === "0") return "clean";
-      // First visit on a phone: open to a clean read. The inline transparency
-      // layer — tappable citation sheets, photo/social previews, the assertion
-      // lens — is a lot to land on in a narrow column, and a tap meant to scroll
-      // can surface a card the reader didn't ask for. Default it off and let them
-      // turn it up from the Transparency control at the top.
-      if (typeof window !== "undefined" && window.matchMedia &&
-          window.matchMedia("(max-width: 760px)").matches) return "clean";
-      return "standard";
-    } catch (e) { return "standard"; }
+      // Clean is the default: the piece reads as plain prose. The grounding
+      // layer — the citation browser, the assertion lens, the source ledger —
+      // surfaces on demand: tap/hover a claim, or hold the "Show sources"
+      // control for 2.5s to open the full citation browser.
+      return "clean";
+    } catch (e) { return "clean"; }
   });
   const previews = transLevel !== "clean";
   const transparency = transLevel === "full";
