@@ -1452,7 +1452,7 @@ function ArticleRead(props) {
       {Header}
       {Body}
       <DefinitionsSection definitions={A.definitions} slug={A.slug} isPhone={isPhone} />
-      <SourcesExplorer sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />
+      {previews && <SourcesExplorer sourceList={sourceList} spansForSource={spansForSource} onJump={jumpToClaim} onOpen={openSourceGallery} />}
     </div>
   );
 
