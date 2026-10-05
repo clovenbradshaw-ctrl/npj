@@ -1082,7 +1082,7 @@ function ArticleRead(props) {
           return (
             <sup key={i} id={"fnref-" + k} className="fnmark" style={{ fontSize: 11, lineHeight: 0 }}>
               <a href={"#fn-" + k} aria-label={"Footnote " + t.num} aria-describedby={"fn-" + k}
-                onMouseEnter={isPhone ? undefined : (e) => enterFn(e, k)}
+                onMouseEnter={(isPhone || !previews) ? undefined : (e) => enterFn(e, k)}
                 onMouseLeave={isPhone ? undefined : scheduleFnLeave}
                 onClick={(e) => { e.preventDefault(); if (isPhone) enterFn({ currentTarget: e.currentTarget }, k); else jumpToFn(k); }}
                 style={{ color: "var(--data)", textDecoration: "none", fontWeight: 600, fontFamily: "var(--mono)" }}>{t.num}</a>
@@ -1141,7 +1141,7 @@ function ArticleRead(props) {
       const popProps = {
         tabIndex: 0, role: "button", "aria-haspopup": "dialog",
         "aria-expanded": popOpen ? "true" : "false", "aria-label": gAria,
-        onMouseEnter: isPhone ? undefined : (e) => enterGround(e, ownedTok),
+        onMouseEnter: (isPhone || !previews) ? undefined : (e) => enterGround(e, ownedTok),
         onMouseLeave: isPhone ? undefined : scheduleGroundLeave,
         onKeyDown: (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -1173,7 +1173,7 @@ function ArticleRead(props) {
       tabIndex: 0, role: "button", "aria-haspopup": "dialog",
       "aria-expanded": hover && hover.claim.id === t.id ? "true" : "false",
       "aria-label": claimAria(claim),
-      onMouseEnter: isPhone ? undefined : (e) => enterClaim(e, claim),
+      onMouseEnter: (isPhone || !previews) ? undefined : (e) => enterClaim(e, claim),
       onMouseLeave: isPhone ? undefined : scheduleLeave,
       onKeyDown: (e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -1660,19 +1660,8 @@ const TRANS_LEVELS = [
    Replaces the old pair of Transparency / Previews toggles. */
 function TransparencyControl({ level, setLevel, isPhone, onHoverOpen }) {
   const [open, setOpen] = useState(false);
-  // In Clean the button reads "Show sources" and IS the doorway to the citations:
-  // a sustained 2.5s hover opens the source browser without leaving the clean read
-  // (and without clicking into the layer menu). Clean is the default, so this is
-  // how the footnotes/sources surface on a clean article. Only armed on a real
-  // pointer device, when clean, and while the menu is closed.
-  const hoverTimer = useRef(null);
-  const armHover = () => {
-    if (level !== "clean" || !onHoverOpen || open) return;
-    if (hoverTimer.current) clearTimeout(hoverTimer.current);
-    hoverTimer.current = setTimeout(() => { hoverTimer.current = null; onHoverOpen(); }, 2500);
-  };
-  const cancelHover = () => { if (hoverTimer.current) { clearTimeout(hoverTimer.current); hoverTimer.current = null; } };
-  useEffect(() => cancelHover, []);
+  // Hover-open removed: in Clean the citation browser opens only on an explicit
+  // click of "Show sources" (never on a dwell). onHoverOpen is now the click path.
   // The menu used to be `position:absolute; right:0` inside its own
   // shrink-wrapped `position:relative` button wrapper. That's fine while the
   // wrapper sits at the right end of the bar — but ControlBar's row wraps on
@@ -1710,9 +1699,8 @@ function TransparencyControl({ level, setLevel, isPhone, onHoverOpen }) {
          so a reader landing on a clean article knows where the grounding lives.
          Once on, it names the layer and shows the current level so they can dial it
          back. A roomier tap target on a phone. */}
-      <button ref={btnRef} className="btn btn-sm" onClick={toggle} aria-haspopup="menu" aria-expanded={open}
-        onMouseEnter={armHover} onMouseLeave={cancelHover}
-        title="Transparency — how much of NPJ's grounding layer to show: Clean (just the article), Standard (inline previews), or Full (every assertion highlighted, with sources & provenance). Hold on “Show sources” to open the sources browser."
+      <button ref={btnRef} className="btn btn-sm" onClick={() => { if (level === "clean" && onHoverOpen) onHoverOpen(); else toggle(); }} aria-haspopup="menu" aria-expanded={open}
+        title="Transparency — Clean (just the article), Standard (inline previews), or Full (every assertion highlighted). In Clean, “Show sources” opens the source browser."
         style={{ display: "inline-flex", alignItems: "center", gap: 7,
           padding: isPhone ? "8px 12px" : undefined, fontSize: isPhone ? 13 : undefined,
           background: on ? "var(--ink)" : "var(--card)", color: on ? "var(--yellow)" : "var(--ink)" }}>
