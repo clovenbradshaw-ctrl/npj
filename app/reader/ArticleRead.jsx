@@ -1468,7 +1468,7 @@ function ArticleRead(props) {
       <div className="fade-in" style={{ position: "fixed", inset: 0, zIndex: 6000, background: "var(--paper)", color: "var(--ink)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--paper)", borderBottom: "1.5px solid var(--ink)", display: "flex", alignItems: "center", gap: 12, padding: isPhone ? "8px 14px" : "10px 22px" }}>
           <span className="np-eyebrow" style={{ color: "var(--ink-soft)", display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>◉</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
+            <span style={{ fontFamily: "var(--mono)" }}>◆</span> {isPhone ? "Preview" : "Preview · exactly as readers will see it"}
           </span>
           <span style={{ flex: 1 }} />
 <TransparencyControl level={transLevel} setLevel={setTransLevel} isPhone={isPhone} onHoverOpen={() => openSourceGallery(sourceList.map(x => x.key), 0)} />

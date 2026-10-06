@@ -4392,7 +4392,7 @@ function PublishOverlay({ publish, setPublish, onClose, onPublished, sources, ti
           re-declares the dark --nr-* vars even when the editor is in light mode */}
       <div className="newsroom" style={{ width: 560, maxWidth: "100%", maxHeight: "calc(100vh - 48px)", overflowY: "auto", background: "var(--nr-field)", border: "1.5px solid var(--yellow)", boxShadow: "0 24px 60px rgba(0,0,0,.6)" }}>
         <div style={{ background: "var(--yellow)", color: "var(--ink)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 18 }}>⊛</span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 18 }}>◉</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21 }}>{isRepublish ? "REPUBLISH BOUNDARY" : "PUBLISH BOUNDARY"}</span>
           <span style={{ flex: 1 }} />
           <span className="np-mono" style={{ fontSize: 11 }}>GitHub</span>

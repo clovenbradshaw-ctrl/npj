@@ -877,7 +877,7 @@ function DocumentsPage({ session, onOpen, onOpenArticle, onHome, onNewsroom, onS
               const badge = m.status === "unpublished"
                 ? { label: "⊘ Unpublished", color: "var(--reject)" }
                 : (m.versions || 1) > 1
-                ? { label: "⊛ Updated" + (m.updated ? " " + m.updated : ""), color: "var(--review)" }
+                ? { label: "◉ Updated" + (m.updated ? " " + m.updated : ""), color: "var(--review)" }
                 : { label: "● Published", color: "var(--verified)" };
               // the event log lives in GitHub now — link to the file on GitHub
               const logHref = m.logPath || (window.NpjArticles && window.NpjArticles.blobUrl
