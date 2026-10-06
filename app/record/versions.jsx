@@ -159,7 +159,7 @@ function VersionBadge({ sha, count, onClick, dark }) {
     <button onClick={onClick} title="View edit history & diffs" className="np-mono"
       style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid " + (dark ? "rgba(255,255,255,.3)" : "var(--ink)"),
         background: dark ? "transparent" : "var(--card)", color: dark ? "#e3ddcc" : "var(--ink)", padding: "3px 9px", fontSize: 11, cursor: "pointer" }}>
-      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{sha || "draft"}
+      <span style={{ fontFamily: "var(--mono)" }}>◉</span> v.{sha || "draft"}
     </button>
   );
 }
@@ -310,7 +310,7 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
           body, which inherit, would render light-on-light and be unreadable. */}
       <div onClick={(e) => e.stopPropagation()} className="np-scroll" style={{ width: single ? "min(620px,97vw)" : "min(860px,97vw)", maxHeight: "86vh", overflowY: "auto", background: "var(--paper)", color: "var(--ink)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>◉</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT HISTORY</span>
           <span style={{ flex: 1 }} />
           <button onClick={onClose} style={{ background: "none", border: 0, color: "var(--paper)", fontSize: 18 }}><I.x /></button>
@@ -321,7 +321,7 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
              single tidy version stamp instead of dead from/to controls. */
           <div style={{ padding: "18px 22px 28px" }}>
             <div style={{ border: "1.5px solid var(--ink)", background: "var(--card)", padding: "11px 13px", marginBottom: 18 }}>
-              <div className="np-mono" style={{ fontSize: 12, fontWeight: 600 }}>⊛ v.{vB.sha} · current</div>
+              <div className="np-mono" style={{ fontSize: 12, fontWeight: 600 }}>◉ v.{vB.sha} · current</div>
               <VersionMeta v={vB} size={10} />
               {vB.message && <div style={{ fontFamily: "var(--serif)", fontSize: 13, marginTop: 5, lineHeight: 1.4, overflowWrap: "anywhere" }}>{vB.message}</div>}
             </div>
@@ -351,7 +351,7 @@ function VersionHistory({ versions, onClose, onRevert, canRevert, reverting, rev
                   onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); viewEdits(i); } }}
                   title={i < list.length - 1 ? "See this version's edits" : "See the original"}
                   style={{ border: "1.5px solid " + (isFrom || isTo ? "var(--ink)" : "var(--rule)"), marginBottom: 7, padding: "8px 9px", cursor: "pointer", background: isTo ? "var(--yellow)" : isFrom ? "color-mix(in srgb, var(--yellow) 22%, transparent)" : "var(--card)" }}>
-                  <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>⊛ v.{v.sha}{i === 0 ? " · current" : ""}</div>
+                  <div className="np-mono" style={{ fontSize: 11, fontWeight: 600 }}>◉ v.{v.sha}{i === 0 ? " · current" : ""}</div>
                   <VersionMeta v={v} />
                   {(v.note || v.op === "INS") && <div style={{ fontFamily: "var(--serif)", fontSize: 12, marginTop: 4, lineHeight: 1.35, overflowWrap: "anywhere" }}>{v.note || "Published"}</div>}
                   {/* what changed from the version before this one, in plain words */}

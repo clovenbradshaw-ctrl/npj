@@ -455,7 +455,7 @@ function FrontCard({ item, template, variant, onOpen, stack }) {
     <p style={{ fontSize: lead ? 22 : 17.5, lineHeight: 1.5, margin: lead ? "0 0 20px" : "12px 0 16px", maxWidth: lead ? "60ch" : undefined,
       color: light ? "rgba(255,255,255,.9)" : "var(--ink)" }}>{item.dek}</p>
   ) : null;
-  // The version chip the article header carries (⊛ v.<sha>), pulled through to the
+  // The version chip the article header carries (◉ v.<sha>), pulled through to the
   // cover so the front page leads with the same provenance receipt. It mirrors
   // window.VersionBadge's look, but is inlined here because the front page paints
   // before the versions module (with its diff viewer) lazy-loads; clicking it just
@@ -464,7 +464,7 @@ function FrontCard({ item, template, variant, onOpen, stack }) {
     <button onClick={open} className="np-mono" title="Open the article to see its edit history"
       style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1.5px solid var(--ink)",
         background: "var(--card)", color: "var(--ink)", padding: "3px 9px", fontSize: 11, cursor: "pointer" }}>
-      <span style={{ fontFamily: "var(--mono)" }}>⊛</span> v.{item.base_sha}
+      <span style={{ fontFamily: "var(--mono)" }}>◉</span> v.{item.base_sha}
     </button>
   ) : null;
   // The cover's meta line reads like the article header: the version chip, then the

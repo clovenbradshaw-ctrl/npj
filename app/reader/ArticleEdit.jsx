@@ -341,7 +341,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
       `}</style>
       <div className="np-scroll" style={{ width: "min(880px, 97vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--paper)", border: "2px solid var(--ink)", boxShadow: "0 24px 60px rgba(0,0,0,.5)" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--ink)", color: "var(--paper)", padding: "12px 18px", display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>⊛</span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 17, color: "var(--yellow)" }}>◉</span>
           <span style={{ fontFamily: "var(--display)", fontSize: 21, color: "var(--yellow)" }}>EDIT THE RECORD</span>
           <span className="np-mono" style={{ fontSize: 10.5, opacity: .75 }}>appends one REC event to articles/{A.slug}.jsonl in GitHub</span>
           <span style={{ flex: 1 }} />
@@ -350,7 +350,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
 
         <div style={{ padding: "18px 22px 24px" }}>
           <div className="np-mono" style={{ fontSize: 10.5, color: "var(--ink-soft)", lineHeight: 1.55, marginBottom: 14 }}>
-            Editing as {me}{isAdmin ? " · admin" : " · assignee"}. Nothing is rewritten: your change is appended to the article's event log, so every prior version stays in the public record (⊛ v.{A.base_sha}, {A.versions ? A.versions.length : 1} version{(A.versions || []).length === 1 ? "" : "s"} so far).
+            Editing as {me}{isAdmin ? " · admin" : " · assignee"}. Nothing is rewritten: your change is appended to the article's event log, so every prior version stays in the public record (◉ v.{A.base_sha}, {A.versions ? A.versions.length : 1} version{(A.versions || []).length === 1 ? "" : "s"} so far).
           </div>
 
           <div className="np-eyebrow" style={{ marginBottom: 6 }}>Headline</div>
@@ -472,7 +472,7 @@ function ArticleEdit({ article, me, isAdmin, onClose, onSaved }) {
           <div style={{ display: "flex", gap: 9, justifyContent: "flex-end", marginTop: 18 }}>
             <button className="btn" onClick={onClose} disabled={busy}>Discard</button>
             <button className="btn btn-primary" onClick={save} disabled={busy} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-              {busy ? <span style={{ width: 12, height: 12, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>⊛</span>}
+              {busy ? <span style={{ width: 12, height: 12, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>◉</span>}
               {busy ? "Committing the new version…" : "Commit the edit"}
             </button>
           </div>

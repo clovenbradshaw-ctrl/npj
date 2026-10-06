@@ -50,7 +50,7 @@
       { code: "SYN", glyph: "△", greek: "η", triad: "Structure",    fn: "Synthesis. A whole exceeding its parts. GROUP BY.", logs: true },
       { code: "DEF", glyph: "⊢", greek: "δ", triad: "Significance", fn: "Definition. Set terms within a stable frame.", logs: true },
       { code: "EVA", glyph: "⊨", greek: "ψ", triad: "Significance", fn: "Evaluation. Test a particular against DEF's terms.", logs: true },
-      { code: "REC", glyph: "⊛", greek: "Ω", triad: "Significance", fn: "Recontextualization. Restructure the frame itself.", logs: true }
+      { code: "REC", glyph: "◉", greek: "Ω", triad: "Significance", fn: "Recontextualization. Restructure the frame itself.", logs: true }
     ],
     glyph(code) { const o = this.operators.find(o => o.code === code); return o ? o.glyph : "?"; }
   };

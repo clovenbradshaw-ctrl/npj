@@ -209,7 +209,7 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
 
         {(s.resolution || s.merged) && (
           <div style={{ marginTop: 8, fontSize: 12, color: s.status === "rejected" ? "var(--reject)" : "var(--verified)", fontFamily: "var(--cond)", display: "inline-flex", alignItems: "center", gap: 5 }}>
-            <span style={{ fontFamily: "var(--mono)" }}>{s.merged ? "⊛" : s.status === "rejected" ? "✕" : "✓"}</span>
+            <span style={{ fontFamily: "var(--mono)" }}>{s.merged ? "◉" : s.status === "rejected" ? "✕" : "✓"}</span>
             {s.resolution || (s.merged ? "Merged into the record" : "")}{s.resolvedBy ? " · " + aliasOf(s.resolvedBy) : ""}
           </div>
         )}
@@ -233,7 +233,7 @@ function SuggestionCard({ s, claim, canReview, onVote, onReply, onResolve, onMer
           <div style={{ display: "flex", gap: 7, marginTop: 11, borderTop: "1px solid var(--rule)", paddingTop: 10, flexWrap: "wrap" }}>
             {s.kind === "suggestion"
               ? <button className="btn btn-sm" disabled={busy} style={{ flex: 1, minWidth: 130, background: "var(--verified)", color: "#fff", borderColor: "var(--verified)", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: busy ? .7 : 1 }} onClick={doMerge}>
-                  {busy ? <span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>⊛</span>}
+                  {busy ? <span style={{ width: 11, height: 11, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} /> : <span style={{ fontFamily: "var(--mono)" }}>◉</span>}
                   {busy ? "Merging…" : "Merge → commit"}
                 </button>
               : <button className="btn btn-sm" style={{ flex: 1, minWidth: 110, borderColor: "var(--verified)", color: "var(--verified)" }} onClick={() => onResolve(s.id, "accepted")}><I.check style={{ fontSize: 13 }} /> Mark resolved</button>}

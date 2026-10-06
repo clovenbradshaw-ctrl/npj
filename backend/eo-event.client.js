@@ -1,9 +1,10 @@
 /* eo-event.client.js — optional, tiny.
  * Your n8n workflow is unchanged; it commits whatever `contentRaw` it gets.
  * This just formats content as a plaintext EO-notation line and POSTs it.
- *   op: append → EVA (⊨), new → DEF (⊢), republish → REC (⊛).
+ *   op: append → EVA (⊨), new → DEF (⊢), republish → REC (◉).
+ *   REC was ⊛ until 2026-10-06; lines already committed keep ⊛, read both as REC.
  */
-const GLYPH = { DEF: "⊢", EVA: "⊨", REC: "⊛" };
+const GLYPH = { DEF: "⊢", EVA: "⊨", REC: "◉" };
 
 export function eoLine({ content, filename, mode = "overwrite", author = "@unknown", op }) {
   const code = op || (mode === "append" ? "EVA" : "DEF");

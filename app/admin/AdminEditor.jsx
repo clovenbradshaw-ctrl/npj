@@ -151,7 +151,7 @@ function AdminEditor({ route }) {
         style={{ position: "fixed", left: 18, bottom: 18, zIndex: 6000, display: "inline-flex", alignItems: "center", gap: (open || hover) ? 8 : 0,
           background: "var(--yellow)", color: "var(--ink)", border: "1.5px solid var(--ink)", boxShadow: "4px 4px 0 rgba(0,0,0,.35)",
           padding: (open || hover) ? "9px 14px" : "9px 11px", fontFamily: "var(--cond)", fontWeight: 700, fontSize: 13.5, textTransform: "uppercase", letterSpacing: ".05em", cursor: "pointer", transition: "gap .15s ease, padding .15s ease" }}>
-        <span style={{ fontFamily: "var(--mono)", fontSize: 15, lineHeight: 1 }}>⊛</span>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 15, lineHeight: 1 }}>◉</span>
         <span style={{ maxWidth: (open || hover) ? 140 : 0, overflow: "hidden", whiteSpace: "nowrap", transition: "max-width .18s ease" }}>{open ? "Close" : "Edit layout"}</span>
       </button>
 
@@ -159,7 +159,7 @@ function AdminEditor({ route }) {
         <div className="np-scroll" style={{ position: "fixed", left: 18, bottom: 64, zIndex: 6000, width: 372, maxWidth: "calc(100vw - 36px)", maxHeight: "calc(100vh - 96px)", overflowY: "auto",
           background: AE.bg, border: "1.5px solid var(--yellow)", boxShadow: "0 24px 60px rgba(0,0,0,.55)" }}>
           <div style={{ position: "sticky", top: 0, background: "var(--yellow)", color: "var(--ink)", padding: "11px 14px", display: "flex", alignItems: "center", gap: 9, zIndex: 2 }}>
-            <span style={{ fontFamily: "var(--mono)", fontSize: 16 }}>⊛</span>
+            <span style={{ fontFamily: "var(--mono)", fontSize: 16 }}>◉</span>
             <span style={{ fontFamily: "var(--display)", fontSize: 19 }}>SITE LAYOUT</span>
             <span style={{ flex: 1 }} />
             <span className="np-mono" style={{ fontSize: 9.5 }}>verified admin</span>
